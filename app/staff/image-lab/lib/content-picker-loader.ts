@@ -32,7 +32,6 @@ import "server-only";
 
 import { excludeTestFamilies } from "@/app/crm/lib/test-family-filter";
 import { type ImageLabDb } from "./image-lab-db";
-import { mintSourceToken } from "./source-token";
 import type {
   ContentPickerDeps,
   PickerChildRow,
@@ -146,9 +145,6 @@ async function loadChildRows(
 
 export function contentPickerDeps(db: ImageLabDb): ContentPickerDeps {
   return {
-    // The one mint site in the feature. See `./source-token.ts`.
-    mintSourceToken: (provenance, staffId) => mintSourceToken(provenance, staffId),
-
     listChildren: () => loadChildRows(db, {}),
 
     async findChild(childId) {

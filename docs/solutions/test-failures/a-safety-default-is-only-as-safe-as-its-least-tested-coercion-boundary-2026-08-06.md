@@ -25,6 +25,30 @@ tags:
 
 # A default is only as safe as its least-tested boundary
 
+> **⚠ 2026-08-06 — THE SPECIFIC RULE THIS DOCUMENT DESCRIBES IS NO LONGER LIVE.**
+> The Image Lab's OpenAI constraint — that `gpt-image-2` must never receive a
+> child's own words, because OpenAI's under-18 API guidance requires zero data
+> retention to process an under-13's personal data — **was removed by owner
+> decision on legal advice**, together with the consent regime, the provenance
+> token and the staff attestation. Two verified facts carry it: reference images
+> will only ever be AI-generated, and scrubbed child-authored business text was
+> cleared as not personal data of a child. See
+> `docs/runbooks/2026-08-05-image-lab-operations.md` §9.
+>
+> `no_child_content_attested` was the exception switch on that gate, so the
+> specific boundaries this document walks — the zod coercion, the DB-row mapper,
+> the idempotency comparison — no longer exist, and their tests were deleted with
+> them.
+>
+> **THE LESSON STANDS INDEPENDENT OF THAT RULE.** It is about mutation-testing a
+> default that is asserted in prose at three layers and tested at one, and about
+> the two failure modes a green suite hides: the guard that has silently opened,
+> and the tool that has silently stopped working (deriving from `{}` — safe, and
+> useless). Both still apply to every remaining coercion boundary in the Lab. It
+> was applied directly during the removal: the name scrub, now the ONLY privacy
+> control on that path, was mutation-verified by breaking it, confirming a NAMED
+> test reddened, and restoring.
+
 ## Problem
 
 `fp_image_lab_runs.no_child_content_attested` is the exception switch on the

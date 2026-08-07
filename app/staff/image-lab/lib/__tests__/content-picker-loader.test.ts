@@ -215,13 +215,15 @@ describe("every query fails loud rather than silent", () => {
   });
 });
 
-// ── The flag stays on the path ───────────────────────────────────────────────
+// ── No provenance minting on the real path ──────────────────────────────────
 
-describe("production does not route around the go-live flag", () => {
-  it("leaves `isLive` unset, so `isImageLabRealContentLive` is genuinely called", () => {
-    // A loader that supplied its own predicate would make the flag's whole test
-    // table decorative — and the flag is the technical enforcement of the
-    // consent and provider-terms check.
-    expect(contentPickerDeps(happyDb().db).isLive).toBeUndefined();
+describe("the production picker mints no provenance", () => {
+  it("exposes no `mintSourceToken` and no `isLive` dep", () => {
+    // ⚠ BOTH WERE REMOVED ON 2026-08-06 with consent and provenance. This test
+    // is what stops either being quietly reinstated on the loader while the core
+    // no longer expects it — the shape of the deps object IS the contract.
+    const deps = contentPickerDeps(happyDb().db) as Record<string, unknown>;
+    expect(deps.mintSourceToken).toBeUndefined();
+    expect(deps.isLive).toBeUndefined();
   });
 });

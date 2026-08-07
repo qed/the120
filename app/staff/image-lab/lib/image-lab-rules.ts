@@ -53,32 +53,22 @@ export function isImageLabLive(): boolean {
 }
 
 /**
- * The SECOND switch: may a real child's authored text be read at all?
+ * ⚠ THERE IS NO SECOND FLAG ANY MORE (2026-08-06, owner decision).
  *
- * ⚠ A DIFFERENT QUESTION FROM {@link isImageLabLive}, and they authorize
- * different things. Generation being on says the bench may spend money; this
- * being on says a real child's authored text may be sent to a third-party model,
- * which is the consent-and-provider-terms question. Unset means the picker is
- * absent, `createRun` refuses any provenance-bearing compose, and manual prompts
- * still generate normally.
+ * `IMAGE_LAB_REAL_CONTENT_LIVE` used to gate the content picker as "the
+ * technical enforcement of the consent check". Consent was removed from the Lab
+ * entirely on two verified facts: reference images will only ever be
+ * AI-GENERATED, so no child photo, drawing or likeness can reach a vendor; and
+ * the owner's legal advice cleared SCRUBBED child-authored business text as not
+ * personal data of a child. With no consent question left, a flag that gated it
+ * gated nothing, so the picker is always available and `IMAGE_LAB_LIVE` above is
+ * the Lab's only switch.
  *
- * ⚠ IT LIVES BESIDE ITS SIBLING, IN THIS PLAIN MODULE. It used to live in
- * `content-picker-core.ts`, which made the two flag readers asymmetric for no
- * reason — and undid the reason `isImageLabLive` was moved here in Unit 3 (so a
- * shell surface reading one boolean does not drag a `*-core` module's whole
- * import graph in). `createRun` is now a reader too, which made a core-layer home
- * actively awkward.
- *
- * Read at CALL TIME and allowlisted, for the same two reasons stated above.
- *
- * ⚠ SERVER-SIDE ONLY. There is deliberately no `NEXT_PUBLIC_` twin — a
- * build-time public copy would be a second reader of the same switch that could
- * disagree with the server on a warm deploy (a repo-wide test pins its absence).
+ * The consequences of that removal are documented where they land — see
+ * `content-picker-core.scrubNames` (the scrub is no longer server-enforceable)
+ * and the runbook's purge section (deletion requests cannot be serviced by
+ * child). They are accepted, not overlooked.
  */
-export function isImageLabRealContentLive(): boolean {
-  const raw = process.env.IMAGE_LAB_REAL_CONTENT_LIVE?.trim().toLowerCase();
-  return raw === "1" || raw === "true";
-}
 
 // ── Storage ───────────────────────────────────────────────────────────────────
 

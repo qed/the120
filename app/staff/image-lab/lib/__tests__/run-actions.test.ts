@@ -186,11 +186,10 @@ describe("createImageLabRun", () => {
         "too_many_references",
       ],
       [{ drillTags: ["kid_appeal"] }, "empty_template"],
-      // ⚠ `source` IS GONE — provenance is a SERVER-SIGNED TOKEN now, so there is
-      // no client-asserted id shape left for the schema to police. A token too
-      // short to be one is the parse failure that replaced it, and it names
-      // itself rather than reporting "write a template first".
-      [{ sourceToken: "short" }, "bad_source_token"],
+      // ⚠ `sourceToken` IS GONE (2026-08-06), and with it `bad_source_token`.
+      // An unknown key is now simply ignored by the schema rather than being
+      // policed — there is no provenance for a caller to assert.
+      [{ promptModes: { "gpt-image-2": "sideways" } }, "empty_template"],
     ];
 
     for (const [over, reason] of cases) {
@@ -210,82 +209,39 @@ describe("createImageLabRun", () => {
   });
 
   /**
-   * ⚠ THE PERMISSIVE DEFAULT, PINNED AT THE WIRE BOUNDARY ITSELF.
+   * ⚠ THREE ATTESTATION-COERCION TESTS WERE DELETED HERE (2026-08-06).
    *
-   * `run-core` reads the field with `=== true` and the gate reads the ROW with
-   * `!== false`, and both of those are covered. THIS coercion — the one that
-   * turns a parsed request body into the boolean everything downstream trusts —
-   * was not: flipping `=== true` to `!== false` here left the whole suite green
-   * while a POST that simply OMITS the field became ATTESTED. That is the exact
-   * P0 hole (absent must mean "not attested"), reintroduced one layer above the
-   * place it was closed.
+   * They pinned that `noChildContentAttested` reached the core as `false` when
+   * absent, that only a literal `true` produced an attested run, and that `true`
+   * still worked. The field is gone with the attestation, so there is no
+   * coercion left at this boundary to defend.
    *
-   * The field is `.optional()`, so ABSENCE is the ordinary case for any client
-   * that has never heard of the attestation — a stale tab, a replay, a
-   * hand-rolled POST. Absence must be the RESTRICTIVE answer, and the only way
-   * to say so is to assert on the value that actually reaches `createRun`.
+   * THE LESSON THEY EXISTED FOR IS NOT GONE, and it is worth stating because
+   * this is exactly where coverage evaporates quietly: a safety default is only
+   * as safe as its least-tested coercion boundary
+   * (docs/solutions/test-failures/). The remaining coercion boundaries on this
+   * file — the zod schema's own bounds, and `keepKnownSlots` — are still
+   * covered below, and the picker's scrub (the one privacy control left) is
+   * mutation-verified in `content-picker-core.test.ts`.
    */
-  it("a compose that OMITS the attestation reaches the core as `false`", async () => {
-    const body = compose();
-    expect(body).not.toHaveProperty("noChildContentAttested");
-
-    await createImageLabRun(body);
-    const passed = coreSpies.createRun.mock.calls[0]![1] as {
-      noChildContentAttested: unknown;
-    };
-    // Not `toBeFalsy()`: `undefined` is falsy and would sail through, and it is
-    // `undefined` reaching the core that the mutation actually produces.
-    expect(passed.noChildContentAttested).toBe(false);
+  it("drops a slot key the vocabulary does not define, at the wire", async () => {
+    await createImageLabRun(
+      compose({ slotValues: { product: "kept", parentEmail: "dropped@example.com" } })
+    );
+    const passed = coreSpies.createRun.mock.calls[0]![1] as { slotValues: unknown };
+    expect(passed.slotValues).toEqual({ product: "kept" });
   });
 
-  it("only a literal `true` is ever forwarded as attested", async () => {
-    // ⚠ A COERCION BUG HERE IS THE DIFFERENCE BETWEEN A GATE AND A DECORATION.
-    // Every value below is something a hand-rolled or stale POST can put on the
-    // wire. `null` and the truthy non-booleans are refused outright by the
-    // schema (`z.boolean().optional()` admits neither), which is stricter still
-    // — so the property is stated as the thing that matters: NOTHING but `true`
-    // can produce an attested run.
-    const hostile: unknown[] = [
-      undefined,
-      null,
-      "false",
-      "true",
-      1,
-      0,
-      {},
-      [],
-      "yes",
-    ];
-
-    for (const value of hostile) {
-      vi.clearAllMocks();
-      requireStaffSpy.mockResolvedValue({ staffId: "staff-from-the-gate" });
-      rateLimitSpy.mockReturnValue({ allowed: true, retryAfterMs: 0 });
-      coreSpies.createRun.mockResolvedValue({
-        ok: true,
-        run: { id: UUID },
-        cells: [],
-        duplicate: false,
-      });
-
-      await createImageLabRun(compose({ noChildContentAttested: value }));
-      const call = coreSpies.createRun.mock.calls[0];
-      const label = `noChildContentAttested=${JSON.stringify(value) ?? "undefined"}`;
-      if (!call) continue; // Refused at the schema — stricter than `false`.
-      expect((call[1] as { noChildContentAttested: unknown }).noChildContentAttested, label).toBe(
-        false
-      );
-    }
-  });
-
-  it("forwards an explicit `true` unchanged — the attestation still works", async () => {
-    // The other half of the property: the restrictive default must not have been
-    // achieved by making the field inert.
-    await createImageLabRun(compose({ noChildContentAttested: true }));
-    const passed = coreSpies.createRun.mock.calls[0]![1] as {
-      noChildContentAttested: unknown;
-    };
-    expect(passed.noChildContentAttested).toBe(true);
+  it("forwards NO provenance field of any kind to the core", async () => {
+    await createImageLabRun(
+      compose({
+        sourceToken: "tok:child-1::",
+        noChildContentAttested: true,
+      })
+    );
+    const passed = coreSpies.createRun.mock.calls[0]![1] as Record<string, unknown>;
+    expect(passed).not.toHaveProperty("sourceToken");
+    expect(passed).not.toHaveProperty("noChildContentAttested");
   });
 
   it("has its OWN cooldown, because minting cells is the supply side of the spend", async () => {
@@ -392,20 +348,19 @@ describe("the three picker actions", () => {
     expect(pickerSpies.listPickerIdeas).toHaveBeenCalledWith(expect.anything(), UUID);
   });
 
-  it("fillImageLabSlots passes the ids through, and bounds their SHAPE", async () => {
-    await fillImageLabSlots({ childId: UUID, ideaId: "idea:2", taskId: "1.1.2" });
+  it("fillImageLabSlots passes the idea id through, and bounds its SHAPE", async () => {
+    await fillImageLabSlots({ childId: UUID, ideaId: "idea:2" });
+    // ⚠ NO `staffId` AND NO `taskId`. `staffId` was here to bind the provenance
+    // token this fill used to mint; `taskId` was recorded as run provenance.
+    // Both were removed on 2026-08-06 — see `content-picker-core`.
     expect(pickerSpies.pickSlotValues).toHaveBeenCalledWith(expect.anything(), {
       childId: UUID,
       ideaId: "idea:2",
-      taskId: "1.1.2",
-      // ⚠ FROM THE GATE, NOT THE BODY. The provenance token this fill mints is
-      // bound to the staff member who minted it, and this action's
-      // `requireStaff()` is the only honest source of that id.
-      staffId: "staff-from-the-gate",
     });
 
-    // A value this action accepted but `createRun` then refused would be a dead
-    // end the composer could not explain, so both use the one exported pattern.
+    // ⚠ THE SHAPE BOUND SURVIVED THE PROVENANCE REMOVAL WITH A SMALLER JOB. It
+    // used to bound `source_idea_id` on the run row too; what is left is a
+    // closed character class on a value that goes straight into a lookup.
     pickerSpies.pickSlotValues.mockClear();
     expect(
       await fillImageLabSlots({ childId: UUID, ideaId: "Maya Chen's idea" })
@@ -413,13 +368,11 @@ describe("the three picker actions", () => {
     expect(pickerSpies.pickSlotValues).not.toHaveBeenCalled();
   });
 
-  it("normalizes absent ids to null rather than undefined", async () => {
+  it("normalizes an absent idea id to null rather than undefined", async () => {
     await fillImageLabSlots({ childId: OTHER_UUID });
     expect(pickerSpies.pickSlotValues).toHaveBeenCalledWith(expect.anything(), {
       childId: OTHER_UUID,
       ideaId: null,
-      taskId: null,
-      staffId: "staff-from-the-gate",
     });
   });
 });

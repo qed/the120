@@ -1,8 +1,9 @@
 ---
-title: "Image Lab — operations note (migration, go-live flags, unverified capabilities, purge order, accepted gaps)"
+title: "Image Lab — operations note (flag, migrations, unverified capabilities, deletion posture, accepted gaps)"
 type: runbook
 status: ready-to-run (human/gated)
 date: 2026-08-05
+updated: 2026-08-06
 plan: first-profit docs/plans/2026-08-05-002-feat-image-lab-v1-plan.md (Unit 7)
 ---
 
@@ -15,8 +16,33 @@ Origin: first-profit `docs/brainstorms/2026-08-05-image-lab-requirements.md`.
 This note is the **operational** state an operator has to know before touching the
 Lab. It is drawn from the migration header and the code, and it deliberately
 POINTS AT those rather than restating them — a forked runbook is worse than no
-runbook. Everything below is a fact about the shipped code as of Unit 7 plus its
-security pass, not an aspiration.
+runbook. Everything below is a fact about the shipped code, not an aspiration.
+
+**Read §0 first.** It is the whole current posture in one screen. The history —
+including a consent regime and a per-vendor prompt gate that no longer exist — is
+at the END, in §9, dated. You do not need it to operate the Lab.
+
+---
+
+## 0. Current posture — the whole thing in one screen
+
+| | |
+|---|---|
+| **Flags** | `IMAGE_LAB_LIVE` only. On ⇒ models may be called. Off ⇒ every cell finishes `unconfigured`, nothing is billed. There is no second flag. |
+| **Who may use it** | Active `public.staff` row + `requireStaff()` on every action and on the paid route. No other gate. |
+| **Child content** | The content picker is **always available** to staff. It loads a child's product name, one-liner, pitch and sale summary into the slot panel. |
+| **Privacy control** | **One: the name scrub**, at pick time. The child's first name, last name and username are removed from every value the picker returns. The buyer's name is never read at all. |
+| **Reference images** | **AI-generated only.** This is the assumption the whole posture rests on — see §2. |
+| **Prompt choice** | Per model, free. `authored` (template × slots) by default; `derived` (closed category vocabulary) selectable on every model, required on none. Google and OpenAI are treated identically. |
+| **Deletion requests** | **Cannot be serviced per child.** See §5 — read it before answering a parent. |
+| **DB access** | Service role only, RLS on with zero policies. Unknown model ids fail closed. |
+
+**What is NOT here any more** (removed 2026-08-06 by owner decision — §9 has the
+reasoning): `IMAGE_LAB_REAL_CONTENT_LIVE`, the consent-version coupling, the
+server-signed provenance token, the `source_child_id` breadcrumb, the staff
+"no child content" attestation, and the OpenAI-only child-text/reference gate.
+
+---
 
 ---
 
@@ -64,275 +90,82 @@ counting the ones that mention this bucket.
 
 Then `NOTIFY pgrst, 'reload schema'` before anything writes these tables.
 
+**The 2026-08-06 consent/provenance removal (§9) shipped NO migration**, and that
+was deliberate. `supabase/MIGRATION-LOCK.md` is additive-only: `source_child_id`,
+`source_idea_id`, `source_task_id` and `no_child_content_attested` stay in the
+schema, unwritten and unread. `source_child_id` is nullable and
+`no_child_content_attested` is `not null default false`, so simply omitting them
+from the insert needs no DDL. Both Lab tables were empty in production, so there
+was no data to migrate either way. **Do not "clean up" these columns** — dropping
+a column is exactly what the lock forbids, and the retired ones cost nothing.
+
 ---
 
-## 2. The two go-live flags
+## 2. The one go-live flag
 
-Both are **server-side only** and read per request. Neither is `NEXT_PUBLIC_`,
-deliberately: a build-time public copy could disagree with the server on a warm
-deploy.
+`IMAGE_LAB_LIVE` is **server-side only** and read per request. It is deliberately
+not `NEXT_PUBLIC_`: a build-time public copy could disagree with the server on a
+warm deploy, and a repo-wide test pins the absence of a public twin.
 
 | Flag | Gates | Unset behaviour |
 |---|---|---|
 | `IMAGE_LAB_LIVE` | **Generation.** Whether any model may be called at all. | The bench renders in full; the adapter returns `unconfigured` and attempts no network call; the page shows an explicit "generation off" notice and the `/staff` hub card carries a matching badge. |
-| `IMAGE_LAB_REAL_CONTENT_LIVE` | **All child content, on every leg.** Whether a real child's authored text may be loaded into the slot panel, AND whether `createImageLabRun` will accept, scrub or record a compose claiming child provenance. | The picker is absent; a provenance-bearing compose is refused outright (`content_picker_off`) rather than silently recorded; manual prompts still compose and generate normally. |
 
-### ⚠ STATUS 2026-08-06 (FINAL) — `IMAGE_LAB_LIVE` ON, `IMAGE_LAB_REAL_CONTENT_LIVE` **OFF**. BOTH CHECKS WERE RUN AND **BOTH FAILED**.
+Allowlisted values only — `1` or `true`, case-insensitive, trimmed. `false` and
+`0` are how an operator says "off" in a dashboard, and a plain truthiness check
+would read both as ON.
 
-`IMAGE_LAB_REAL_CONTENT_LIVE` was briefly set on as an accepted risk, then the two
-checks were actually performed and **neither closes**. The flag was removed the
-same day. Nothing was ever exposed: the PR was unmerged throughout, so no code
-ran with it on.
+### There is no second flag, and the child-content question it gated is closed
 
-**CHECK 2 — CONSENT: FAILS.** Policy `2026-08-05.1` (verified against the backend
-source of truth, `app/api/fp/signup/consent-rules.ts`, not just the client
-snapshot) grants exactly ONE third-party AI disclosure and it is bound to the
-photo:
+`IMAGE_LAB_REAL_CONTENT_LIVE` gated the content picker and was described here as
+"the technical enforcement of the consent and provider-terms check". Both checks
+were resolved rather than passed, on 2026-08-06, by owner decision on legal
+advice. Two facts, both verified, carry it:
 
-> "I consent to First Profit collecting **a photo of my child** … and to **that
-> photo** being sent to a third-party artificial intelligence image service that
-> draws a personalized comic book cover starring my child"
+1. **Reference images will only ever be AI-generated.** No child photo, drawing
+   or likeness ever reaches a vendor through the Lab. This is a standing
+   operational commitment, not something the code enforces — see §7.
+2. **Scrubbed child-authored business text is not personal data of a child.**
+   This is the owner's legal advice, and it is why a consent clause is no longer
+   required for the text the picker loads.
 
-Every other clause is First Profit *collecting and storing*, not disclosing — and
-the notes clause is scope-limited ("used only to improve First Profit"). The Lab
-with this flag on sends the child's **authored business text** (product name,
-one-liner, pitch, sale details) to OpenAI and Google. The photo clause does not
-stretch to cover written work. **To close: a consent version bump** adding a
-clause for child-authored content going to a third-party AI service — text,
-version and sha256 bumped in the SAME change on both sides (a drift test guards
-it). It binds only parents who attest AFTER it ships; the 17 already-enrolled
-children's consent cannot be retroactively widened.
+With no consent question left, the flag gated nothing. It is gone, the picker is
+always available, and the per-vendor prompt gate that existed to satisfy OpenAI's
+under-18 guidance is gone with it.
 
-**CHECK 1 — PROVIDER TERMS: GOOGLE CLOSED 2026-08-06. OPENAI — fix in flight.**
+### The scrub is now the ONLY privacy control on this path, and it is NOT server-enforceable
 
-> **GOOGLE: CLOSED (owner confirmation, 2026-08-06).** The owner confirms the
-> Gemini key bills against a **paid** project and that all prompts go through the
-> paid tier. Under the Gemini API Additional Terms effective **2026-03-23**, paid
-> tier means Google "doesn't use your prompts … or responses to improve our
-> products", with limited-period logging solely for policy enforcement. That is
-> the whole dependency, and it is met.
->
-> One standing operational condition, not a blocker: **no fallback path may route
-> a prompt through unpaid quota** — a dev key, AI Studio, or quota overflow would
-> land under the unpaid terms, which ARE trained on and human-reviewed. Keep the
-> production credential paid-only. (EEA/CH/UK users get paid-tier protection even
-> on free quota, so the exposure there is narrower.)
->
-> **OPENAI: fix in flight — `feat/image-lab-category-prompts`.** Rather than wait
-> on a sales-gated ZDR contract, we remove the condition that requires it:
-> gpt-image-2 will never receive a child's own words. A cell targeting an OpenAI
-> model must dispatch a prompt derived from a closed vocabulary of business-
-> category terms; the gate is enforced server-side on the resolved string at
-> dispatch, and it refuses rather than silently rewriting, so a stored row never
-> misreports its own input.
->
-> **The gate is asymmetric on purpose, and it does NOT extend to Google.** An
-> earlier draft of this section applied the derived prompt to every model in a
-> run "so the compare stays honest." That was wrong and the owner corrected it:
-> the Lab is a prompt bench, not a model tournament. Discovering that gpt-image-2
-> needs different prompt phrasing than gemini-3-pro-image is a *result* the panel
-> engine needs, not a confound to be eliminated — the engine will hand each model
-> its own best prompt. So staff choose prompt text per cell and may deliberately
-> send different text to different models in one run. The constraint is
-> asymmetric because the vendors' *terms* are asymmetric: OpenAI requires ZDR for
-> under-13 personal data and we lack it; Google's paid tier is contractually
-> no-training. Applying the gate to a Google cell is a defect, not caution — it
-> would block the experimentation the tool exists for. Comparability is preserved
-> by *recording* each result's actual prompt and whether it was derived or
-> child-authored, not by forcing the inputs to match. Once the gate ships,
-> OpenAI's under-18 rule
-> ("do not process personal data of under-13s without ZDR") no longer binds this
-> pipeline, because no personal data of a child is sent. Until it ships, this half
-> stays open — and `IMAGE_LAB_REAL_CONTENT_LIVE` stays off regardless, because
-> CHECK 2 is independent of it (see below).
+Read this before relying on it, and do not soften it when you repeat it.
 
-Original finding, retained for the record:
+Until 2026-08-06 the name scrub ran **twice**. Once in the content picker, and
+again server-side in `createRun`, against the child identity proved by the
+picker's server-signed provenance token. **The second run was the enforcing one.**
+It meant a client that edited the slot values after the fill, replayed an old
+POST, or hand-rolled a request could not get unscrubbed child prose into
+`resolved_prompt`, because the server re-derived the name tokens from the child
+the run was demonstrably built from and scrubbed again.
 
-*Google — closeable today.* Gemini API Additional Terms (effective 2026-03-23):
-paid tier, Google "doesn't use your prompts … or responses to improve our
-products"; logging is limited-period for policy enforcement only. Unpaid tier IS
-used for training and human review. EEA/CH/UK get paid-tier protection even on
-free quota. **The whole dependency is: confirm the production key bills against a
-PAID project, and that no fallback (dev key, AI Studio, quota overflow) can route
-child text through unpaid quota.**
+Provenance was removed, so **the server no longer knows which child any text came
+from**. There is no subject to scrub against, and therefore no server-side
+re-scrub is possible — not "not implemented yet", not "deferred". The scrub is now
+a **pick-time transform that a client could edit after the fact**.
 
-*OpenAI — NOT closeable today, and the blocker is their own rule.* Training is
-fine by default (no training on API data since 2023-03-01; 30-day abuse-monitoring
-retention). But OpenAI's under-18 API guidance
-(`developers.openai.com/api/docs/guides/safety-checks/under-18-api-guidance`)
-states:
+This is a real reduction in enforceability. It is **accepted, not overlooked**.
+The accepted reasoning: this is a staff-only bench, the failure requires a staff
+member to defeat their own tool, and scrubbed child-authored business text has
+been cleared as not personal data of a child.
 
-> "You should not use OpenAI services to process any personal data of children
-> under 13 or the applicable age of digital consent without first implementing
-> zero data retention in our API."
+What compensates — and these are compensations, not enforcement:
 
-The beta cohort includes under-13s (band `g3_5`). ZDR **is** supported for the
-`gpt-image-*` models but is **approval-gated through OpenAI sales — not
-self-serve** — and even under ZDR, image endpoints retain suspected-CSAM matches
-for manual review (non-waivable). Three paths:
-  (a) start the ZDR request with OpenAI sales;
-  (b) route under-13 accounts to Gemini paid tier only, leaving gpt-image-2 for
-      synthetic prompts; or
-  (c) **send gpt-image-2 a sanitized prompt derived from the business CATEGORY
-      rather than the child's own words** — likely the cheapest defensible path,
-      since the prompt only needs to convey what to draw. Note this is a real code
-      change in the Lab, not a config flip.
+- the picker is the only path that produces slot content at all;
+- the resolved-prompt preview sits directly above the Generate button and shows
+  the exact string each model will receive;
+- the picker's own note tells staff the scrub runs once and that anything typed
+  or pasted afterwards is sent as written.
 
-### CHECK 1, OPENAI HALF — path (c) IMPLEMENTED, **NOT YET CLOSED**
-
-> **⚠ THIS SECTION CLAIMED "CLOSED IN CODE" ON 2026-08-06 AND THAT WAS WRONG.**
-> Review found three ways child content reaches gpt-image-2 without ever arming
-> the gate. Fixes are in flight on `feat/image-lab-category-prompts`; until they
-> land and are mutation-verified, **treat the OpenAI half of CHECK 1 as OPEN and
-> leave `IMAGE_LAB_REAL_CONTENT_LIVE` off.**
->
-> The root cause is worth stating plainly, because it will recur: **provenance is
-> a property of the FETCH PATH, not of the CONTENT.** The gate arms on
-> `run.source_child_id`, which is set only when a picker-minted token verifies.
-> Child text that arrives any other way is invisible to it.
->
-> 1. **The template is not inspected.** The compensating refusal checks slot
->    values only. Put the child's pitch in the template, omit the token, leave
->    slots empty → no refusal, the name scrub is skipped entirely (no tokens to
->    scrub), the gate returns ok on its first line, and verbatim child prose is
->    dispatched. **The `unverified_slot_source` refusal copy actively recommended
->    this** ("or put the wording straight into the template instead"), and a test
->    pinned the behaviour as correct, so the suite could never catch it.
-> 2. **Turning `IMAGE_LAB_REAL_CONTENT_LIVE` OFF widens the guard.** The flag is a
->    conjunct of that same refusal, so the position an operator picks to mean
->    "stop touching child content" disables the only check on unprovenanced slot
->    content. The switch is inverted for that one branch.
-> 3. **Reference images are ungated.** The gate's input is
->    `{modelId, childProvenance, promptText}` — it is a TEXT gate. Up to 16
->    reference objects ride the same paid call to gpt-image-2, controlled only by
->    warning copy in the upload dialog. A photo of the child's hand-lettered sign
->    carries their handwriting and business name — while the derived prompt in the
->    same request instructs "no lettering, no logos, no brand names" precisely
->    because those are a privacy problem. References are append-only and
->    undeletable, so the mistake is permanent.
->
-> Also found: the gate **fails open** on an unrecognized model id (`entry?.provider
-> ?? null` is not `"openai"`, so it passes), held closed today only by the
-> adapter's separate lookup in another module — one plausible registry
-> copy-paste turns it into a live bypass.
-
-Path (c) is **implemented** on branch `feat/image-lab-category-prompts`. What
-shipped is narrower and more useful than "sanitize the Lab":
-
-- **The prompt is a PER-MODEL, staff-controlled choice.** The Lab is a PROMPT
-  bench, not a model tournament — finding that `gpt-image-2` needs different
-  wording than `gemini-3-pro-image` is a RESULT the panel engine needs, so the
-  bench must be able to send different text to different models in one run. Each
-  cell carries `authored` (template × slot values) or `derived` text.
-- **ONE non-overridable rule, enforced SERVER-SIDE at dispatch.** A cell
-  targeting an **OpenAI** model, on a run with **verified child provenance**,
-  must carry a prompt from a closed category vocabulary. *(In flight: the arming
-  condition is being widened, because "verified child provenance" was too narrow
-  — see the warning above. An OpenAI compose that carries no verified provenance
-  will have to carry an explicit, staff-attributed attestation that the template
-  holds no child-authored content; absent that, OpenAI cells are forced to
-  derived. The safe path becomes the default and the lazy path becomes safe,
-  while staff-authored prompt experiments on OpenAI stay fully available.)* The
-  vocabulary lives in
-  (`app/staff/image-lab/lib/category-prompt-rules.ts`). Anything else is
-  **REFUSED** (`child_text_gate`, HTTP 403) — never silently rewritten, because a
-  row that reports a prompt it did not send corrupts the evidence the Lab exists
-  to produce. Nothing is dialled and nothing is billed; the cell is untouched, so
-  fixing the prompt choice and generating again is a real recovery.
-- **Google models are deliberately NOT gated.** The Gemini paid tier is confirmed
-  no-training with no under-18 processing bar, and over-restricting it would block
-  the experimentation this bench is for. `IMAGE_LAB_REAL_CONTENT_LIVE` and the
-  name scrub still govern that leg.
-- **Every image row now records the exact text that produced it**
-  (`fp_image_lab_images.resolved_prompt` + `prompt_derived`, migration
-  `20260920120000_fp_image_lab_cell_prompts.sql` — **authored, NOT YET APPLIED**;
-  run the ledger query and rename to the real next-free slot first, per
-  `supabase/MIGRATION-LOCK.md` and the migration's own header). History, the
-  bench grid and the Kit all show it per result, labelled derived vs as-written.
-
-**CHECK 2 (consent) IS UNCHANGED AND STILL FAILS** for the Gemini leg, which is
-where child-authored text can still go. `IMAGE_LAB_REAL_CONTENT_LIVE` stays OFF
-until the consent version bump ships. The OpenAI blocker is what closed, not the
-consent one.
-
-⚠ Three openai.com pages (usage-policies, enterprise-privacy, trust portal)
-returned **403 to automated fetch again on 2026-08-06** and remain UNREAD. A human
-must open them for the usage-policies effective date and minors clause, the
-enterprise-privacy retention table, and trust-portal artifacts. Do not close this
-item on the strength of pages nobody has read.
-
----
-
-### Historical note — the accepted-risk window (superseded by the above)
-
-`IMAGE_LAB_LIVE=1` and `IMAGE_LAB_REAL_CONTENT_LIVE=1` were set on the `the120`
-Vercel project (production) on 2026-08-06. **`IMAGE_LAB_REAL_CONTENT_LIVE` was
-switched on as an accepted risk, with neither prerequisite below completed** —
-an explicit owner decision, recorded here so it is traceable rather than
-folklore, and so whoever closes the items can find what was outstanding.
-
-**Still open, and both should be closed promptly:**
-
-1. **OpenAI's no-training posture is UNCONFIRMED.** Their enterprise-privacy page
-   returned 403 during research on 2026-08-05 and was never re-verified. Gemini's
-   paid-tier no-training posture WAS confirmed. Until OpenAI is re-verified, every
-   `gpt-image-2` call carrying picker-filled slots is sending child-authored text
-   to a provider whose current retention terms we have not read.
-2. **The consent snapshot (2026-08-05.1) has not been checked** against
-   "child-authored text is sent to a third-party model API".
-
-Live blast radius while these are open: the beta cohort is **10 families / 17
-kids in production**. The mitigations that ARE in force are the name scrub
-(server-enforced at `createRun`, four leak classes closed — see the redaction
-solution doc), buyer-name exclusion from the `sale` slot, internal-ids-only
-provenance, and the fact that no prompt body or slot value reaches a log line.
-Those reduce the exposure; they do not close the two items above.
-
-**To reverse:** `vercel env rm IMAGE_LAB_REAL_CONTENT_LIVE production` — the
-picker disappears and a provenance-bearing compose is refused outright rather
-than silently recorded. Existing rows are unaffected; use the §5 purge for those.
-
----
-
-**`IMAGE_LAB_REAL_CONTENT_LIVE` must not be set until both checks are done:**
-
-1. **Provider terms.** Re-verify that BOTH providers' no-training posture still
-   holds for the tiers we call. The Gemini paid tier does not train on prompts;
-   OpenAI's API default is no-training, but the enterprise-privacy page **403'd
-   during research on 2026-08-05 and was never confirmed**. The registry's
-   `dataUseNote` on `gpt-image-2` says so out loud.
-2. **Consent policy.** A one-time check of the current first-profit consent
-   snapshot (2026-08-05.1) against "child-authored text is sent to a third-party
-   model API".
-
-The flag is the technical enforcement of that checklist. A checklist item is not
-a gate; this flag is the gate.
-
-**It gates the WRITE path too, since the Unit 7 security pass.** It used to be read
-only by the picker's three entry points and by the page render — so with
-generation on and consent off, a stale tab or a replayed action still drove the
-service-role `children`/`families` lookup, stamped `source_child_id`, and logged
-`dbContent=true` on a deployment whose operator believed the switch was off.
-
-**Provenance is now server-signed, not client-asserted.** `fillImageLabSlots`
-returns a short HMAC token over the child/idea/task ids; `createImageLabRun`
-verifies it and DERIVES the ids from it. A token that fails to verify is a refusal,
-never a downgrade. Operationally this means two things: a `source_child_id` on a
-row is a fact the server minted (so the consent-revocation purge in §5 is
-complete), and the token is keyed off `SUPABASE_SERVICE_ROLE_KEY` — **rotating that
-key invalidates every outstanding token**, which surfaces as `bad_source_token` on
-a compose whose slots were filled before the rotation. Re-filling the slots is the
-fix; nothing is lost.
-
-**With the picker live, slot values must carry that token.** A compose presenting
-non-empty slot values with no token is refused (`unverified_slot_source`) — the
-bench cannot tell hand-typed text from a replay of a child's. Staff who want a
-hand-written value on a live deployment put it in the template instead. With the
-picker off the same compose is unambiguous and is allowed.
-
-Gateway auth is **not** a third flag — it reuses whatever the funnel's existing
-gateway calls use (an existing key, or Vercel OIDC, which needs no key). Do not
-add an env-key sniff; verify presence, don't assume a new var.
+Code: `app/staff/image-lab/lib/content-picker-core.ts` → `scrubNames`, whose
+docblock states this in the same terms. The scrub is mutation-verified by a named
+test (`the picker returns SCRUBBED text — the only privacy control on this path`).
 
 ---
 
@@ -391,27 +224,56 @@ Summarized:
 
 ---
 
-## 5. Consent-revocation purge
+## 5. Deletion requests — READ BEFORE ANSWERING A PARENT
 
-**Runbook: the header of `supabase/migrations/20260917120000_fp_image_lab.sql`.**
-Do not duplicate it here and do not fork it. It covers, in order: draining the
-in-flight window (a `requested` cell with a non-null `attempted_at` has bytes on
-the way and is invisible to a key collection), collecting keys **including
-copy-forward descendants** via a recursive walk of `iterated_from_run_id`,
-deleting objects **through the Storage API and never via SQL**, verifying the
-bucket before deleting rows, and only then deleting rows.
+### ⚠ The Lab cannot service a per-child deletion request. There is no procedure that works.
 
-Two things from it that belong in an operator's head without opening the file:
+This section used to describe a consent-revocation purge keyed on
+`source_child_id`: drain the in-flight window, collect keys including
+copy-forward descendants via a recursive walk of `iterated_from_run_id`, delete
+objects through the Storage API, verify the bucket, then delete rows — and
+crucially, **purge the Lab before deleting the child row**, because
+`source_child_id` is `ON DELETE SET NULL`.
 
-- **Purge the Image Lab BEFORE deleting the profile/child.** `source_child_id` is
-  `ON DELETE SET NULL`, so once the child row is gone the provenance is gone and
-  these rows are **unfindable**. This step goes ahead of the repo's existing
-  `sites → ledger → saves → profile → child` ordering.
-- **References are out of scope and cannot be purged in v1.** See §6.
+**That procedure no longer works, and it is replaced rather than kept, because a
+procedure that cannot be executed is worse than none.**
 
-The R20 accepted-exposure record (first-profit `docs/solutions/security-issues/
-r20-fp-child-session-reach-across-the-shared-supabase-project-accepted-exposure-2026-08-01.md`)
-carries the Lab's confirmation note, including this ordering.
+`source_child_id` was the index that made "delete everything derived from this
+child" answerable. It was written from the picker's provenance token. Provenance
+was removed on 2026-08-06 (§9), so **the column is never written**. It is null on
+every row the Lab will ever create.
+
+**Consequence, stated plainly:** a Lab run containing a child's writing **cannot
+be located by child** — not now, and not retroactively. If a parent asks for
+their child's data to be deleted, the Lab's rows cannot be found by child id.
+
+### What you can actually do
+
+- **Deleting runs wholesale is the only recourse.** Delete Lab runs by date range,
+  by staff member, or all of them. There is no narrower cut. The mechanics
+  (drain the in-flight window; delete objects through the Storage API and never
+  via SQL; verify the bucket before deleting rows) are unchanged and still live in
+  the header of `supabase/migrations/20260919120000_fp_image_lab.sql` — read the
+  key-collection and deletion mechanics there and ignore its `source_child_id`
+  filter, which now matches nothing.
+- **The ordering constraint is gone with the column.** There is no longer any
+  reason to purge the Lab before deleting the child row, because there is no link
+  to lose. The repo's `sites → ledger → saves → profile → child` ordering stands
+  on its own.
+- **References cannot be purged at all.** Append-only, no delete path. See §7.
+
+### If this becomes unacceptable
+
+The carry-forward is to start writing `source_child_id` again from the picker's
+fill — which means reintroducing a way for the compose to state, unforgeably,
+which child it was built from. That is the provenance token, or something like
+it. It is a real piece of work and it was deliberately removed; do not
+half-restore it by writing a client-asserted child id, which is the exact hole the
+token was built to close.
+
+Note for the record: `fp_image_lab_runs` and `fp_image_lab_images` were both
+**empty in production** when provenance was removed, so no historical row lost a
+link it previously had.
 
 ---
 
@@ -455,6 +317,17 @@ carries the Lab's confirmation note, including this ordering.
 ## 7. Known accepted gaps
 
 These are decisions, not bugs. Each is stated in the code that owns it.
+
+- **The name scrub is not server-enforceable.** It runs once, at pick time, and
+  everything after the fill response is client-editable. There is no second pass
+  and there cannot be one — the server has no child identity to scrub against.
+  Full statement in §2; do not repeat it in a softened form.
+- **"Reference images are AI-generated only" is a commitment, not a control.**
+  Nothing in the code inspects an uploaded PNG, and the OpenAI-leg reference
+  refusal that used to exist was removed with provenance. References are also
+  append-only and undeletable (below), so a reference derived from a child's
+  drawing, product photo or likeness is an unrecoverable mistake. The upload UI
+  states this at the point of upload; that is the whole enforcement.
 
 - **No spend ceiling beyond the per-instance cooldown.** The generate-cell route
   is rate-limited per staff member at **30 cells / 5 minutes** — sized so one
@@ -528,3 +401,97 @@ Supabase Lab bucket). This is real work — error unions, timeout policies, a
 storage migration — not a rename. Bucket usage should be checked at the same
 time (compare runs are up to 12 images each, on Free-tier storage, with a 25 MiB
 per-object ceiling).
+
+---
+
+## 9. What this runbook used to say, and why it changed (dated)
+
+Kept short and kept LAST, deliberately. Earlier passes preserved a growing pile of
+superseded analysis at the top of this document, which made it hard to read cold —
+an operator had to wade through two failed checks and a retracted "closed in code"
+claim before reaching how the thing works. This is the record; §0–§8 are the Lab.
+
+### 2026-08-06 — consent and provenance removed from the Image Lab entirely
+
+**Owner decision, on legal advice.** In the owner's words: *"The only images I
+will ever use in image lab are AI generated images, so no consent will ever be
+needed from any parents. I want consent records completely removed and
+disconnected from Image Lab."* Asked to choose a scope, the owner took the
+fullest option — **drop consent AND attribution both** — and said plainly: *"I
+just want to finish and ship the Image Lab."*
+
+Two supporting facts, both verified, make it coherent:
+
+- reference images will only ever be AI-generated, so no child photo, drawing or
+  likeness ever reaches a vendor;
+- the owner's legal advice cleared **scrubbed** child-authored business text as
+  not personal data of a child.
+
+**Removed:** `IMAGE_LAB_REAL_CONTENT_LIVE`; the never-set
+`IMAGE_LAB_OPENAI_OPEN_VOCABULARY` and `IMAGE_LAB_OPENAI_OPEN_REFERENCES`; the
+child-text gate (`decideChildTextGate` / `child_text_gate`) and the reference gate
+(`child_reference_gate`); all forcing of the derived vocabulary; the staff
+attestation `no_child_content_attested` and its UI; the server-signed source token
+(minting, signing, verification, `wrong_staff`) and every call site; the writing
+and reading of `source_child_id`; the `unverified_slot_source` refusal; the
+`dbContent=` field on the audit breadcrumb; and all consent-version coupling.
+
+**Kept:** the name scrub (now pick-time only — §2); `prompt_derived` and
+`resolved_prompt` per cell, because the evidence trail is independent of all of
+this; the derived category vocabulary as a **selectable** option on every model;
+`IMAGE_LAB_LIVE`; the staff auth gate; service-role-only DB access with RLS on and
+zero policies; the unknown-model fail-closed; the CAS; idempotency; and the
+bounded timeouts.
+
+**Schema:** nothing was dropped. `supabase/MIGRATION-LOCK.md` is additive-only, so
+`source_child_id`, `source_idea_id`, `source_task_id` and
+`no_child_content_attested` remain as columns — unwritten, unread, and no longer
+selected. `source_child_id` is nullable and `no_child_content_attested` is
+`not null default false`, so omitting them from the insert needed **no DDL and no
+migration**. Both Lab tables were empty in production at the time.
+
+**Consequences, both documented rather than buried:** the scrub is no longer
+server-enforceable (§2), and deletion requests cannot be serviced per child (§5).
+
+### 2026-08-05 → 2026-08-06 — the two checks, superseded
+
+The flag table used to carry a status block headed *"BOTH CHECKS WERE RUN AND
+BOTH FAILED"*, plus a retracted "closed in code" claim and a long accepted-risk
+history. In summary, for the record:
+
+- **CHECK 2, CONSENT — failed, then removed.** Consent policy `2026-08-05.1`
+  granted exactly one third-party AI disclosure and it was bound to the child's
+  **photo** ("…and to that photo being sent to a third-party artificial
+  intelligence image service…"). It did not stretch to cover a child's written
+  work. The stated fix was a consent version bump adding a clause for
+  child-authored content — binding only parents who attested after it shipped,
+  never the 17 already-enrolled children retroactively. **Superseded:** the legal
+  advice above means no such clause is required, and the Lab is no longer coupled
+  to consent versions at all.
+- **CHECK 1, PROVIDER TERMS, GOOGLE — closed, and it stays closed.** The Gemini
+  key bills against a **paid** project. Under the Gemini API Additional Terms
+  effective 2026-03-23, paid tier means Google "doesn't use your prompts … or
+  responses to improve our products", with limited-period logging solely for
+  policy enforcement. **One standing operational condition survives all of this:
+  no fallback path may route a prompt through unpaid quota** — a dev key, AI
+  Studio, or quota overflow lands under the unpaid terms, which ARE trained on
+  and human-reviewed. Keep the production credential paid-only.
+- **CHECK 1, PROVIDER TERMS, OPENAI — removed rather than closed.** OpenAI's
+  under-18 API guidance ("do not process personal data of children under 13
+  without zero data retention") bound the pipeline, and ZDR for `gpt-image-*` is
+  approval-gated through OpenAI sales rather than self-serve. The fix in flight
+  was path (c): send gpt-image-2 only a prompt derived from a closed vocabulary of
+  business-category terms, enforced server-side on the resolved string at
+  dispatch. That gate shipped and was then **removed on 2026-08-06** — the rule it
+  satisfied no longer binds, because the text the Lab sends is not personal data
+  of a child. The **lesson** the gate taught survives it and is recorded in
+  `docs/solutions/`: provenance is a property of the fetch path, not of the
+  content, so a guard keyed on an optional client-supplied field is defeated by
+  deleting the field rather than by forging one.
+
+One correction from that period is worth preserving because it still governs the
+product: an early draft applied the derived prompt to **every** model in a run "so
+the compare stays honest". The owner corrected it — **the Lab is a prompt bench,
+not a model tournament.** Discovering that one model needs different phrasing than
+another is a *result*, not a confound. That is why `derived` remains selectable
+per model rather than being deleted along with the rule that once required it.

@@ -1,8 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   extractPickerIdeas,
   firstNameIsScrubbable,
-  isImageLabRealContentLive,
   listPickerChildren,
   listPickerIdeas,
   nameTokensFor,
@@ -21,14 +20,16 @@ import {
  * R15, R17).
  *
  * This is the module that reads CHILD DATA and hands it to a third-party model,
- * so its four protections each have their own named test: the flag, the
+ * so its three remaining protections each have their own named test: the
  * docVersion gate, the test-family exclusion, and the name scrub. Deleting any
  * one of them reddens here.
+ *
+ * ⚠ THE SCRUB IS NOW THE ONLY PRIVACY CONTROL ON THIS PATH (2026-08-06). The
+ * consent flag and the provenance token that let `createRun` re-scrub server-side
+ * were both removed by owner decision, so nothing downstream of these functions
+ * scrubs anything. `the picker returns SCRUBBED text` below is therefore not one
+ * assertion among several — it is the assertion. It is mutation-verified.
  */
-
-/** The staff member every fill in this suite is minted for. The real token binds
- *  it, so the fake carries it too. */
-const STAFF = "staff-1";
 
 const MAYA: PickerChildRow = {
   childId: "child-1",
@@ -59,53 +60,15 @@ const doc = (over: Record<string, unknown> = {}) => ({
 
 function makeDeps(over: Partial<ContentPickerDeps> = {}): ContentPickerDeps {
   return {
-    isLive: () => true,
     listChildren: async () => [MAYA],
     findChild: async (id) => (id === MAYA.childId ? MAYA : null),
     loadSaveDoc: async () => doc(),
     loadSales: async () => [],
-    // A deterministic stand-in for the HMAC. The real minting is asserted in
-    // `source-token.test.ts`; here it only has to be a value the fill carries.
-    // ⚠ THE STAFF ID IS IN THE TOKEN. The real minter binds it so a token cannot
-    // be replayed by another staff session onto another compose — which would
-    // attach source_child_id, the column the revocation purge keys on, to a run
-    // holding none of that child's content.
-    mintSourceToken: (p, staffId) =>
-      `tok:${p.childId}:${p.ideaId ?? ""}:${p.taskId ?? ""}:${staffId}`,
     ...over,
   };
 }
 
-// ── 1. The flag ──────────────────────────────────────────────────────────────
-
-describe("IMAGE_LAB_REAL_CONTENT_LIVE gates the whole picker", () => {
-  const offDeps = makeDeps({
-    isLive: () => false,
-    listChildren: async () => {
-      throw new Error("must not be reached");
-    },
-    findChild: async () => {
-      throw new Error("must not be reached");
-    },
-    loadSaveDoc: async () => {
-      throw new Error("must not be reached");
-    },
-  });
-
-  it("refuses every entry point WITHOUT touching a child table", async () => {
-    expect(await listPickerChildren(offDeps)).toEqual({ ok: false, reason: "disabled" });
-    expect(await listPickerIdeas(offDeps, MAYA.childId)).toEqual({
-      ok: false,
-      reason: "disabled",
-    });
-    expect(await pickSlotValues(offDeps, { childId: MAYA.childId, staffId: STAFF })).toEqual({
-      ok: false,
-      reason: "disabled",
-    });
-  });
-});
-
-// ── 2. The docVersion gate ───────────────────────────────────────────────────
+// ── 1. The docVersion gate ───────────────────────────────────────────────────
 
 describe("the save doc is read ONLY at a known docVersion", () => {
   it("SKIPS an unknown version rather than parsing it", async () => {
@@ -126,7 +89,7 @@ describe("the save doc is read ONLY at a known docVersion", () => {
     // them to type the content in by hand, which bypasses the scrub entirely.
     expect(ideas).toEqual({ ok: true, ideas: [], docReadable: false });
 
-    const filled = await pickSlotValues(deps, { childId: MAYA.childId, staffId: STAFF });
+    const filled = await pickSlotValues(deps, { childId: MAYA.childId });
     expect(filled.ok).toBe(true);
     if (!filled.ok) return;
     expect(filled.docReadable).toBe(false);
@@ -141,7 +104,7 @@ describe("the save doc is read ONLY at a known docVersion", () => {
 
   it("a child with ZERO ideas yields explicit empties", async () => {
     const deps = makeDeps({ loadSaveDoc: async () => ({ docVersion: 1, ideas: [] }) });
-    const filled = await pickSlotValues(deps, { childId: MAYA.childId, staffId: STAFF });
+    const filled = await pickSlotValues(deps, { childId: MAYA.childId });
     expect(filled.ok).toBe(true);
     if (!filled.ok) return;
     expect(Object.keys(filled.slots).sort()).toEqual([
@@ -175,13 +138,51 @@ describe("the save doc is read ONLY at a known docVersion", () => {
   });
 });
 
-// ── 3. The name scrub ────────────────────────────────────────────────────────
+// ── 2. The name scrub ────────────────────────────────────────────────────────
+
+/**
+ * ⚠ THE LOAD-BEARING TEST OF THIS WHOLE FEATURE, AND IT IS MUTATION-VERIFIED.
+ *
+ * `createRun` used to re-scrub server-side against the child a provenance token
+ * named, so there were two independent chances to catch an unscrubbed name.
+ * Provenance was removed on 2026-08-06, so THE PICKER'S OWN SCRUB IS THE ONLY
+ * ONE LEFT: if this reddens, a child's name reaches a vendor and nothing else in
+ * the system will notice.
+ *
+ * Verified by breaking `scrubNames` (an early `return text`) and confirming this
+ * test — by this name — fails.
+ */
+describe("the picker returns SCRUBBED text — the only privacy control on this path", () => {
+  it("every entry point returns text with the child's name already removed", async () => {
+    const deps = makeDeps();
+
+    const filled = await pickSlotValues(deps, { childId: MAYA.childId });
+    expect(filled.ok).toBe(true);
+    if (!filled.ok) return;
+    for (const value of Object.values(filled.slots)) {
+      expect(value).not.toMatch(/maya/i);
+      expect(value).not.toMatch(/chen/i);
+    }
+
+    // The idea LIST travels to the browser too, and it is scrubbed for the same
+    // reason: only `label` renders today, one wiring change from a surface that
+    // would bypass this entirely.
+    const listed = await listPickerIdeas(deps, MAYA.childId);
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    for (const idea of listed.ideas) {
+      const everything = [idea.productName, idea.oneLiner, idea.pitch, idea.label].join(" ");
+      expect(everything).not.toMatch(/maya/i);
+      expect(everything).not.toMatch(/chen/i);
+    }
+  });
+});
 
 describe("the child's own name and username are scrubbed", () => {
   it("removes the first name from a first-person pitch, possessive intact", async () => {
     // A first-person pitch conventionally OPENS with the child's name. This is
     // the hard requirement from the Unit 1 security review.
-    const filled = await pickSlotValues(makeDeps(), { childId: MAYA.childId, staffId: STAFF });
+    const filled = await pickSlotValues(makeDeps(), { childId: MAYA.childId });
     expect(filled.ok).toBe(true);
     if (!filled.ok) return;
 
@@ -406,14 +407,14 @@ describe("the child's own name and username are scrubbed", () => {
         ideas: [{ fields: { productName: "Street Cards" } }],
       }),
     });
-    const filled = await pickSlotValues(deps, { childId: anon.childId, staffId: STAFF });
+    const filled = await pickSlotValues(deps, { childId: anon.childId });
     if (!filled.ok) return;
     expect(filled.slots.product).toBe("Street Cards");
     expect(filled.scrubbed).toBe(false);
   });
 });
 
-// ── 4. Test families ─────────────────────────────────────────────────────────
+// ── 3. Test families ─────────────────────────────────────────────────────────
 
 describe("test families are excluded, NULL-safely", () => {
   const rows: PickerChildRow[] = [
@@ -433,7 +434,7 @@ describe("test families are excluded, NULL-safely", () => {
     const deps = makeDeps({
       findChild: async () => ({ ...MAYA, isTest: true }),
     });
-    expect(await pickSlotValues(deps, { childId: MAYA.childId, staffId: STAFF })).toEqual({
+    expect(await pickSlotValues(deps, { childId: MAYA.childId })).toEqual({
       ok: false,
       reason: "unknown_child",
     });
@@ -445,14 +446,14 @@ describe("test families are excluded, NULL-safely", () => {
 
   it("refuses an unknown child id", async () => {
     const deps = makeDeps({ findChild: async () => null });
-    expect(await pickSlotValues(deps, { childId: "nope", staffId: STAFF })).toEqual({
+    expect(await pickSlotValues(deps, { childId: "nope" })).toEqual({
       ok: false,
       reason: "unknown_child",
     });
   });
 });
 
-// ── 5. The sale slot excludes the buyer ──────────────────────────────────────
+// ── 4. The sale slot excludes the buyer ──────────────────────────────────────
 
 describe("the sale slot carries money and timing, never a buyer", () => {
   const sales: SaleRow[] = [
@@ -481,7 +482,7 @@ describe("the sale slot carries money and timing, never a buyer", () => {
 
     const filled = await pickSlotValues(
       makeDeps({ loadSales: async () => withPayer }),
-      { childId: MAYA.childId, staffId: STAFF }
+      { childId: MAYA.childId }
     );
     if (!filled.ok) return;
     expect(filled.slots.sale).not.toContain("Alvarez");
@@ -490,7 +491,7 @@ describe("the sale slot carries money and timing, never a buyer", () => {
   it("reports the exclusion as a CHIP, never as a silent blank", async () => {
     // A blank field reads as a missing value and a staff member types it back in
     // — reintroducing exactly what the exclusion removed.
-    const filled = await pickSlotValues(makeDeps(), { childId: MAYA.childId, staffId: STAFF });
+    const filled = await pickSlotValues(makeDeps(), { childId: MAYA.childId });
     if (!filled.ok) return;
     expect(filled.excluded).toHaveLength(1);
     expect(filled.excluded[0]!.slot).toBe("sale");
@@ -499,43 +500,42 @@ describe("the sale slot carries money and timing, never a buyer", () => {
   });
 });
 
-// ── 6. Provenance ────────────────────────────────────────────────────────────
+// ── 5. Which idea a fill resolved to ────────────────────────────────────────
 
-describe("provenance is ids only (origin R17)", () => {
-  it("returns the child and idea ids the run row will record", async () => {
+describe("the fill reports the idea it actually used", () => {
+  it("returns the child and idea ids, and NO name field of any kind", async () => {
     const filled = await pickSlotValues(makeDeps(), {
       childId: MAYA.childId,
       ideaId: "idea-a",
-      taskId: "1.1.2",
-      staffId: STAFF,
     });
     expect(filled.ok).toBe(true);
     if (!filled.ok) return;
     expect(filled.childId).toBe("child-1");
     expect(filled.ideaId).toBe("idea-a");
-    expect(filled.taskId).toBe("1.1.2");
-    // …and carries no name field of any kind.
     expect(Object.keys(filled)).not.toContain("firstName");
     expect(Object.keys(filled)).not.toContain("username");
+    // ⚠ AND NO PROVENANCE TOKEN. `provenance` was a server-signed string the
+    // composer carried back so `createRun` could derive `source_child_id`. It
+    // was removed on 2026-08-06; a fill that started minting one again would
+    // mean the whole token mechanism had come back with it.
+    expect(Object.keys(filled)).not.toContain("provenance");
   });
 
   it("REFUSES when the requested idea no longer resolves — never substitutes", async () => {
-    // ⚠ THE OLD FALLBACK SPENT MONEY ON A DIFFERENT CHILD'S IDEA THAN THE ONE
-    // SELECTED, and recorded THAT idea as `source_idea_id` — so the consent
-    // audit trail pointed at the wrong one. Positional ids (`idea:2`) are
-    // exactly the ones that move when the child edits between the two round
-    // trips, which makes this the common case rather than the exotic one.
+    // ⚠ THE OLD FALLBACK SPENT MONEY ON A DIFFERENT IDEA THAN THE ONE SELECTED.
+    // Positional ids (`idea:2`) are exactly the ones that move when the child
+    // edits between the two round trips, which makes this the common case
+    // rather than the exotic one.
     expect(
       await pickSlotValues(makeDeps(), {
         childId: MAYA.childId,
         ideaId: "idea-that-was-deleted",
-        staffId: STAFF,
       })
     ).toEqual({ ok: false, reason: "unknown_idea" });
   });
 
   it("flags a DEFAULTED idea so the composer can re-sync its select", async () => {
-    const filled = await pickSlotValues(makeDeps(), { childId: MAYA.childId, staffId: STAFF });
+    const filled = await pickSlotValues(makeDeps(), { childId: MAYA.childId });
     if (!filled.ok) return;
     expect(filled.ideaId).toBe("idea-a");
     expect(filled.substituted).toBe(true);
@@ -543,7 +543,6 @@ describe("provenance is ids only (origin R17)", () => {
     const chosen = await pickSlotValues(makeDeps(), {
       childId: MAYA.childId,
       ideaId: "idea-a",
-      staffId: STAFF,
     });
     if (!chosen.ok) return;
     expect(chosen.substituted).toBe(false);
@@ -555,54 +554,9 @@ describe("provenance is ids only (origin R17)", () => {
         throw new Error("boom");
       },
     });
-    expect(await pickSlotValues(deps, { childId: MAYA.childId, staffId: STAFF })).toEqual({
+    expect(await pickSlotValues(deps, { childId: MAYA.childId })).toEqual({
       ok: false,
       reason: "unavailable",
     });
-  });
-});
-
-// ── 6. The flag's own parser, EXECUTED ───────────────────────────────────────
-
-describe("isImageLabRealContentLive is a real, executed allowlist", () => {
-  const original = process.env.IMAGE_LAB_REAL_CONTENT_LIVE;
-  afterEach(() => {
-    if (original === undefined) delete process.env.IMAGE_LAB_REAL_CONTENT_LIVE;
-    else process.env.IMAGE_LAB_REAL_CONTENT_LIVE = original;
-  });
-
-  /**
-   * ⚠ NOTHING EXECUTED THIS FUNCTION. Every picker test injected `isLive`, so
-   * mutating the parser to `return true` survived the whole suite — a flag that
-   * fails OPEN on real children's authored text, invisible to CI. These cases
-   * run the real thing through `process.env`.
-   */
-  const cases: [string | undefined, boolean][] = [
-    [undefined, false],
-    ["", false],
-    // `=false` and `=0` are how an operator says "off" in a dashboard, and a
-    // truthiness check reads both as ON.
-    ["0", false],
-    ["false", false],
-    ["no", false],
-    ["yes", false],
-    ["on", false],
-    ["1", true],
-    ["true", true],
-    ["TRUE", true],
-    [" true ", true],
-  ];
-
-  it.each(cases)("%o → %s", (value, expected) => {
-    if (value === undefined) delete process.env.IMAGE_LAB_REAL_CONTENT_LIVE;
-    else process.env.IMAGE_LAB_REAL_CONTENT_LIVE = value;
-    expect(isImageLabRealContentLive()).toBe(expected);
-  });
-
-  it("is read at CALL TIME, so flipping it does not need a cold start", () => {
-    process.env.IMAGE_LAB_REAL_CONTENT_LIVE = "1";
-    expect(isImageLabRealContentLive()).toBe(true);
-    process.env.IMAGE_LAB_REAL_CONTENT_LIVE = "0";
-    expect(isImageLabRealContentLive()).toBe(false);
   });
 });

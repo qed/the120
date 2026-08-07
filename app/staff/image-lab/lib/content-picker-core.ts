@@ -9,58 +9,47 @@
  * fakes in `__tests__/content-picker-core.test.ts`; `content-picker-loader.ts`
  * builds the real deps from `imageLabDb()` and `run-actions.ts` holds the gate.
  *
- * ⚠ THIS IS THE ONE PLACE IN THE IMAGE LAB THAT READS CHILD DATA, and four
- * separate protections live here rather than in four different callers:
+ * ⚠ THIS IS THE ONE PLACE IN THE IMAGE LAB THAT READS CHILD DATA, and three
+ * separate protections live here rather than in three different callers:
  *
- *  1. THE FLAG. `IMAGE_LAB_REAL_CONTENT_LIVE` gates this module's entry points —
- *     a SEPARATE switch from `IMAGE_LAB_LIVE`, because they authorize different
- *     things. Generation being on says the bench may spend money; the picker
- *     being on says a real child's authored text may be sent to a third-party
- *     model, which is the consent-and-provider-terms question. Unset means the
- *     picker is absent and manual prompts still generate normally.
- *
- *  2. THE DOC VERSION GATE. An unknown `docVersion` is SKIPPED, never parsed —
+ *  1. THE DOC VERSION GATE. An unknown `docVersion` is SKIPPED, never parsed —
  *     the same rule the site projection trigger applies (`SITE_DOC_VERSION_GATE`,
  *     imported rather than restated). A doc shape we do not recognize is a doc
  *     whose fields we cannot claim to know the meaning of, and guessing would
  *     put arbitrary child text under a slot name a prompt trusts.
  *
- *  3. TEST FAMILIES ARE EXCLUDED, through the repo's ONE predicate
+ *  2. TEST FAMILIES ARE EXCLUDED, through the repo's ONE predicate
  *     (`isRealFamily` / `excludeTestFamilies`, app/crm/lib/test-family-filter.ts).
  *     Both layers: the loader filters in SQL and this module filters the rows it
  *     got, because the SQL filter is invisible to this suite and a query that
  *     silently lost its `.not()` would otherwise ship green.
  *
- *  4. THE NAME SCRUB, and it is a HARD REQUIREMENT from the Unit 1 security
- *     review rather than a nicety. A first-person pitch conventionally OPENS with
- *     the child's own name — "Hi, I'm Maya, and I make…" — so a child's name
- *     arrives inside `{{pitch}}` as a matter of course. The names ARE available
- *     on this shared project (children.first_name, children.fp_username), so
- *     there is no excuse for shipping them to a vendor. See {@link scrubNames}.
+ *  3. THE NAME SCRUB, and it is now THE ONLY PRIVACY CONTROL ON THIS PATH. A
+ *     first-person pitch conventionally OPENS with the child's own name — "Hi,
+ *     I'm Maya, and I make…" — so a child's name arrives inside `{{pitch}}` as a
+ *     matter of course. The names ARE available on this shared project
+ *     (children.first_name, children.fp_username), so there is no excuse for
+ *     shipping them to a vendor. It runs at PICK TIME, here, against the child
+ *     whose content is being loaded, and every entry point below returns
+ *     already-scrubbed text. See {@link scrubNames} for what that costs.
  *
  * And one exclusion by CONSTRUCTION rather than by scrubbing: the `sale` slot is
  * built from `fp_ledger` WITHOUT ever selecting `payer`. The buyer's name is a
- * THIRD party who never consented to anything, and no panel needs it (origin
- * R12a). It is not fetched, so it cannot leak.
+ * THIRD party, and no panel needs it (origin R12a). It is not fetched, so it
+ * cannot leak.
+ *
+ * ── WHAT USED TO BE HERE AND IS NOT (2026-08-06, owner decision) ───────────
+ * A consent flag (`IMAGE_LAB_REAL_CONTENT_LIVE`) gated these entry points, and a
+ * server-signed provenance token was minted here so `createRun` could re-scrub
+ * server-side against the child the token named. Both are gone. The reasoning is
+ * recorded in `image-lab-rules.ts`; the cost is recorded in {@link scrubNames}
+ * and in docs/runbooks/2026-08-05-image-lab-operations.md, in those terms.
  */
 
 import { SITE_DOC_VERSION_GATE } from "@/app/lib/fp/fp-public-site-rules";
 import { isRealFamily } from "@/app/crm/lib/test-family-filter";
-import {
-  IMAGE_LAB_SLOTS,
-  isImageLabRealContentLive,
-  type ImageLabSlot,
-} from "./image-lab-rules";
+import { IMAGE_LAB_SLOTS, type ImageLabSlot } from "./image-lab-rules";
 import type { SlotValues } from "./run-rules";
-
-/**
- * ⚠ THE CONSENT FLAG NOW LIVES IN `./image-lab-rules`, BESIDE `isImageLabLive`.
- * Re-exported here so the picker's existing importers are unchanged and so this
- * module still reads as the place the gate is applied — but there is exactly one
- * definition, and `createRun` (which must consult it too, on a path that must not
- * import a `*-core`) reads it from the plain module.
- */
-export { isImageLabRealContentLive };
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
@@ -133,7 +122,6 @@ export type PickerContent = {
   ok: true;
   readonly childId: string;
   readonly ideaId: string | null;
-  readonly taskId: string | null;
   /** Every slot present, "" where there is nothing — never a missing key. */
   readonly slots: SlotValues;
   /** Slots whose value came back empty. Drives the honest empty-state copy. */
@@ -152,32 +140,21 @@ export type PickerContent = {
   /**
    * True when NO idea was requested and the picker defaulted to the first one.
    * The composer re-syncs its select from {@link ideaId} so the surface and the
-   * `source_idea_id` it will record can never disagree.
+   * idea the slots were actually filled from can never disagree.
    */
   readonly substituted: boolean;
   /** False when the save doc failed the docVersion gate — a DIFFERENT state from
    *  "this child has no ideas", and it needs its own copy. */
   readonly docReadable: boolean;
   readonly excluded: readonly ExcludedField[];
-  /**
-   * ⚠ THE SERVER-SIGNED PROVENANCE TOKEN — the ONLY way a compose can claim these
-   * slot values came from a child (see `./source-token.ts`).
-   *
-   * The composer carries it back verbatim to `createImageLabRun`, which VERIFIES
-   * it and derives `source_child_id` from it. `source` used to be a client-
-   * asserted, optional object, which made the whole chokepoint — the re-scrub AND
-   * the consent breadcrumb — opt-in on a field a caller could simply omit.
-   */
-  readonly provenance: string;
 };
 
 export type PickerRefusal =
-  | { ok: false; reason: "disabled" }
   | { ok: false; reason: "unknown_child" }
   /** The requested idea id no longer resolves. NEVER silently substituted:
    *  positional ids (`idea:2`) move when the child edits between the two round
-   *  trips, and spending on a different idea than the one selected also files
-   *  the consent trail against the wrong `source_idea_id`. */
+   *  trips, and spending on a different idea than the one selected is money on a
+   *  prompt nobody chose. */
   | { ok: false; reason: "unknown_idea" }
   | { ok: false; reason: "unavailable" };
 
@@ -189,29 +166,6 @@ export type ContentPickerDeps = {
   loadSaveDoc(profileId: string): Promise<unknown>;
   /** Sale ledger rows. The loader NEVER selects `payer`. */
   loadSales(profileId: string): Promise<SaleRow[]>;
-  /**
-   * Sign the provenance this fill just resolved (`./source-token.ts`).
-   *
-   * ⚠ INJECTED RATHER THAN IMPORTED, so this stays a PLAIN module: the real
-   * implementation is `server-only` and reaches `node:crypto`, and a suite that
-   * had to load it could not run in this feature's node/no-jsdom environment
-   * without the deployment's secret.
-   */
-  mintSourceToken(
-    provenance: {
-      childId: string;
-      ideaId: string | null;
-      taskId: string | null;
-    },
-    /** ⚠ THE STAFF MEMBER THE TOKEN IS MINTED FOR. It is signed into the payload
-     *  and `createRun` requires the presenting session to match it — one token
-     *  used to be replayable by any staff session onto any compose, which made
-     *  `source_child_id` (the column the revocation purge keys on) attachable to
-     *  runs holding none of that child's content. */
-    staffId: string
-  ): string;
-  /** Overridable so tests never touch process.env. */
-  isLive?: () => boolean;
 };
 
 // ── The name scrub ───────────────────────────────────────────────────────────
@@ -464,6 +418,33 @@ function trailingBoundaryOk(
 /**
  * Remove a child's own name and username from text bound for a model.
  *
+ * ⚠ THIS IS A PICK-TIME TRANSFORM AND IT IS NO LONGER SERVER-ENFORCEABLE.
+ * READ THIS BEFORE RELYING ON IT.
+ *
+ * Until 2026-08-06 the scrub ran TWICE: here, and again server-side in
+ * `run-core.createRun`, against the child identity proved by the picker's signed
+ * provenance token. The second run was the enforcing one — it meant a client that
+ * edited the slot values after the fill, replayed an old POST, or hand-rolled a
+ * request could not put unscrubbed child prose into `resolved_prompt`, because
+ * the server re-derived the tokens from the child the run was demonstrably built
+ * from and scrubbed again.
+ *
+ * Provenance was removed by owner decision, so the server no longer knows which
+ * child any text came from. There is no subject to scrub against, and therefore
+ * NO SERVER-SIDE RE-SCRUB IS POSSIBLE — not "not implemented yet", not
+ * "deferred". The scrub now runs exactly once, at PICK TIME, and everything
+ * downstream of the fill response is client-editable. A staff member (or a stale
+ * tab, or a crafted POST) can put a child's name into a prompt after this
+ * function has run and nothing on the server will catch it.
+ *
+ * That is a REAL REDUCTION IN ENFORCEABILITY and it is accepted, not overlooked.
+ * The accepted reasoning: this is a staff-only bench, the failure requires a
+ * staff member to defeat their own tool, and the owner's legal advice cleared
+ * scrubbed child-authored business text as not personal data of a child. The
+ * operational compensations — the preview above Generate, and the fact that the
+ * picker is the only path that produces slot content at all — are exactly that:
+ * compensations, not enforcement. See the runbook.
+ *
  * ⚠ FOLDED, BOUNDARY-AWARE, AND DELIBERATELY OVER-EAGER. A child called Art
  * selling art supplies will see "[name] supplies", and that is the correct trade:
  * an over-scrubbed prompt makes a slightly worse picture, an under-scrubbed one
@@ -601,9 +582,6 @@ export function summarizeSales(sales: readonly SaleRow[]): string {
 export async function listPickerChildren(
   deps: ContentPickerDeps
 ): Promise<{ ok: true; children: PickerChildOption[] } | PickerRefusal> {
-  const isLive = deps.isLive ?? isImageLabRealContentLive;
-  if (!isLive()) return { ok: false, reason: "disabled" };
-
   let rows: PickerChildRow[];
   try {
     rows = await deps.listChildren();
@@ -644,9 +622,6 @@ export async function listPickerIdeas(
   deps: ContentPickerDeps,
   childId: string
 ): Promise<PickerIdeasResult | PickerRefusal> {
-  const isLive = deps.isLive ?? isImageLabRealContentLive;
-  if (!isLive()) return { ok: false, reason: "disabled" };
-
   let child: PickerChildRow | null;
   try {
     child = await deps.findChild(childId);
@@ -696,20 +671,17 @@ export async function listPickerIdeas(
  * ideas or a missing sale yields explicit empties, never a crash and never a
  * missing key that would make `{{sale}}` silently resolve to the literal for a
  * reason the composer cannot explain.
+ *
+ * ⚠ EVERY VALUE IT RETURNS IS ALREADY SCRUBBED, and that is the whole privacy
+ * story on this path now — nothing downstream re-scrubs. See {@link scrubNames}.
  */
 export async function pickSlotValues(
   deps: ContentPickerDeps,
   input: {
     childId: string;
     ideaId?: string | null;
-    taskId?: string | null;
-    /** From the ACTION'S GATE, never from the request body. See the dep above. */
-    staffId: string;
   }
 ): Promise<PickerContent | PickerRefusal> {
-  const isLive = deps.isLive ?? isImageLabRealContentLive;
-  if (!isLive()) return { ok: false, reason: "disabled" };
-
   let child: PickerChildRow | null;
   try {
     child = await deps.findChild(input.childId);
@@ -737,9 +709,8 @@ export async function pickSlotValues(
   const ideas = parsed ?? [];
 
   // ⚠ AN UNRESOLVABLE REQUESTED IDEA IS A REFUSAL, NOT A SUBSTITUTION. The old
-  // fallback to `ideas[0]` spent money on a different idea than the one selected
-  // AND recorded that other idea as `source_idea_id`, pointing the consent trail
-  // at the wrong thing. Positional ids (`idea:2`) are exactly the ones that move
+  // fallback to `ideas[0]` spent money on a different idea than the one the staff
+  // member selected. Positional ids (`idea:2`) are exactly the ones that move
   // when the child edits between the two round trips.
   const requested =
     typeof input.ideaId === "string" && input.ideaId !== "" ? input.ideaId : null;
@@ -774,22 +745,11 @@ export async function pickSlotValues(
   }
 
   const ideaId = idea?.ideaId ?? null;
-  const taskId =
-    typeof input.taskId === "string" && input.taskId !== "" ? input.taskId : null;
 
   return {
     ok: true,
     childId: child.childId,
     ideaId,
-    taskId,
-    // ⚠ MINTED FROM WHAT THIS FUNCTION RESOLVED, never from what was asked for.
-    // The requested idea may have been substituted (`substituted`), and the token
-    // must name the idea the run will actually record — the same rule that makes
-    // the composer re-sync its select from `ideaId`.
-    provenance: deps.mintSourceToken(
-      { childId: child.childId, ideaId, taskId },
-      input.staffId
-    ),
     slots,
     emptySlots,
     scrubbed,

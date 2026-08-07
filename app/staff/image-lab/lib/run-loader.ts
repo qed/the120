@@ -31,9 +31,7 @@ import {
 import {
   isImageLabFailureReason,
   isImageLabImageState,
-  isImageLabRealContentLive,
 } from "./image-lab-rules";
-import { verifySourceToken } from "./source-token";
 import { generateLabImage } from "./image-model";
 import { type ImageLabDb } from "./image-lab-db";
 import {
@@ -44,8 +42,6 @@ import {
   type SlotValues,
 } from "./run-rules";
 import { withFwTimeout } from "@/app/lib/fp/fw-call";
-import { excludeTestFamilies } from "@/app/crm/lib/test-family-filter";
-import { CHILD_SCRUB_COLUMNS } from "./content-picker-loader";
 import { errorName } from "./run-core";
 import type { FinalizePatch, NewCellRow, RunDeps, RunRow } from "./run-core";
 
@@ -56,12 +52,13 @@ const REFERENCES = "fp_image_lab_references";
 const RUN_COLUMNS =
   "id, staff_id, idempotency_key, template, slot_values, resolved_prompt, " +
   "reference_ids, drill_tags, note, compare, iterated_on_model, " +
-  "iterated_from_run_id, source_child_id, source_idea_id, source_task_id, " +
-  // The staff attestation (20260920120000). Read on the PAID path — the dispatch
-  // gate consults it for every run with no verified provenance — so it is named
-  // here for the same reason every other column is, and a missing column fails
-  // loudly at 42703 rather than defaulting a privacy decision to `false` quietly.
-  "no_child_content_attested, created_at";
+  // NOT SELECTED, DELIBERATELY: `source_child_id`, `source_idea_id`,
+  // `source_task_id` and `no_child_content_attested`. The columns still exist —
+  // the migration lock is additive-only — but provenance and the staff
+  // attestation were removed on 2026-08-06 and nothing reads them. Naming a
+  // column this code does not consume would invite the next reader to wire it
+  // back up. See `run-core.RunRow`.
+  "iterated_from_run_id, created_at";
 
 const IMAGE_COLUMNS =
   "id, run_id, model_id, cell_ordinal, state, attempted_at, billed, " +
@@ -179,14 +176,6 @@ function toRunRow(raw: Record<string, unknown>, cellCount: number): RunRow {
     iteratedOnModel: typeof raw.iterated_on_model === "string" ? raw.iterated_on_model : null,
     iteratedFromRunId:
       typeof raw.iterated_from_run_id === "string" ? raw.iterated_from_run_id : null,
-    sourceChildId: typeof raw.source_child_id === "string" ? raw.source_child_id : null,
-    sourceIdeaId: typeof raw.source_idea_id === "string" ? raw.source_idea_id : null,
-    sourceTaskId: typeof raw.source_task_id === "string" ? raw.source_task_id : null,
-    // ⚠ `=== true` AND NOTHING ELSE. Any other value — absent column, null from a
-    // row written before the column, a string — reads as NOT attested, which is
-    // the constrained answer. The safe reading must be the one that costs nothing
-    // to reach.
-    noChildContentAttested: raw.no_child_content_attested === true,
     createdAtMs: asMs(raw.created_at),
     cellCount,
   };
@@ -264,20 +253,6 @@ export function runDeps(db: ImageLabDb): RunDeps {
     newId: () => randomUUID(),
     now: () => Date.now(),
 
-    // The provenance chokepoint's two injected facts. Both live outside this
-    // plain-module boundary on purpose: the verifier reaches `node:crypto` and
-    // the deployment secret, and the flag is read at CALL TIME so a warm
-    // instance can never hold a stale answer.
-    verifySourceToken: (token, staffId) => {
-      // ⚠ THE CALLER'S OWN STAFF ID, FROM THE GATE'S SESSION. A token minted for
-      // one staff member must not verify for another — see the dep's docblock.
-      const verdict = verifySourceToken(token, staffId);
-      return verdict.ok
-        ? { ok: true, provenance: verdict.provenance }
-        : { ok: false };
-    },
-    isRealContentLive: () => isImageLabRealContentLive(),
-
     async insertRun(row) {
       const { data, error } = await bounded(() => db
         .from(RUNS)
@@ -294,10 +269,11 @@ export function runDeps(db: ImageLabDb): RunDeps {
           compare: row.compare,
           iterated_on_model: row.iteratedOnModel,
           iterated_from_run_id: row.iteratedFromRunId,
-          source_child_id: row.sourceChildId,
-          no_child_content_attested: row.noChildContentAttested,
-          source_idea_id: row.sourceIdeaId,
-          source_task_id: row.sourceTaskId,
+          // ⚠ `source_child_id`, `source_idea_id`, `source_task_id` and
+          // `no_child_content_attested` ARE NOT WRITTEN. The columns are nullable
+          // / defaulted (`no_child_content_attested boolean not null default
+          // false`), so omitting them from the insert needs no DDL — which is why
+          // this change ships without a migration under the additive-only lock.
         })
         .select(RUN_COLUMNS)
         .single(), `insertRun(${row.id})`);
@@ -391,53 +367,6 @@ export function runDeps(db: ImageLabDb): RunDeps {
      * `createRun` refuses to build a run from it. Unknown provenance is not real
      * provenance.
      */
-    async loadChildIdentity(childId) {
-      const child = await bounded(
-        () =>
-          db
-            .from("children")
-            .select(CHILD_SCRUB_COLUMNS)
-            .eq("id", childId)
-            .maybeSingle(),
-        "loadChildIdentity"
-      );
-      if (child.error) {
-        throw new Error(`loadChildIdentity failed: ${errorCode(child.error)}`);
-      }
-      const row = child.data as {
-        parent_id?: unknown;
-        first_name?: unknown;
-        last_name?: unknown;
-        fp_username?: unknown;
-      } | null;
-      if (!row) return null;
-
-      const parentId = typeof row.parent_id === "string" ? row.parent_id : null;
-      // ⚠ THE ONE CHOKEPOINT, never a hand-written `.eq("is_test", false)` —
-      // that drops NULL rows, which are real families.
-      const family = parentId
-        ? await bounded(
-            () =>
-              excludeTestFamilies(
-                db.from("families").select("parent_id, is_test").eq("parent_id", parentId)
-              ),
-            "loadChildIdentity/family"
-          )
-        : { data: null, error: null };
-      if (family.error) {
-        throw new Error(`loadChildIdentity family read failed: ${errorCode(family.error)}`);
-      }
-      const families = (family.data ?? []) as { is_test: boolean | null }[];
-
-      const str = (v: unknown) => (typeof v === "string" ? v : "");
-      return {
-        firstName: str(row.first_name),
-        lastName: str(row.last_name),
-        username: typeof row.fp_username === "string" ? row.fp_username : null,
-        isTest: families.length > 0 ? (families[0]!.is_test ?? null) : true,
-      };
-    },
-
     /**
      * ⚠ THE ATOMIC CAS, and the three predicates are all load-bearing:
      *   `id = $1`                 — this cell;

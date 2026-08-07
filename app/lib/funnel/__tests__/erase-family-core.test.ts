@@ -52,6 +52,21 @@ function makeDb(seed: Tables, opts: { selectFaultTable?: string } = {}) {
           return { data: null, error: { message: `23503: children ${cid} still referenced` } };
         }
       }
+      // The Path student graph (path_notification_sends/events, task progress,
+      // ...) is student_id -> path_student_profiles ON DELETE RESTRICT. Modeled
+      // so the suite cannot pin an ordering production refuses: an ACTIVE
+      // child's profile delete must 23503 and strand fail-safe (the documented
+      // posture until the drain unit lands).
+      if (table === "path_student_profiles") {
+        const sid = r.id;
+        if (
+          (t.path_notification_sends ?? []).some((x) => x.student_id === sid) ||
+          (t.path_notification_events ?? []).some((x) => x.student_id === sid) ||
+          (t.path_task_events ?? []).some((x) => x.student_id === sid)
+        ) {
+          return { data: null, error: { message: `23503: path_student_profiles ${sid} still referenced` } };
+        }
+      }
     }
     // Apply the delete.
     t[table] = rows.filter((r) => !matches(r, filters));
@@ -217,6 +232,14 @@ function seedFamily(): Tables {
       { id: "a2", parent_id: "parentU", parent_email: "fam@test.the120.invalid", child_id: "childB" },
     ],
     deposits: [{ child_id: "childA", parent_id: "parentU" }],
+    // ── step 8b: the parent-keyed RESTRICT referrers of auth.users ──
+    // The verifier grant EVERY v3 parent holds (the row that stranded the first
+    // live erasure) plus one notification-send log line. Both must be swept or
+    // the fake's deleteAuthUser refuses the parent delete.
+    path_role_grants: [{ id: "g1", user_id: "parentU", role: "verifier" }],
+    path_notification_sends: [
+      { id: "n1", recipient_user_id: "parentU", kind: "path_weekly" },
+    ],
     // ── New User Flow v3 ──
     // Live one-time sign-in codes (CASCADE-backed, deleted explicitly).
     fp_handoff_codes: [
@@ -356,6 +379,16 @@ function makeDeps(
       if ((t.fp_player_profiles ?? []).some((x) => x.user_id === userId) || (t.path_student_profiles ?? []).some((x) => x.user_id === userId)) {
         return { ok: false }; // RESTRICT: a profile still references this account
       }
+      // The step-8b referrers, modeled with the SAME RESTRICT the live schema
+      // has (the first live erasure 23503'd on the verifier grant). A core that
+      // skips the sweep cannot delete the parent here — the fake proves the
+      // sweep, not just the counters.
+      if (
+        (t.path_role_grants ?? []).some((x) => x.user_id === userId) ||
+        (t.path_notification_sends ?? []).some((x) => x.recipient_user_id === userId)
+      ) {
+        return { ok: false }; // RESTRICT: a grant / send-log row still references it
+      }
       deletedAuth.push(userId);
       // parent cascade: remove parents row + SET NULL on consent/attempts parent_id
       t.parents = (t.parents ?? []).filter((p) => p.id !== userId);
@@ -406,9 +439,16 @@ describe("eraseFamily — full family, FK-safe order", () => {
       "fp_parental_consent",
       "fp_signup_attempts",
       "deposits",
+      // step 8b: without this sweep the fake's RESTRICT refuses the parent
+      // delete outright, so parentAccountDeleted above is the real proof; the
+      // emptiness check is the accounting.
+      "path_role_grants",
+      "path_notification_sends",
     ]) {
       expect(t[table], `${table} should be empty`).toHaveLength(0);
     }
+    expect(out.deleted.path_role_grants).toBe(1);
+    expect(out.deleted.path_notification_sends).toBe(1);
 
     // The provisioning claim SURVIVES (SET NULL + released, never cascaded away):
     // its local_part is preserved (never-reissue) while the PII is scrubbed.
@@ -440,6 +480,81 @@ describe("eraseFamily — full family, FK-safe order", () => {
     // Workspace suspend precedes delete for the path-b child, gated ON.
     expect(wsCalls).toEqual(["suspend:childb@the120.school", "delete:childb@the120.school"]);
     expect(out.workspace).toMatchObject({ suspended: 1, deleted: 1, skipped: 0 });
+  });
+
+  it("step 8b sweeps the parent-keyed RESTRICT referrers BEFORE the account delete (the first-live-erasure bug)", async () => {
+    const { db, t, deleteLog } = makeDb(seedFamily());
+    const { deps, deletedAuth } = makeDeps(t);
+    deps.db = db;
+
+    const out = await eraseFamily(deps, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+
+    // The parent really died — impossible without the sweep, because the fake's
+    // deleteAuthUser enforces the grant/send-log RESTRICT like production does.
+    expect(out.parentAccountDeleted).toBe(true);
+    expect(deletedAuth).toContain("parentU");
+    // And the order log shows the sweep landed before the account delete.
+    const grantAt = deleteLog.indexOf("path_role_grants(1)");
+    const sendsAt = deleteLog.indexOf("path_notification_sends(1)");
+    expect(grantAt).toBeGreaterThanOrEqual(0);
+    expect(sendsAt).toBeGreaterThanOrEqual(0);
+    const parentAt = out.order.findIndex((s) => s.startsWith("auth_users:parent"));
+    const grantOrderAt = out.order.findIndex((s) => s.startsWith("path_role_grants"));
+    expect(grantOrderAt).toBeGreaterThanOrEqual(0);
+    expect(grantOrderAt).toBeLessThan(parentAt);
+  });
+
+  it("a CHILD-SCOPED erasure leaves the parent's grant and mail history untouched", async () => {
+    const { db, t } = makeDb(seedFamily());
+    const { deps } = makeDeps(t);
+    deps.db = db;
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+      childIds: ["childA"],
+    });
+
+    expect(out.ok).toBe(true);
+    // The parent survives a child-scoped erasure — and so must their verifier
+    // grant (they still verify their OTHER kid's work) and their send log.
+    expect(t.path_role_grants).toHaveLength(1);
+    expect(t.path_notification_sends).toHaveLength(1);
+    expect(out.deleted.path_role_grants).toBe(0);
+    expect(out.deleted.path_notification_sends).toBe(0);
+  });
+
+  it("an ACTIVE child strands fail-safe AND the step-8b sweep does NOT run (the send log survives for the cron)", async () => {
+    // The documented pre-drain-unit posture: a child with Path-graph rows
+    // (here: a notification send about them, still derivable from a surviving
+    // task event) cannot be erased yet — step 4 23503s, the child strands, and
+    // CRUCIALLY the parent's grant + send log survive too. Sweeping the send
+    // log while the derivation inputs survive would let the cron's reconcile
+    // pass re-insert it and RE-EMAIL the erasure-requesting parent (ADV-3).
+    const seed = seedFamily();
+    seed.path_task_events = [{ id: "e1", student_id: "pspA", kind: "submitted" }];
+    seed.path_notification_sends.push({
+      id: "n2",
+      recipient_user_id: "parentU",
+      student_id: "pspA",
+      kind: "submitted",
+    });
+    const { db, t } = makeDb(seed);
+    const { deps, deletedAuth } = makeDeps(t);
+    deps.db = db;
+
+    const out = await eraseFamily(deps, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+
+    expect(out.ok).toBe(false);
+    // childA stranded on the RESTRICT-blocked profile delete; anchor preserved.
+    expect((t.children as { id: string }[]).map((c) => c.id)).toContain("childA");
+    // The parent delete deferred — and the sweep did not run: grant + BOTH send
+    // rows survive, so the pipeline's idempotency record is intact.
+    expect(deletedAuth).not.toContain("parentU");
+    expect(t.path_role_grants).toHaveLength(1);
+    expect(t.path_notification_sends).toHaveLength(2);
+    expect(out.deleted.path_role_grants).toBe(0);
+    expect(out.deleted.path_notification_sends).toBe(0);
   });
 
   it("RESTRICT never blocks (order is correct) — no stranded rows", async () => {

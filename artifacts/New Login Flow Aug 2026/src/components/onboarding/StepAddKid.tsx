@@ -33,8 +33,9 @@ export function StepAddKid({ onSubmit }: StepAddKidProps) {
         Add your kid, and their story starts.
       </h1>
       <p className="mt-4 max-w-md text-base leading-relaxed text-stone">
-        First Profit turns starting a real, tiny business into a guided graphic novel. It begins
-        with one page — theirs.
+        The 120 offers academic programs in learning math at 2X-4X normal speed and First
+        Profit, a business program where your kid earns their first $1,000 over a 5 phase,
+        25 step process.
       </p>
 
       <form onSubmit={handleSubmit} noValidate className="mt-9 space-y-5">

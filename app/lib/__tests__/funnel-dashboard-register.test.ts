@@ -92,8 +92,13 @@ describe("the dashboard gate loads the flip fact (dashboard-gate-core + page.tsx
   const core = read("app/lib/funnel/dashboard-gate-core.ts");
   const page = read("app/dashboard/page.tsx");
 
-  it("selects arrived_at with the other child columns — the ONE children read serves the flip", () => {
-    expect(core).toMatch(/select\("id, applicant_state, created_at, status, arrived_at"\)/);
+  it("selects arrived_at AND fp_username with the other child columns — the ONE children read serves the flip", () => {
+    // v3 Unit 8 widened the flip fact to two columns. Both must ride the same
+    // single read: a second query for the discriminator would be a second
+    // failure mode for one decision.
+    expect(core).toMatch(
+      /select\("id, applicant_state, created_at, status, arrived_at, fp_username"\)/
+    );
   });
 
   it("the page delegates loading to the core inside its cache() wrapper", () => {
@@ -261,14 +266,14 @@ describe("DashboardApp — the two registers never mix on one screen", () => {
       app.indexOf("min-h-screen bg-hq-canvas")
     );
     expect(home).toMatch(
-      /cardVerdict\(\s*c,\s*depositsFor\(c\.id\),\s*composedChildIds\.has\(c\.id\),\s*projectNames\.get\(c\.id\) \?\? null,?\s*\)/
+      /cardVerdict\(\s*c,\s*depositsFor\(c\.id\),\s*composedChildIds\.has\(c\.id\),\s*projectNames\.get\(c\.id\) \?\? null,\s*remapCtx,?\s*\)/
     );
     expect(home).toMatch(/verdict\.statusLine/);
     // The reserve block is the ONE shared renderReserveCta — the dispute-
     // evidence posture (inline policy + tick) must not fork per register.
-    expect(home).toMatch(
-      /renderReserveCta\(c, verdict\.kind === "funnel" \? verdict\.secondaryReviewLink : undefined\)/
-    );
+    // v3 Unit 9: it takes the child alone now; the `secondaryReviewLink`
+    // argument went with the archived v2 walkthrough it linked at.
+    expect(home).toMatch(/renderReserveCta\(c\)/);
   });
 
   it("post-arrival cards key on the sticky column, not applicant state or deposits", () => {
@@ -287,28 +292,37 @@ describe("DashboardApp — the two registers never mix on one screen", () => {
     expect(app).not.toContain("/start/next-steps");
   });
 
-  it("the reserve block renders the outlined Review pill from the ONE shared class literal", () => {
-    // reviewPillClass is declared once and consumed by BOTH the reserve
-    // block's twin and the R1a standalone pill — the pair cannot drift.
-    expect(app.match(/reviewPillClass\b/g)?.length).toBeGreaterThanOrEqual(4);
-    // The twin renders the verdict's computed link, never a re-hardcoded
-    // label/href (data.ts stays the one source of truth).
-    expect(app).toMatch(/renderReserveCta\(c, verdict\.secondaryReviewLink\)/);
+  it("the outlined Review pill is RETIRED from both registers (v3 Unit 9)", () => {
+    // It linked at the v2 read-only application walkthrough, now in
+    // `archive/new-user-v2/child/[childId]`. Three absences, because the pill
+    // had three halves: the verdict field, the render sites, and the shared
+    // href builder.
+    // Comment-stripped: the removal is DOCUMENTED in DashboardApp's comments,
+    // and a raw-text sweep would redden on the explanation of its own fix.
+    const code = app.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    expect(code).not.toContain("secondaryReviewLink");
+    expect(code).not.toContain("Review application");
+    expect(code).not.toContain("flowHref");
+    // The reserve block survives it, taking the child alone.
+    expect(app).toMatch(/renderReserveCta\(c\)/);
   });
 
-  it("both registers suppress the standalone review link when the reserve block already carries the pill", () => {
-    // The double-render guard exists at BOTH trailing render sites — twice
-    // per site since direct reserve (2026-08-02): once for the review pill,
-    // once for the secondary reserve twin.
-    expect(app.match(/cta\?\.kind !== "reserve"/g)?.length).toBe(4);
+  it("both registers suppress the standalone reserve twin when the reserve block already carries it", () => {
+    // The double-render guard exists at BOTH trailing render sites — once per
+    // site since v3 Unit 9 retired the review pill (it was twice: once for the
+    // review pill, once for the secondary reserve twin).
+    expect(app.match(/cta\?\.kind !== "reserve"/g)?.length).toBe(2);
     // And the secondary reserve twin renders at both registers.
     expect(app.match(/renderSecondaryReserve\(c, verdict\.secondaryReserveCta\.label\)/g)?.length).toBe(2);
   });
 
-  it("the disabled twin blocks every input modality while checkout opens (anchor has no real disabled)", () => {
-    expect(app).toMatch(/tabIndex=\{reserving \? -1 : undefined\}/);
-    expect(app).toMatch(/if \(reservingId === c\.id\) e\.preventDefault\(\);/);
-    expect(app).toMatch(/pointer-events-none opacity-60/);
+  it("the reserve button still blocks a double-navigation while checkout opens", () => {
+    // RETIRED with the review twin (v3 Unit 9): the three anchor-specific
+    // guards (tabIndex -1, preventDefault, pointer-events-none). An <a> has no
+    // real `disabled`, which is why it needed all three; the buttons that
+    // remain have one, and it is the real thing.
+    expect(app.match(/disabled=\{reserving\}/g)?.length).toBe(2);
+    expect(app).toMatch(/disabled:cursor-not-allowed disabled:opacity-60/);
   });
 });
 
@@ -344,7 +358,13 @@ describe("the screen-16 bars carry REAL verified counts, not the 0 placeholder",
   });
 
   it("counts load only for a path-register family, and a failure keeps children (fail open to the floor)", () => {
-    expect(core).toMatch(/childRows\.some\(\(c\) => c\.arrived_at != null\)/);
+    // ⚠ THE COUPLED-PREDICATE PIN (v3 Unit 8). The load condition IS
+    // `dashboardRegister`, not a hand-inlined copy of its predicate — which is
+    // what it used to be, and which v3 would have broken: widening the register
+    // to FP children while the load still tested `arrived_at` alone gives every
+    // v3 family a permanent 0 floor on the bars the register exists to show.
+    expect(core).toMatch(/if \(dashboardRegister\(children\) === "path"\)/);
+    expect(core).not.toMatch(/childRows\.some\(\(c\) => c\.arrived_at != null\)/);
     expect(core).toMatch(/verifiedTaskCounts = counts === null \? null : Object\.fromEntries\(counts\)/);
   });
 });

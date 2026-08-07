@@ -660,6 +660,14 @@ describe("deletion ordering — fp_public_sites dies FIRST", () => {
       suspendWorkspaceUser: async () => "missing" as const,
       deleteWorkspaceUser: async () => "missing" as const,
       workspaceConfigured: false,
+      // No blob adapter (production's shape today): these fixtures name no
+      // objects, so nothing is skipped and nothing is stranded.
+      blobConfigured: false,
+      // These fixtures seed no Image Lab runs, so the purge's one seed SELECT
+      // finds nothing and this is never called. Fails loudly if that changes.
+      deleteImageLabObject: async (key: string) => {
+        throw new Error(`unexpected image-lab object delete: ${key}`);
+      },
       now: () => Date.now(),
     };
   }

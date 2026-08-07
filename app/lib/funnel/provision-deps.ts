@@ -31,6 +31,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { notifyOps } from "@/app/lib/ops-alert";
 import { buildWorkspaceJwtConfig } from "@/app/lib/funnel/workspace-auth";
+// A PURE constant (the bucket id). image-lab-rules.ts imports nothing from
+// next/supabase, and the Lab's service-role guard scans modules UNDER
+// app/staff/image-lab/ — importing its vocabulary from outside is exactly how the
+// bucket id stays a single definition instead of a second string literal here.
+import { IMAGE_LAB_BUCKET } from "@/app/staff/image-lab/lib/image-lab-rules";
 import {
   deriveStudentLocalBaseFromFirstName,
   DRIVABLE_PROVISION_STATES,
@@ -959,6 +964,37 @@ export function realEraseFamilyDeps(): EraseFamilyDeps {
   return {
     db,
     workspaceConfigured: saKeyRaw().length > 0,
+    // ── BLOB DELETION: NO ADAPTER EXISTS YET, AND THAT IS DECLARED, NOT HIDDEN ──
+    // The v3 cover pipeline ships TEMPLATE-ONLY: the picture is rendered inline
+    // as a data URL and `cover_blob_key` / `fp_cover_blob_key` are written NULL,
+    // so no object is ever created (verified 2026-08-06 against production: zero
+    // non-null blob keys). The Vercel Blob adapter is still the documented seam
+    // at the bottom of app/fp/lib/cover-store.ts, and until it lands there is
+    // nothing honest to inject here.
+    //
+    // `blobConfigured: false` therefore means "no way to delete an object", and
+    // the core treats that as a STRAND (not a benign skip) the moment it ever
+    // finds a non-null key — which is exactly the alarm we want on the day the
+    // AI path starts writing objects and this factory has not been updated.
+    // WHEN THE ADAPTER LANDS: set `blobConfigured` to whatever gates the store's
+    // token and supply `deleteBlob` mapping already-gone → "missing" (the SDK's
+    // `del()` is URL-addressed — see concern (a) in the cover-store seam note).
+    blobConfigured: false,
+    // ── IMAGE LAB OBJECTS: WIRED FOR REAL, because there is a real store ──
+    // Unlike the Vercel Blob seam above, the Image Lab's bucket is Supabase
+    // Storage reached through THIS SAME service-role client, so there is no
+    // honest "unconfigured" state and no flag: the dep is required by the type
+    // and implemented here. `remove()` is idempotent — an absent key comes back
+    // with no error and an empty data array, which is a COMPLETED erasure, not a
+    // failure (the same contract deleteBlob declares).
+    deleteImageLabObject: async (key) => {
+      const { data, error } = await db.storage.from(IMAGE_LAB_BUCKET).remove([key]);
+      if (error) {
+        console.error(`[erase] image-lab object delete failed for ${key}: ${error.message}`);
+        return "error";
+      }
+      return (data ?? []).length > 0 ? "deleted" : "missing";
+    },
     deleteAuthUser: async (userId) => {
       const res = await db.auth.admin.deleteUser(userId);
       if (res.error) {

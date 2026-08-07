@@ -1,7 +1,14 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { classifyIdentifier } from "@/app/api/fp/login/login-rules";
 import {
+  appendUsernameSuffix,
   generateUsernameBase,
+  generateUsernameLocalPart,
   mintUsername,
+  mintUsernameFromNames,
   pickUniqueUsername,
   USERNAME_FALLBACK_BASE,
   MAX_USERNAME_ATTEMPTS,
@@ -207,5 +214,155 @@ describe("generator === CHECK === unique index === login namespace (^[a-z0-9]+$)
     const mint = mintUsername({ firstName: "- -", isTaken: () => false });
     expect(mint).toMatchObject({ ok: true, username: USERNAME_FALLBACK_BASE, usedFallback: true });
     if (mint.ok) expect(mint.username).toMatch(LOGIN_USERNAME_FORMAT);
+  });
+});
+
+/* ==========================================================================
+   New User Flow v3, Unit 3 — the TWO-NAME variant (`remi.newal`)
+   ========================================================================== */
+
+describe("generateUsernameLocalPart — firstname.lastname", () => {
+  it("joins the two slugged names with a single dot", () => {
+    expect(generateUsernameLocalPart("Remi", "Newal")).toEqual({ ok: true, base: "remi.newal" });
+    expect(generateUsernameLocalPart("Álex", "Ó Súilleabháin")).toEqual({
+      ok: true,
+      base: "alex.osuilleabhain",
+    });
+  });
+
+  it("DEGRADES to the first name alone when the last name is absent or underivable — never `remi.`", () => {
+    for (const last of [undefined, null, "", "   ", "- -", "🙂"]) {
+      expect(generateUsernameLocalPart("Remi", last)).toEqual({ ok: true, base: "remi" });
+    }
+  });
+
+  it("refuses only on an underivable FIRST name, so mintUsernameFromNames can fall back", () => {
+    const v = generateUsernameLocalPart("- -", "Newal");
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.reason).toBe("underivable");
+  });
+});
+
+describe("mintUsernameFromNames — collision suffix BEFORE the @", () => {
+  it("first kid gets the clean handle, the next gets the numeric suffix", () => {
+    const taken = new Set<string>();
+    const first = mintUsernameFromNames({
+      firstName: "Remi",
+      lastName: "Newal",
+      isTaken: (c) => taken.has(c),
+    });
+    expect(first).toMatchObject({ ok: true, username: "remi.newal", attempt: 1 });
+    if (first.ok) taken.add(first.username);
+
+    const second = mintUsernameFromNames({
+      firstName: "Remi",
+      lastName: "Newal",
+      isTaken: (c) => taken.has(c),
+    });
+    expect(second).toMatchObject({ ok: true, username: "remi.newal2", attempt: 2 });
+    if (second.ok) taken.add(second.username);
+
+    const third = mintUsernameFromNames({
+      firstName: "Remi",
+      lastName: "Newal",
+      isTaken: (c) => taken.has(c),
+    });
+    expect(third).toMatchObject({ ok: true, username: "remi.newal3" });
+  });
+
+  it("`underivable` first name keeps the `student` base through the two-name variant", () => {
+    const mint = mintUsernameFromNames({
+      firstName: "- -",
+      lastName: "Newal",
+      isTaken: () => false,
+    });
+    expect(mint).toMatchObject({ ok: true, username: USERNAME_FALLBACK_BASE, usedFallback: true });
+  });
+
+  it("is byte-identical to mintUsername when no last name is supplied", () => {
+    for (const name of ["Mary Jane", "Anna-Lee", "José", "- -"]) {
+      const a = mintUsername({ firstName: name, isTaken: () => false });
+      const b = mintUsernameFromNames({ firstName: name, isTaken: () => false });
+      expect(b).toEqual(a);
+    }
+  });
+
+  it("appendUsernameSuffix places the digits BEFORE an @ when the base is email-shaped", () => {
+    // No generator emits an `@` today, but the storage CHECK and login regex both
+    // ADMIT email-shaped handles, so the suffixer must not turn one into a
+    // different address.
+    expect(appendUsernameSuffix("cedric@firstprofit.school", 1)).toBe("cedric@firstprofit.school");
+    expect(appendUsernameSuffix("cedric@firstprofit.school", 2)).toBe("cedric2@firstprofit.school");
+    expect(appendUsernameSuffix("remi.newal", 2)).toBe("remi.newal2");
+  });
+});
+
+describe("THE THREE-PARTY NESTING INVARIANT: generator ⊆ DB CHECK === login regex", () => {
+  // The acceptors are read from their SOURCE OF TRUTH rather than restated:
+  //   - the DB CHECK regex is extracted from the migration file on disk;
+  //   - the login acceptor is the real `classifyIdentifier`, imported.
+  // A widening (or narrowing) of either that this generator does not fit fails
+  // here rather than at a 23514 on a live child insert.
+  const MIGRATION = "supabase/migrations/20260904120000_fp_username_email_shaped.sql";
+  const sql = readFileSync(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..", MIGRATION),
+    "utf8"
+  );
+  const extracted = /fp_username ~ '([^']+)'/.exec(sql);
+
+  it("the migration still states a single fp_username CHECK regex we can read", () => {
+    expect(extracted).not.toBeNull();
+  });
+
+  const DB_CHECK = new RegExp(extracted![1]);
+
+  const NAMES: Array<[string, string]> = [
+    ["Remi", "Newal"],
+    ["Mary Jane", "van der Berg"],
+    ["Anna-Lee", "O'Brien"],
+    ["José", "Ó Súilleabháin"],
+    ["Weiß", "Schäfer"],
+    ["Lily  Rose  ", "  Ng  "],
+    ["- -", "Newal"],
+    ["Remi", ""],
+  ];
+
+  it("every generated username (base, suffixed, and the fallback) is accepted by BOTH", () => {
+    for (const [first, last] of NAMES) {
+      const taken = new Set<string>();
+      for (let i = 0; i < 3; i += 1) {
+        const mint = mintUsernameFromNames({
+          firstName: first,
+          lastName: last,
+          isTaken: (c) => taken.has(c),
+        });
+        expect(mint.ok, `${first}/${last}`).toBe(true);
+        if (!mint.ok) continue;
+        taken.add(mint.username);
+
+        // (a) storage: the DB CHECK, straight from the migration.
+        expect(DB_CHECK.test(mint.username), `CHECK rejects ${mint.username}`).toBe(true);
+        expect(mint.username.length, mint.username).toBeLessThanOrEqual(80);
+
+        // (b) login: the real acceptor, and it must classify as a USERNAME —
+        // a handle that merely "matches a regex" but refuses at login is a kid
+        // who cannot sign in.
+        const classified = classifyIdentifier(mint.username);
+        expect(classified.kind, `login refuses ${mint.username}`).toBe("username");
+        if (classified.kind === "username") {
+          // (c) the case-insensitive unique index: the stored handle IS its own
+          // normalized form, so the index and the lookup cannot disagree.
+          expect(classified.normalized).toBe(mint.username);
+        }
+      }
+    }
+  });
+
+  it("the generator is a STRICT SUBSET: it never emits the punctuation the acceptors merely tolerate", () => {
+    const GENERATOR_SHAPE = /^[a-z0-9]+(\.[a-z0-9]+)?[0-9]*$/;
+    for (const [first, last] of NAMES) {
+      const mint = mintUsernameFromNames({ firstName: first, lastName: last, isTaken: () => false });
+      if (mint.ok) expect(mint.username).toMatch(GENERATOR_SHAPE);
+    }
   });
 });

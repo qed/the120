@@ -99,6 +99,145 @@ export const FW_RESIDUE_REPORT_RATE_LIMIT: RateLimitConfig = { windowMs: 10 * 60
 
 export const FW_MATCH_LOOKUP_RATE_LIMIT: RateLimitConfig = { windowMs: 10 * 60_000, limit: 60 };
 
+/* ───────────────── New User Flow v3 parent step (v3 Unit 2) ───────────────── */
+
+/**
+ * The v3 `/start` Server Actions get their OWN namespaces so their strikes can
+ * never interact with `fp-signup` (the firstprofit.school HTTP front door) or
+ * `fp-login`. Two live front doors share the `fp_signup_attempts` table; they
+ * must not share a rate-limit bucket, or a spike at one would lock out the
+ * other for the same family.
+ *
+ * ⚠ BOTH of these are VOLUMETRIC BACKSTOPS ONLY. This store is in-memory,
+ * per-instance, and empty on cold start (see rate-limit-store.ts' own header),
+ * so nothing security-load-bearing may rest on it. The control that actually
+ * bounds code guessing is the DURABLE `code_guess_count` on the attempt row
+ * (app/api/fp/signup/verify-store.ts MAX_CODE_GUESSES). These limits exist to
+ * bound VOLUME — mail sends, account-creation probes, request floods — not to
+ * bound guesses.
+ */
+export const V3_START_NAMESPACE = "fp-v3-start";
+export const V3_START_IP_NAMESPACE = "fp-v3-start-ip";
+export const V3_VERIFY_NAMESPACE = "fp-v3-verify";
+export const V3_VERIFY_IP_NAMESPACE = "fp-v3-verify-ip";
+
+/** Start is the heavy door — it mints an auth account and sends mail — so the
+ *  per-(ip,email) budget is tight; it still covers a typo'd password, an
+ *  edit-email, and a couple of retries in one sitting. */
+export const V3_START_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 5 };
+
+/** The per-IP backstop a varying email cannot dodge. Generous enough for a
+ *  school open-house on one NAT, far below what enumerating a list needs. */
+export const V3_START_IP_RATE_LIMIT: RateLimitConfig = { windowMs: 60 * 60_000, limit: 20 };
+
+/** Verify + resend share this per-(ip,email) budget. Sized ABOVE
+ *  MAX_CODE_GUESSES on purpose: the durable counter is what must decide a
+ *  lockout, and a volumetric limit that bit first would mask it (and would
+ *  reset itself on the next cold start, which the durable counter never does). */
+export const V3_VERIFY_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 20 };
+
+export const V3_VERIFY_IP_RATE_LIMIT: RateLimitConfig = { windowMs: 60 * 60_000, limit: 100 };
+
+/* ─────────────── New User Flow v3 steps 2-5 (v3 Unit 3, review FIX 7) ─────── */
+
+/**
+ * The signed-in half of the v3 flow (add-kid, edit-kid, save-story, provision)
+ * gets a per-PARENT budget.
+ *
+ * It was justified as "not a public surface", which is true and insufficient: a
+ * single verified session can loop `v3AddKidAction` with `differentChild: true`,
+ * and each call mints an `fp_signup_attempts` row + an `fp_parental_consent`
+ * row + a draft carrying a minor's name — all of it BEFORE
+ * `MAX_CHILDREN_PER_FAMILY` gets a say, since that cap lives inside
+ * `createChild` at provisioning time. The durable ceiling is
+ * `V3_MAX_ACTIVE_DRAFTS_PER_PARENT` (app/lib/v3-signup/v3-onboarding-core.ts);
+ * this bounds the remaining reachable abuse, which is the add → provision →
+ * add CYCLE (each cycle frees a draft slot by consuming it).
+ *
+ * Sized so an honest family never notices: adding three kids in one sitting,
+ * with back-navigation, story edits and a provisioning retry each, is well under
+ * 40 calls. Volumetric only, per the store's own header — the load-bearing
+ * bounds are the draft cap above and the family cap in child-core.
+ */
+export const V3_ONBOARDING_NAMESPACE = "fp-v3-onboarding";
+
+export const V3_ONBOARDING_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 40 };
+
+/* ─────────────── New User Flow v3 cover generation (v3 Unit 4) ───────────── */
+
+/**
+ * `POST /api/fp/cover`. Its OWN namespace — never the onboarding action budget —
+ * because the cover endpoint is a ROUTE HANDLER reachable independently of the
+ * Server Actions, and because a family re-running their cover a few times must
+ * not spend the budget that their provisioning retry needs.
+ *
+ * Recorded on the ATTESTED CLIENT IP, before any authorization work, because at
+ * that point in the request there is no authenticated identity to key on — the
+ * whole point of putting the limiter first is that it costs nothing and bounds
+ * unauthenticated floods before the session probe and the DB reads.
+ *
+ * ⚠ VOLUMETRIC ONLY, like every bucket in this module (the store is in-memory
+ * and empty on cold start). The load-bearing per-kid ceiling is the DURABLE
+ * `generation_count` column on `fp_onboarding_drafts` / `children`, enforced by
+ * a compare-and-set on the observed value (app/api/fp/cover/cover-core.ts,
+ * COVER_GENERATION_CAP). A family behind one NAT with three kids, each redrawing
+ * a few times, stays far inside this.
+ */
+export const V3_COVER_NAMESPACE = "fp-v3-cover";
+
+export const V3_COVER_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 30 };
+
+/* ─────────────── New User Flow v3 handoff exchange (v3 Unit 5) ──────────── */
+
+/**
+ * `POST /api/fp/handoff/exchange` — the CROSS-ORIGIN, UNAUTHENTICATED door that
+ * turns a one-time code into a child's session. Its own namespace for the same
+ * reason `fp-login` has one: a flood here must never spend (or be spent by) the
+ * budget of any other surface, and the exchange is the only v3 bucket keyed on
+ * an anonymous caller.
+ *
+ * Recorded on the ATTESTED CLIENT IP, BEFORE any work — the login route's
+ * ordering. At that point the request carries nothing but a code, so there is no
+ * identity to key on, and the limiter is what bounds a code-guessing flood
+ * before a single DB round trip.
+ *
+ * ⚠ VOLUMETRIC ONLY, like every bucket here (in-memory, per-instance, empty on
+ * cold start). Nothing security-load-bearing rests on it: the code is >=128 bits
+ * of CSPRNG, stored only as sha256, single-use by a CAS, and dead after 120
+ * seconds. Guessing it is not a thing this limit is holding back — it is holding
+ * back VOLUME.
+ *
+ * Sized for the real caller: one exchange per handoff, plus a retry or two if a
+ * tab is reloaded. A family device behind one NAT signing several kids in one
+ * after another stays far inside 20/15min.
+ */
+export const V3_HANDOFF_NAMESPACE = "fp-v3-handoff";
+
+export const V3_HANDOFF_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 20 };
+
+/* ────────── New User Flow v3 per-kid credentials recovery (v3 Unit 8) ────── */
+
+/**
+ * The dashboard's per-kid "set a new password" action, and the legacy-consent
+ * capture/revocation that sit beside it. Keyed on the PARENT ID from the cookie
+ * session — the caller is authenticated by construction, so the IP is the wrong
+ * unit, and the parent is the account whose looping this bounds.
+ *
+ * Its OWN namespace rather than sharing `fp-v3-onboarding`: a family hammering
+ * the recovery form (a kid who keeps forgetting, a parent retrying a flaky
+ * network) must not spend the budget that lets them add another child, and vice
+ * versa. Sized generously — this is a form a parent uses a handful of times a
+ * year, and every refusal here is a real family locked out of helping their kid
+ * log in.
+ *
+ * ⚠ VOLUMETRIC ONLY. Nothing security-load-bearing rests on it: the action
+ * refuses any child the caller does not own via a WHERE-clause predicate, so
+ * there is no enumeration to slow down — only volume.
+ */
+export const V3_KID_RESET_NAMESPACE = "fp-v3-kid-reset";
+
+export const V3_KID_RESET_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 20 };
+
 /** Events still inside the window (future-stamped ones included). Non-mutating. */
 export function pruneEvents(events: readonly number[], now: number, windowMs: number): number[] {
   return events.filter((t) => now - t < windowMs);

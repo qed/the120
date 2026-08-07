@@ -25,6 +25,12 @@ export default defineConfig({
       // commit as the first scripts/ test so the allowlist tripwire
       // (app/lib/__tests__/vitest-include-coverage.test.ts) stays green.
       "scripts/**/__tests__/**/*.test.{ts,tsx}",
+      // NOT listed, deliberately: `archive/**` (the retired new-user v2 flow,
+      // v3 plan Unit 9). It is excluded from tsconfig and eslint too. No test
+      // file moved into it — the v2 pinning tests were dispositioned rather
+      // than archived — so the include-coverage tripwire stays green WITHOUT
+      // an ignore entry, and if someone ever does archive a test file the
+      // tripwire reddening is the correct signal, not a nuisance.
     ],
   },
   resolve: {

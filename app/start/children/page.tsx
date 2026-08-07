@@ -1,45 +1,15 @@
-import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { listChildrenCore } from "@/app/lib/funnel/children-core";
-import { ChildrenFlow } from "./ChildrenFlow";
+import { V2_DEEP_ROUTE_TARGET } from "@/app/lib/v3-signup/v2-deep-routes";
 
 /**
- * `/start/children` — Add a Child (funnel U7; R31, R32).
+ * A RETIRED v2 DEEP ROUTE (plan Unit 9, R17). The flow that lived here is in
+ * `archive/new-user-v2/`; this file exists only so a bookmark or a sent email
+ * does not 404. See app/lib/v3-signup/v2-deep-routes.ts for why the dashboard
+ * is the honest destination rather than a per-route guess.
  *
- * Guarded by the session, not by a hand-written scope check: `listChildrenCore`
- * reads under the family's own session and RLS returns their rows and only
- * theirs. An unauthenticated visitor has nothing to add a child TO — the
- * `children.parent_id` FK is the whole reason Decision 2 exists — so they go
- * back to capture.
+ * `redirect()` is at the top level and outside any try — a caught NEXT_REDIRECT
+ * reports failure on success, which this repo has shipped once.
  */
-
-export const dynamic = "force-dynamic";
-
-export const metadata: Metadata = {
-  title: "Add your child — The 120",
-};
-
-export default async function ChildrenPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const listed = await listChildrenCore();
-
-  // Outside any try: redirect() signals by throwing.
-  if (listed.kind === "unauthenticated") redirect("/start");
-
-  // The `?g=` hint, still riding (R36). This route is force-dynamic, so the
-  // read costs nothing; the grid forwards it into the mini-app for the first
-  // child only.
-  const params = await searchParams;
-  const g = params.g;
-
-  return (
-    <ChildrenFlow
-      initialChildren={listed.kind === "ok" ? listed.children : []}
-      loadFailed={listed.kind === "failed"}
-      hintSlug={(Array.isArray(g) ? g[0] : g) ?? null}
-    />
-  );
+export default async function RetiredV2Route() {
+  redirect(V2_DEEP_ROUTE_TARGET);
 }

@@ -17,6 +17,10 @@
       "schedule": "35 13 * * *"
     },
     {
+      "path": "/api/cron/v3-draft-reaper",
+      "schedule": "50 13 * * *"
+    },
+    {
       "path": "/api/cron/funnel-retention",
       "schedule": "0 9 * * 1"
     },

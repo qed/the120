@@ -1,10 +1,23 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  dashboardGateVerdict,
+  dashboardRegister,
+} from "@/app/lib/funnel/session-rules";
+import {
   loadDashboardGateFactsCore,
   type DashboardGateChildRow,
   type DashboardGateDeps,
 } from "@/app/lib/funnel/dashboard-gate-core";
+import type { RemapContext } from "@/app/lib/v3-signup/remap-rules";
+
+/** The all-false remap context every fail-open shape carries: no session or no
+ *  roster means no override, and those shapes render the dashboard anyway. */
+const NO_REMAP_CTX: RemapContext = {
+  funnelStamped: false,
+  passwordChosen: false,
+  hasFpChild: false,
+};
 
 /**
  * The dashboard gate's data loading, by EXECUTION through the injectable
@@ -22,6 +35,7 @@ const row = (over: Partial<DashboardGateChildRow> = {}): DashboardGateChildRow =
   created_at: "2026-07-01T00:00:00Z",
   status: "draft",
   arrived_at: null,
+  fp_username: null,
   ...over,
 });
 
@@ -35,10 +49,13 @@ function fakeDeps(opts: {
   /** null = the counts read failed; undefined = empty map. */
   verifiedCounts?: Record<string, number> | null;
   countsThrow?: boolean;
+  /** null = the consent read failed; undefined = nobody has consented. */
+  consentChildIds?: string[] | null;
 }) {
   const calls: string[] = [];
   const projectQueries: string[][] = [];
   const countQueries: string[][] = [];
+  const consentQueries: string[][] = [];
   const deps: DashboardGateDeps = {
     getUser: async () => {
       calls.push("getUser");
@@ -64,8 +81,14 @@ function fakeDeps(opts: {
       if (opts.verifiedCounts === null) return null;
       return new Map(Object.entries(opts.verifiedCounts ?? {}));
     },
+    loadPhotoConsentChildIds: async (childIds) => {
+      calls.push("loadPhotoConsentChildIds");
+      consentQueries.push([...childIds]);
+      if (opts.consentChildIds === null) return null;
+      return new Set(opts.consentChildIds ?? []);
+    },
   };
-  return { deps, calls, projectQueries, countQueries };
+  return { deps, calls, projectQueries, countQueries, consentQueries };
 }
 
 describe("loadDashboardGateFactsCore — the fail-open shapes", () => {
@@ -76,6 +99,8 @@ describe("loadDashboardGateFactsCore — the fail-open shapes", () => {
       hasPassword: false,
       children: null,
       verifiedTaskCounts: null,
+      photoConsentChildIds: null,
+      remapCtx: NO_REMAP_CTX,
     });
     expect(calls).toEqual(["getUser"]);
   });
@@ -87,6 +112,8 @@ describe("loadDashboardGateFactsCore — the fail-open shapes", () => {
       hasPassword: false,
       children: null,
       verifiedTaskCounts: null,
+      photoConsentChildIds: null,
+      remapCtx: NO_REMAP_CTX,
     });
   });
 
@@ -97,6 +124,8 @@ describe("loadDashboardGateFactsCore — the fail-open shapes", () => {
       hasPassword: false,
       children: null,
       verifiedTaskCounts: null,
+      photoConsentChildIds: null,
+      remapCtx: NO_REMAP_CTX,
     });
   });
 
@@ -112,6 +141,8 @@ describe("loadDashboardGateFactsCore — the fail-open shapes", () => {
       hasPassword: false,
       children: null,
       verifiedTaskCounts: null,
+      photoConsentChildIds: null,
+      remapCtx: NO_REMAP_CTX,
     });
   });
 });
@@ -136,7 +167,7 @@ describe("loadDashboardGateFactsCore — the owingIds filter", () => {
       childRows: [row({ id: "a", applicant_state: "added" }), row({ id: "b", applicant_state: "submitted" })],
     });
     const facts = await loadDashboardGateFactsCore(deps);
-    expect(calls).toEqual(["getUser", "loadChildRows"]);
+    expect(calls).toEqual(["getUser", "loadChildRows", "loadPhotoConsentChildIds"]);
     expect(facts.children?.map((c) => c.hasComposedProject)).toEqual([false, false]);
   });
 });
@@ -184,6 +215,8 @@ describe("loadDashboardGateFactsCore — the verified-count read (screen 16)", (
       hasPassword: false,
       children: null,
       verifiedTaskCounts: null,
+      photoConsentChildIds: null,
+      remapCtx: NO_REMAP_CTX,
     });
   });
 
@@ -220,6 +253,7 @@ describe("loadDashboardGateFactsCore — row mapping", () => {
         hasComposedProject: false,
         status: "member",
         arrivedAt: "2026-08-25T12:00:00Z",
+        fpUsername: null,
       },
     ]);
   });
@@ -252,6 +286,7 @@ describe("loadDashboardGateFactsCore — happy path", () => {
           hasComposedProject: true,
           status: "draft",
           arrivedAt: null,
+          fpUsername: null,
         },
         {
           id: "b",
@@ -260,9 +295,15 @@ describe("loadDashboardGateFactsCore — happy path", () => {
           hasComposedProject: false,
           status: "draft",
           arrivedAt: null,
+          fpUsername: null,
         },
       ],
       verifiedTaskCounts: null, // nobody arrived — the counts read never ran
+      photoConsentChildIds: [],
+      // v3 Unit 8 review (FIX 1): the remap override facts, derived ONCE here
+      // from this family's metadata + roster and handed to both destination
+      // producers the page drives (the gate's redirect and every card's CTA).
+      remapCtx: { funnelStamped: true, passwordChosen: false, hasFpChild: false },
     });
   });
 
@@ -273,5 +314,114 @@ describe("loadDashboardGateFactsCore — happy path", () => {
       hasPassword: true,
       children: [],
     });
+  });
+});
+
+/* ─────────────── v3 Unit 8: the FP discriminator through the gate ─────────────── */
+
+describe("loadDashboardGateFactsCore — the FP family (v3 Unit 8)", () => {
+  /** An FP child exactly as `createChild` writes it: entry rung, no arrival,
+   *  a claimed username. This is the shape v2 misread as "mid-application". */
+  const fpRow = (id = "a") =>
+    row({ id, applicant_state: "added", arrived_at: null, fp_username: "remi.newal" });
+
+  it("hasPassword is TRUE for a funnel-stamped parent with an FP child — the confirmed misroute, closed", async () => {
+    const { deps } = fakeDeps({
+      user: { id: "u1", appMetadata: FUNNEL_META },
+      childRows: [fpRow()],
+    });
+    const facts = await loadDashboardGateFactsCore(deps);
+    expect(facts.hasPassword).toBe(true);
+    expect(facts.children?.[0].fpUsername).toBe("remi.newal");
+  });
+
+  it("hasPassword stays FALSE for a GENUINE v2 funnel parent — the fix does not widen", async () => {
+    // Identical metadata, identical applicant state, identical (absent) arrival.
+    // The ONLY difference is `fp_username`, which has a single writer
+    // (service-role `createChild`, trigger-guarded), so a v2 funnel family can
+    // never hold one. They keep routing to sign-in / the resume door.
+    const { deps } = fakeDeps({
+      user: { id: "u1", appMetadata: FUNNEL_META },
+      childRows: [row({ id: "a", applicant_state: "added", fp_username: null })],
+    });
+    const facts = await loadDashboardGateFactsCore(deps);
+    expect(facts.hasPassword).toBe(false);
+  });
+
+  it("an empty-string fp_username does not count as an account", async () => {
+    const { deps } = fakeDeps({
+      user: { id: "u1", appMetadata: FUNNEL_META },
+      childRows: [row({ id: "a", fp_username: "" })],
+    });
+    await expect(loadDashboardGateFactsCore(deps)).resolves.toMatchObject({ hasPassword: false });
+  });
+
+  it("verifiedTaskCounts LOAD for an FP-only family — no permanent 0 floor", async () => {
+    // The coupled-predicate regression. FP children never arrive through the
+    // funnel, so before Unit 8 the counts read was skipped for exactly the
+    // families whose bars the path register exists to show.
+    const { deps, calls, countQueries } = fakeDeps({
+      user: { id: "u1", appMetadata: FUNNEL_META },
+      childRows: [fpRow("a"), fpRow("b")],
+      verifiedCounts: { a: 12 },
+    });
+    const facts = await loadDashboardGateFactsCore(deps);
+    expect(calls).toContain("loadVerifiedTaskCounts");
+    expect(countQueries).toEqual([["a", "b"]]);
+    expect(facts.verifiedTaskCounts).toEqual({ a: 12 });
+  });
+
+  it("the register and the counts load move TOGETHER (the coupled predicate)", async () => {
+    // Asserted as a pair on purpose: widening one alone is the specific defect
+    // — a v3 family in the path register with a hard-coded 0 on every bar.
+    for (const [rows, expected] of [
+      [[fpRow("a")], "path"],
+      [[row({ id: "a", arrived_at: "2026-08-25T12:00:00Z" })], "path"],
+      [[row({ id: "a" })], "application"],
+    ] as const) {
+      const { deps, calls } = fakeDeps({ childRows: [...rows], verifiedCounts: {} });
+      const facts = await loadDashboardGateFactsCore(deps);
+      expect(dashboardRegister(facts.children)).toBe(expected);
+      expect(calls.includes("loadVerifiedTaskCounts")).toBe(expected === "path");
+    }
+  });
+
+  it("a MIXED family (one v2 applicant kid + one FP kid) is a password family in the path register", async () => {
+    const { deps } = fakeDeps({
+      user: { id: "u1", appMetadata: FUNNEL_META },
+      childRows: [
+        row({ id: "v2", applicant_state: "added", fp_username: null }),
+        fpRow("fp"),
+      ],
+      verifiedCounts: { fp: 3 },
+    });
+    const facts = await loadDashboardGateFactsCore(deps);
+    expect(facts.hasPassword).toBe(true);
+    expect(dashboardRegister(facts.children)).toBe("path");
+    // The gate renders rather than bouncing the family into the v2 mini-app on
+    // account of the v2 kid — and BOTH children survive to the cards, each
+    // carrying its own discriminator.
+    expect(dashboardGateVerdict({ ...facts, stay: false })).toEqual({ action: "render" });
+    expect(facts.children?.map((c) => c.fpUsername)).toEqual([null, "remi.newal"]);
+  });
+});
+
+describe("loadDashboardGateFactsCore — the photo-consent read (v3 Unit 8)", () => {
+  it("asks about every child and passes the open set through as a plain array", async () => {
+    const { deps, consentQueries } = fakeDeps({
+      childRows: [row({ id: "a" }), row({ id: "b" })],
+      consentChildIds: ["b"],
+    });
+    const facts = await loadDashboardGateFactsCore(deps);
+    expect(consentQueries).toEqual([["a", "b"]]);
+    expect(facts.photoConsentChildIds).toEqual(["b"]);
+  });
+
+  it("a failed consent read arrives as null — the panel then offers NEITHER affordance", async () => {
+    const { deps } = fakeDeps({ childRows: [row({ id: "a" })], consentChildIds: null });
+    const facts = await loadDashboardGateFactsCore(deps);
+    expect(facts.photoConsentChildIds).toBeNull();
+    // …and it never fails the gate: the dashboard still renders.
+    expect(facts.children).toHaveLength(1);
   });
 });

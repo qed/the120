@@ -8,7 +8,6 @@ import {
   FUNNEL_STAGES,
   STAGE_EVENT_NAMES,
   STAGE_FOR_EVENT,
-  isFunnelEventName,
   sanitizeEventProperties,
   stageFromEvents,
 } from "@/app/lib/funnel/event-rules";
@@ -79,8 +78,10 @@ describe("the no-PII rule (R56), executable", () => {
       "app/lib/funnel/actions/events.ts",
       "app/api/notify-submission/route.ts",
       "app/api/stripe/webhook/route.ts",
+      // v3 Unit 9: this is the V3 front door now (the v2 page it replaced is in
+      // `archive/new-user-v2/page.tsx`). Same path, different file — the
+      // retarget the funnel-analytics-parity decision called for.
       "app/start/page.tsx",
-      "app/start/child/[childId]/page.tsx",
     ].map(read);
     for (const src of sources) {
       expect(src).not.toMatch(/emitFunnelEvent\([^)]*first_?[nN]ame/);
@@ -140,9 +141,17 @@ describe("the emit points exist (wiring scans — server-side only, R56)", () =>
     ["app/lib/funnel/actions/events.ts", '"share_card_created"'],
     ["app/api/notify-submission/route.ts", '"c2_applied"'],
     ["app/api/stripe/webhook/route.ts", '"c3_deposit"'],
+    // RETARGETED, not retired (v3 Unit 9 + the plan's funnel-analytics-parity
+    // decision): `start_view` still emits from `app/start/page.tsx`, which is
+    // now the v3 flow's page. Unit 3 shipped the emission there deliberately so
+    // conversion measurement is continuous across the swap — the pin did not
+    // have to move at all, only its subject did.
     ["app/start/page.tsx", '"start_view"'],
-    ["app/start/child/[childId]/page.tsx", '"quiz_start"'],
-    ["app/start/child/[childId]/page.tsx", '"reveal_viewed"'],
+    // RETIRED with the v2 mini-app: `quiz_start` and `reveal_viewed` were
+    // per-render emissions of `/start/child/[childId]`, now in
+    // `archive/new-user-v2/`. The event NAMES stay in the vocabulary (the
+    // migration's CHECK and every row already written still carry them); what
+    // is gone is the surface that emitted them. v3 has no quiz and no reveal.
   ];
   for (const [file, marker] of POINTS) {
     it(`${marker} emits from ${file}`, () => {
@@ -154,9 +163,9 @@ describe("the emit points exist (wiring scans — server-side only, R56)", () =>
     const src = read("app/lib/funnel/actions/miniapp.ts");
     expect(src).toContain("preselected");
     expect(src).toContain("switched_from");
-    // And the shell supplies the outcome from the doors model.
-    const shell = read("app/start/child/[childId]/MiniAppShell.tsx");
-    expect(shell).toContain("doorConfirmOutcome(selected, doors)");
+    // The shell half of this pin (MiniAppShell supplying the outcome from the
+    // doors model) retired with the v2 flow — the action is what survives, and
+    // it is the side that writes the event.
   });
 
   it("c3_deposit emits only for a WRITTEN fulfilment — replays never double-count the conversion", () => {
@@ -167,40 +176,51 @@ describe("the emit points exist (wiring scans — server-side only, R56)", () =>
   });
 
   it("no client-side emit exists: emitFunnelEvent is imported only by server files", () => {
-    // The emitter is server-only; the two client-reachable events go
-    // through session-gated server actions.
-    const shell = read("app/start/child/[childId]/MiniAppShell.tsx");
-    expect(shell).not.toContain('from "@/app/lib/funnel/events"');
-    expect(shell).toContain("emitFaqOpenedAction");
-    // 2026-07-30: the download-card button (the share_card emitter's only
-    // call site) is retired from the reveal; the server action remains.
-    expect(shell).not.toContain("emitShareCardAction");
+    // The emitter is server-only. Asserted over the LIVE client tree rather
+    // than over the one v2 shell that used to be its only risk — after the
+    // archive, `app/start` is a client flow again and this is the sweep that
+    // keeps it honest.
+    for (const f of [
+      "app/start/V3Flow.tsx",
+      "app/start/StepParent.tsx",
+      "app/start/StepAddKid.tsx",
+      "app/start/StepCover.tsx",
+      "app/start/StepStory.tsx",
+      "app/start/StepAccountReady.tsx",
+      "app/dashboard/DashboardApp.tsx",
+    ]) {
+      expect(read(f), f).not.toContain('from "@/app/lib/funnel/events"');
+    }
+    // And the emitter still runs from the SERVER page of the same route.
+    expect(read("app/start/page.tsx")).toContain('from "@/app/lib/funnel/events"');
   });
 });
 
-describe("locked walks emit NOTHING (unified-flow U6 — owned by that unit)", () => {
-  // Read-only review traffic must not pollute funnel metrics: the per-render
-  // emissions (quiz_start, reveal_viewed) sit behind the DUAL lock verdict
-  // (mergedLockVerdict — funnel edit horizon OR legacy status lock).
-  // Telemetry inherits the trust boundary: the emit carries every gate the
-  // walk itself has (the 2026-07-28 learning).
-  const page = read("app/start/child/[childId]/page.tsx");
+/* RETIRED (v3 Unit 9): "locked walks emit NOTHING". It pinned the dual-lock
+ * guard around the v2 mini-app page's two per-render emissions (`quiz_start`,
+ * `reveal_viewed`). Page, guard and emissions all moved to
+ * `archive/new-user-v2/child/[childId]/page.tsx` together — there is no live
+ * per-render emission left to guard. The rule it encoded (telemetry inherits
+ * every gate the surface has) survives as the reason the v3 page's ONE
+ * emission is discussed in its own docblock. */
 
-  it("the page computes the dual verdict and guards BOTH per-render emissions with it", () => {
-    expect(page).toContain("const walkLocked = mergedLockVerdict(facts)");
-    const guard = page.match(/if \(!walkLocked\) \{([\s\S]*?)\n  \}/);
-    expect(guard).not.toBeNull();
-    expect(guard![1]).toContain('emitFunnelEvent("quiz_start"');
-    expect(guard![1]).toContain('emitFunnelEvent("reveal_viewed"');
+describe("the v3 front door's single emission (v3 Unit 9)", () => {
+  const page = read("app/start/page.tsx");
+
+  it("emits start_view exactly once, and emits nothing else", () => {
+    expect((page.match(/emitFunnelEvent\("start_view"/g) ?? []).length).toBe(1);
+    expect((page.match(/emitFunnelEvent\(/g) ?? []).length).toBe(1);
   });
 
-  it("no per-render emission exists OUTSIDE the guard — locked walks emit zero events", () => {
-    // Exactly one call site per event name, and both sit inside the guarded
-    // block asserted above — a second, unguarded emit would break the count.
-    expect((page.match(/emitFunnelEvent\("quiz_start"/g) ?? []).length).toBe(1);
-    expect((page.match(/emitFunnelEvent\("reveal_viewed"/g) ?? []).length).toBe(1);
-    // And no other emitFunnelEvent call exists in the page at all.
-    expect((page.match(/emitFunnelEvent\(/g) ?? []).length).toBe(2);
+  it("emits BEFORE the session read — every landing is in the denominator", () => {
+    // Deliberate, and stated in the page. The go-live gate this pin
+    // originally guarded was removed by owner decision, but the property it
+    // protected outlived it: the emit must sit above EVERYTHING conditional in
+    // the render, so an auth outage or a signed-out visitor cannot quietly drop
+    // visits out of the conversion denominator.
+    expect(page.indexOf('emitFunnelEvent("start_view"')).toBeLessThan(
+      page.indexOf("supabaseServer()")
+    );
   });
 });
 
@@ -234,9 +254,9 @@ describe("the review-driven pins (U16)", () => {
     const src = read("app/lib/funnel/actions/miniapp.ts");
     expect(src).toContain("result.previousSlug !== result.slug");
     expect(src).toContain("switched_from: result.previousSlug");
-    // The client no longer supplies switched_from at all.
-    const shell = read("app/start/child/[childId]/MiniAppShell.tsx");
-    expect(shell).not.toContain("switchedFrom: outcome.switchedFrom");
+    // The client half of this pin (the v2 shell no longer supplying
+    // switched_from) retired with that shell; the server derivation asserted
+    // above is what actually carries the guarantee.
   });
 
   it("entry_source reaches the tuple only through readCtaSource — start_view and c1_captured both", () => {

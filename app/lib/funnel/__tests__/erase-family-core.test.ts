@@ -4,10 +4,12 @@ import {
   CHILD_LEAF_DELETE_ORDER,
   ERASURE_PRESERVED_TABLES,
   FAMILY_EVIDENCE_DELETE_ORDER,
+  PARENT_SCOPED_DELETE_ORDER,
   RELEASED_CLAIM_PII_COLUMNS,
   RELEASED_CLAIM_PRESERVED_COLUMN,
   dedupeAuthUserIds,
   hasWorkspaceMailbox,
+  planSubjectBlobDeletes,
 } from "../erase-family-rules";
 
 /**
@@ -50,16 +52,55 @@ function makeDb(seed: Tables, opts: { selectFaultTable?: string } = {}) {
           return { data: null, error: { message: `23503: children ${cid} still referenced` } };
         }
       }
+      // The Path student graph (path_notification_sends/events, task progress,
+      // ...) is student_id -> path_student_profiles ON DELETE RESTRICT. Modeled
+      // so the suite cannot pin an ordering production refuses: an ACTIVE
+      // child's profile delete must 23503 and strand fail-safe (the documented
+      // posture until the drain unit lands).
+      if (table === "path_student_profiles") {
+        const sid = r.id;
+        if (
+          (t.path_notification_sends ?? []).some((x) => x.student_id === sid) ||
+          (t.path_notification_events ?? []).some((x) => x.student_id === sid) ||
+          (t.path_task_events ?? []).some((x) => x.student_id === sid)
+        ) {
+          return { data: null, error: { message: `23503: path_student_profiles ${sid} still referenced` } };
+        }
+      }
     }
     // Apply the delete.
     t[table] = rows.filter((r) => !matches(r, filters));
     deleteLog.push(`${table}(${doomed.length})`);
+    // Image Lab: `fp_image_lab_images.run_id -> fp_image_lab_runs ON DELETE
+    // CASCADE` (so the purge deletes runs and the image rows go with them), and
+    // `iterated_from_run_id -> fp_image_lab_runs ON DELETE SET NULL` (which is
+    // why the lineage MUST be walked before anything is deleted).
+    if (table === "fp_image_lab_runs") {
+      const gone = new Set(doomed.map((r) => r.id));
+      t.fp_image_lab_images = (t.fp_image_lab_images ?? []).filter((x) => !gone.has(x.run_id));
+      for (const r of t.fp_image_lab_runs ?? []) {
+        if (gone.has(r.iterated_from_run_id)) r.iterated_from_run_id = null;
+      }
+    }
     // children side effects: deposits CASCADE; consent/attempts SET NULL; the
     // provisioning claim SET NULL + the released trigger (row SURVIVES).
     if (table === "children") {
       for (const r of doomed) {
         const cid = r.id;
         t.deposits = (t.deposits ?? []).filter((x) => x.child_id !== cid);
+        // v3: fp_handoff_codes.child_id -> children ON DELETE CASCADE.
+        t.fp_handoff_codes = (t.fp_handoff_codes ?? []).filter((x) => x.child_id !== cid);
+        // v3: fp_onboarding_drafts.child_id -> children ON DELETE **SET NULL**.
+        // Modeled precisely because it is the ordering hazard: a draft deleted
+        // AFTER the roster row can no longer be found by child_id, so a test
+        // that asserts the draft is gone is really asserting the order.
+        for (const d of t.fp_onboarding_drafts ?? []) if (d.child_id === cid) d.child_id = null;
+        // Image Lab: `fp_image_lab_runs.source_child_id -> children ON DELETE SET
+        // NULL`. Modeled precisely because it is the SAME ordering hazard as the
+        // drafts: a run purged AFTER the roster row can no longer be found by
+        // child at all, so a test that asserts the run is gone is really
+        // asserting the order.
+        for (const r of t.fp_image_lab_runs ?? []) if (r.source_child_id === cid) r.source_child_id = null;
         for (const c of t.fp_parental_consent ?? []) if (c.child_id === cid) c.child_id = null;
         for (const a of t.fp_signup_attempts ?? []) if (a.child_id === cid) a.child_id = null;
         // NOT cascade: the claim's child_id → children is ON DELETE SET NULL, and
@@ -139,6 +180,15 @@ function makeDb(seed: Tables, opts: { selectFaultTable?: string } = {}) {
   return { db, t, deleteLog };
 }
 
+/** Draft ids are real uuids because blob keys are NAMESPACED BY OWNER ID and the
+ *  ownership guard (`keyBelongsTo`) parses them — a fake id would make every
+ *  blob look "not owned" and the delete tests would prove the wrong thing. */
+const DRAFT_A = "11111111-2222-4333-8444-555555555555";
+const DRAFT_B = "22222222-3333-4444-8555-666666666666";
+const DRAFT_ORPHAN = "33333333-4444-4555-8666-777777777777";
+/** children ids used by the blob seeds (same reason). */
+const CHILD_UUID = "44444444-5555-4666-8777-888888888888";
+
 function seedFamily(): Tables {
   return {
     // path-a child (childA): one shared auth account authA (both profiles ref it)
@@ -182,6 +232,61 @@ function seedFamily(): Tables {
       { id: "a2", parent_id: "parentU", parent_email: "fam@test.the120.invalid", child_id: "childB" },
     ],
     deposits: [{ child_id: "childA", parent_id: "parentU" }],
+    // ── step 8b: the parent-keyed RESTRICT referrers of auth.users ──
+    // The verifier grant EVERY v3 parent holds (the row that stranded the first
+    // live erasure) plus one notification-send log line. Both must be swept or
+    // the fake's deleteAuthUser refuses the parent delete.
+    path_role_grants: [{ id: "g1", user_id: "parentU", role: "verifier" }],
+    path_notification_sends: [
+      { id: "n1", recipient_user_id: "parentU", kind: "path_weekly" },
+    ],
+    // ── New User Flow v3 ──
+    // Live one-time sign-in codes (CASCADE-backed, deleted explicitly).
+    fp_handoff_codes: [
+      { id: "h1", child_id: "childA", code_hash: "hashA" },
+      { id: "h2", child_id: "childB", code_hash: "hashB" },
+    ],
+    // The kid-first onboarding drafts: two carried to children, plus ONE
+    // ABANDONED draft (child_id null) reachable only by parent_id — the row the
+    // parent auth CASCADE would otherwise swallow silently.
+    fp_onboarding_drafts: [
+      {
+        id: DRAFT_A,
+        parent_id: "parentU",
+        child_id: "childA",
+        kid_first_name: "Ada",
+        kid_age: 9,
+        answers: { dream: "robots" },
+        cover_data_url: "data:image/svg+xml;base64,AAA",
+        photo_blob_key: null,
+        cover_blob_key: null,
+        status: "consumed",
+      },
+      {
+        id: DRAFT_B,
+        parent_id: "parentU",
+        child_id: "childB",
+        kid_first_name: "Bo",
+        kid_age: 11,
+        answers: { dream: "bakery" },
+        cover_data_url: "data:image/svg+xml;base64,BBB",
+        photo_blob_key: null,
+        cover_blob_key: null,
+        status: "consumed",
+      },
+      {
+        id: DRAFT_ORPHAN,
+        parent_id: "parentU",
+        child_id: null,
+        kid_first_name: "Cy",
+        kid_age: 7,
+        answers: { dream: "lemonade" },
+        cover_data_url: "data:image/svg+xml;base64,CCC",
+        photo_blob_key: null,
+        cover_blob_key: null,
+        status: "active",
+      },
+    ],
   };
 }
 
@@ -225,21 +330,73 @@ function makeDeps(
     workspaceConfigured?: boolean;
     authFails?: boolean;
     suspendResult?: "suspended" | "missing" | "error";
+    /** v3 blob port. Absent = no adapter configured (today's production shape). */
+    blobConfigured?: boolean;
+    /** Keys the fake store actually holds; anything else answers "missing". */
+    blobStore?: Set<string>;
+    /** Force every blob delete to report a store outage. */
+    blobFails?: boolean;
+    /** Force the adapter to THROW rather than answer (a rude SDK). */
+    blobThrows?: boolean;
+    /** Image Lab bucket contents; anything else answers "missing". */
+    imageLabStore?: Set<string>;
+    /** Force every Image Lab object delete to report a store outage. */
+    imageLabFails?: boolean;
   } = {}
 ) {
   const wsCalls: string[] = [];
   const deletedAuth: string[] = [];
+  const blobCalls: string[] = [];
+  const imageLabCalls: string[] = [];
   const deps: EraseFamilyDeps = {
     db: undefined as never, // filled by caller
     workspaceConfigured: opts.workspaceConfigured ?? true,
+    blobConfigured: opts.blobConfigured ?? false,
+    deleteBlob:
+      opts.blobConfigured === true
+        ? vi.fn(async (key: string) => {
+            blobCalls.push(key);
+            if (opts.blobThrows) throw new Error("blob store unreachable");
+            if (opts.blobFails) return "error" as const;
+            // Idempotent by contract: an absent object is a COMPLETED erasure.
+            if (!opts.blobStore || !opts.blobStore.has(key)) return "missing" as const;
+            opts.blobStore.delete(key);
+            return "deleted" as const;
+          })
+        : undefined,
+    // Unlike deleteBlob there is no "configured" flag: the Image Lab bucket is
+    // the same service-role client, so the dep is always present (fail-closed by
+    // type). Idempotent by contract — an absent object is a COMPLETED erasure.
+    deleteImageLabObject: vi.fn(async (key: string) => {
+      imageLabCalls.push(key);
+      if (opts.imageLabFails) return "error" as const;
+      if (!opts.imageLabStore || !opts.imageLabStore.has(key)) return "missing" as const;
+      opts.imageLabStore.delete(key);
+      return "deleted" as const;
+    }),
     deleteAuthUser: vi.fn(async (userId: string) => {
       if (opts.authFails) return { ok: false };
       if ((t.fp_player_profiles ?? []).some((x) => x.user_id === userId) || (t.path_student_profiles ?? []).some((x) => x.user_id === userId)) {
         return { ok: false }; // RESTRICT: a profile still references this account
       }
+      // The step-8b referrers, modeled with the SAME RESTRICT the live schema
+      // has (the first live erasure 23503'd on the verifier grant). A core that
+      // skips the sweep cannot delete the parent here — the fake proves the
+      // sweep, not just the counters.
+      if (
+        (t.path_role_grants ?? []).some((x) => x.user_id === userId) ||
+        (t.path_notification_sends ?? []).some((x) => x.recipient_user_id === userId)
+      ) {
+        return { ok: false }; // RESTRICT: a grant / send-log row still references it
+      }
       deletedAuth.push(userId);
       // parent cascade: remove parents row + SET NULL on consent/attempts parent_id
       t.parents = (t.parents ?? []).filter((p) => p.id !== userId);
+      // v3: fp_onboarding_drafts.parent_id -> auth.users ON DELETE CASCADE. The
+      // drafts vanish WITH THE ROW BUT NOT WITH THEIR BLOBS, which is exactly
+      // why the parent-scoped sweep must run BEFORE this. Modeled so a sweep
+      // that ran too late would silently "pass".
+      t.fp_onboarding_drafts = (t.fp_onboarding_drafts ?? []).filter((d) => d.parent_id !== userId);
       for (const c of t.fp_parental_consent ?? []) if (c.parent_id === userId) c.parent_id = null;
       for (const a of t.fp_signup_attempts ?? []) if (a.parent_id === userId) a.parent_id = null;
       return { ok: true };
@@ -254,7 +411,7 @@ function makeDeps(
     }),
     now: () => 0,
   };
-  return { deps, wsCalls, deletedAuth };
+  return { deps, wsCalls, deletedAuth, blobCalls, imageLabCalls };
 }
 
 describe("eraseFamily — full family, FK-safe order", () => {
@@ -282,9 +439,16 @@ describe("eraseFamily — full family, FK-safe order", () => {
       "fp_parental_consent",
       "fp_signup_attempts",
       "deposits",
+      // step 8b: without this sweep the fake's RESTRICT refuses the parent
+      // delete outright, so parentAccountDeleted above is the real proof; the
+      // emptiness check is the accounting.
+      "path_role_grants",
+      "path_notification_sends",
     ]) {
       expect(t[table], `${table} should be empty`).toHaveLength(0);
     }
+    expect(out.deleted.path_role_grants).toBe(1);
+    expect(out.deleted.path_notification_sends).toBe(1);
 
     // The provisioning claim SURVIVES (SET NULL + released, never cascaded away):
     // its local_part is preserved (never-reissue) while the PII is scrubbed.
@@ -316,6 +480,81 @@ describe("eraseFamily — full family, FK-safe order", () => {
     // Workspace suspend precedes delete for the path-b child, gated ON.
     expect(wsCalls).toEqual(["suspend:childb@the120.school", "delete:childb@the120.school"]);
     expect(out.workspace).toMatchObject({ suspended: 1, deleted: 1, skipped: 0 });
+  });
+
+  it("step 8b sweeps the parent-keyed RESTRICT referrers BEFORE the account delete (the first-live-erasure bug)", async () => {
+    const { db, t, deleteLog } = makeDb(seedFamily());
+    const { deps, deletedAuth } = makeDeps(t);
+    deps.db = db;
+
+    const out = await eraseFamily(deps, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+
+    // The parent really died — impossible without the sweep, because the fake's
+    // deleteAuthUser enforces the grant/send-log RESTRICT like production does.
+    expect(out.parentAccountDeleted).toBe(true);
+    expect(deletedAuth).toContain("parentU");
+    // And the order log shows the sweep landed before the account delete.
+    const grantAt = deleteLog.indexOf("path_role_grants(1)");
+    const sendsAt = deleteLog.indexOf("path_notification_sends(1)");
+    expect(grantAt).toBeGreaterThanOrEqual(0);
+    expect(sendsAt).toBeGreaterThanOrEqual(0);
+    const parentAt = out.order.findIndex((s) => s.startsWith("auth_users:parent"));
+    const grantOrderAt = out.order.findIndex((s) => s.startsWith("path_role_grants"));
+    expect(grantOrderAt).toBeGreaterThanOrEqual(0);
+    expect(grantOrderAt).toBeLessThan(parentAt);
+  });
+
+  it("a CHILD-SCOPED erasure leaves the parent's grant and mail history untouched", async () => {
+    const { db, t } = makeDb(seedFamily());
+    const { deps } = makeDeps(t);
+    deps.db = db;
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+      childIds: ["childA"],
+    });
+
+    expect(out.ok).toBe(true);
+    // The parent survives a child-scoped erasure — and so must their verifier
+    // grant (they still verify their OTHER kid's work) and their send log.
+    expect(t.path_role_grants).toHaveLength(1);
+    expect(t.path_notification_sends).toHaveLength(1);
+    expect(out.deleted.path_role_grants).toBe(0);
+    expect(out.deleted.path_notification_sends).toBe(0);
+  });
+
+  it("an ACTIVE child strands fail-safe AND the step-8b sweep does NOT run (the send log survives for the cron)", async () => {
+    // The documented pre-drain-unit posture: a child with Path-graph rows
+    // (here: a notification send about them, still derivable from a surviving
+    // task event) cannot be erased yet — step 4 23503s, the child strands, and
+    // CRUCIALLY the parent's grant + send log survive too. Sweeping the send
+    // log while the derivation inputs survive would let the cron's reconcile
+    // pass re-insert it and RE-EMAIL the erasure-requesting parent (ADV-3).
+    const seed = seedFamily();
+    seed.path_task_events = [{ id: "e1", student_id: "pspA", kind: "submitted" }];
+    seed.path_notification_sends.push({
+      id: "n2",
+      recipient_user_id: "parentU",
+      student_id: "pspA",
+      kind: "submitted",
+    });
+    const { db, t } = makeDb(seed);
+    const { deps, deletedAuth } = makeDeps(t);
+    deps.db = db;
+
+    const out = await eraseFamily(deps, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+
+    expect(out.ok).toBe(false);
+    // childA stranded on the RESTRICT-blocked profile delete; anchor preserved.
+    expect((t.children as { id: string }[]).map((c) => c.id)).toContain("childA");
+    // The parent delete deferred — and the sweep did not run: grant + BOTH send
+    // rows survive, so the pipeline's idempotency record is intact.
+    expect(deletedAuth).not.toContain("parentU");
+    expect(t.path_role_grants).toHaveLength(1);
+    expect(t.path_notification_sends).toHaveLength(2);
+    expect(out.deleted.path_role_grants).toBe(0);
+    expect(out.deleted.path_notification_sends).toBe(0);
   });
 
   it("RESTRICT never blocks (order is correct) — no stranded rows", async () => {
@@ -638,5 +877,583 @@ describe("eraseFamily — fp_public_sites dies FIRST (real-public-site Unit 2)",
     expect(second.ok).toBe(true);
     expect(second.deleted.fp_public_sites).toBe(0);
     expect(second.stranded).toHaveLength(0);
+  });
+});
+
+/* ══════════════════════ New User Flow v3 (2026-08-06) ══════════════════════ */
+
+describe("eraseFamily — v3 onboarding drafts + handoff codes", () => {
+  it("removes every draft and handoff code, and removes the drafts BEFORE the roster row (SET NULL proves the order)", async () => {
+    const { db, t, deleteLog } = makeDb(seedFamily());
+    const { deps } = makeDeps(t);
+    deps.db = db;
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(true);
+    expect(out.stranded).toEqual([]);
+    // Nothing of the kid-first flow survives: the two carried drafts, the
+    // abandoned one, and both sign-in codes.
+    expect(t.fp_onboarding_drafts).toHaveLength(0);
+    expect(t.fp_handoff_codes).toHaveLength(0);
+    expect(out.deleted.fp_onboarding_drafts).toBe(3);
+    expect(out.deleted.fp_handoff_codes).toBe(2);
+
+    // ORDER. The fake models child_id -> children as ON DELETE SET NULL, so a
+    // draft deleted after its children row could no longer be matched by
+    // child_id and WOULD SURVIVE. Empty above already proves it; assert the log
+    // too so a regression names itself.
+    const draftAt = deleteLog.findIndex((d) => d.startsWith("fp_onboarding_drafts("));
+    const codesAt = deleteLog.findIndex((d) => d.startsWith("fp_handoff_codes("));
+    const childrenAt = deleteLog.findIndex((d) => d.startsWith("children("));
+    expect(draftAt).toBeGreaterThanOrEqual(0);
+    expect(draftAt).toBeLessThan(childrenAt);
+    expect(codesAt).toBeLessThan(childrenAt);
+  });
+
+  it("sweeps the ABANDONED (child_id null) draft before the parent cascade could swallow it", async () => {
+    const { db, t, deleteLog } = makeDb(seedFamily());
+    const { deps } = makeDeps(t);
+    deps.db = db;
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(true);
+    // The parent-scoped sweep is a real delete in the log, not a cascade: the
+    // fake's deleteAuthUser CASCADEs drafts away, so a sweep that ran late would
+    // leave `fp_onboarding_drafts` empty too but WITHOUT this delete entry (and
+    // without its blobs deleted).
+    const parentSweepAt = deleteLog.lastIndexOf("fp_onboarding_drafts(1)");
+    expect(parentSweepAt).toBeGreaterThanOrEqual(0);
+    expect(out.parentAccountDeleted).toBe(true);
+    expect(PARENT_SCOPED_DELETE_ORDER).toContain("fp_onboarding_drafts");
+  });
+
+  it("child-scoped erasure takes that child's draft + codes and LEAVES the parent's other rows", async () => {
+    const { db, t } = makeDb(seedFamily());
+    const { deps } = makeDeps(t);
+    deps.db = db;
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+      childIds: ["childA"],
+    });
+
+    expect(out.ok).toBe(true);
+    expect(out.deleted.fp_onboarding_drafts).toBe(1);
+    expect(out.deleted.fp_handoff_codes).toBe(1);
+    // childB's draft and the parent's abandoned draft survive — the parent is
+    // still a live account and those rows are not this run's business.
+    expect((t.fp_onboarding_drafts as { id: string }[]).map((d) => d.id).sort()).toEqual(
+      [DRAFT_B, DRAFT_ORPHAN].sort()
+    );
+    expect((t.fp_handoff_codes as { id: string }[]).map((h) => h.id)).toEqual(["h2"]);
+  });
+
+  it("is idempotent: a second run re-deletes nothing and stays clean", async () => {
+    const { db, t } = makeDb(seedFamily());
+    const { deps } = makeDeps(t);
+    deps.db = db;
+    await eraseFamily(deps, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+
+    const { deps: d2 } = makeDeps(t);
+    d2.db = db;
+    const second = await eraseFamily(d2, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+    expect(second.ok).toBe(true);
+    expect(second.deleted.fp_onboarding_drafts).toBe(0);
+    expect(second.deleted.fp_handoff_codes).toBe(0);
+    expect(second.blobs).toMatchObject({ deleted: 0, errored: 0, unconfigured: 0, refused: 0 });
+  });
+
+  it("END STATE: no row anywhere still holds the kid's name, age, story answers, cover bytes, or a handoff code", async () => {
+    const { db, t } = makeDb(seedFamily());
+    const { deps } = makeDeps(t);
+    deps.db = db;
+    await eraseFamily(deps, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+
+    // Sweep EVERY surviving row in EVERY table for any of the seeded personal
+    // values — a blunt instrument on purpose: it does not care which table a
+    // future migration puts the data in.
+    const needles = ["Ada", "Bo", "Cy", "robots", "bakery", "lemonade", "hashA", "hashB", "AAA", "BBB", "CCC"];
+    const survivors = JSON.stringify(t);
+    for (const needle of needles) {
+      expect(survivors.includes(needle), `"${needle}" still present after erasure`).toBe(false);
+    }
+    // And the ages / answers, wherever they might sit.
+    for (const table of Object.values(t)) {
+      for (const row of table) {
+        expect(row.kid_age ?? null).toBeNull();
+        expect(row.fp_kid_age ?? null).toBeNull();
+        expect(row.fp_story_answers ?? null).toBeNull();
+      }
+    }
+  });
+});
+
+describe("eraseFamily — external blob objects (the two-store erasure)", () => {
+  const draftCover = `fp/v3/drafts/${DRAFT_A}/cover-1.png`;
+  const draftPhoto = `fp/v3/drafts/${DRAFT_A}/photo.png`;
+  const childCover = `fp/v3/children/${CHILD_UUID}/cover-1.png`;
+
+  /** One path-a child that HAS blob-backed art (the shape the AI path will
+   *  produce; today every key is null). */
+  function seedWithBlobs(): Tables {
+    return {
+      children: [
+        { id: CHILD_UUID, parent_id: "parentU", fp_cover_blob_key: childCover, fp_cover_status: "final" },
+      ],
+      parents: [{ id: "parentU" }],
+      fp_player_profiles: [{ id: "pp1", user_id: "auth1", child_id: CHILD_UUID }],
+      fp_player_saves: [{ profile_id: "pp1" }],
+      fp_ledger: [],
+      path_student_profiles: [{ id: "psp1", user_id: "auth1", child_id: CHILD_UUID }],
+      funnel_student_provisioning: [],
+      fp_parental_consent: [],
+      fp_signup_attempts: [],
+      deposits: [],
+      fp_handoff_codes: [],
+      fp_onboarding_drafts: [
+        {
+          id: DRAFT_A,
+          parent_id: "parentU",
+          child_id: CHILD_UUID,
+          kid_first_name: "Ada",
+          photo_blob_key: draftPhoto,
+          cover_blob_key: draftCover,
+          cover_status: "final",
+        },
+      ],
+    };
+  }
+
+  it("deletes every object at the store, OBJECT BEFORE ROW, within the subject's own namespace", async () => {
+    const store = new Set([draftCover, draftPhoto, childCover]);
+    const { db, t, deleteLog } = makeDb(seedWithBlobs());
+    const { deps, blobCalls } = makeDeps(t, { blobConfigured: true, blobStore: store });
+    deps.db = db;
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(true);
+    expect(out.blobs).toMatchObject({ deleted: 3, missing: 0, errored: 0, refused: 0, unconfigured: 0 });
+    expect(store.size).toBe(0); // the bytes are actually gone
+    expect([...blobCalls].sort()).toEqual([childCover, draftCover, draftPhoto].sort());
+
+    // OBJECT BEFORE ROW: the draft's keys are deleted before the draft row.
+    // (Reversed, a crash between the two would leave bytes nothing points at —
+    // unreachable forever.)
+    const firstDraftBlob = out.order.findIndex((o) => o.startsWith("blob:deleted(draft:"));
+    const draftRowOp = out.order.findIndex((o) => o.startsWith("fp_onboarding_drafts:"));
+    expect(firstDraftBlob).toBeGreaterThanOrEqual(0);
+    expect(draftRowOp).toBeGreaterThan(firstDraftBlob);
+    expect(deleteLog.findIndex((d) => d.startsWith("fp_onboarding_drafts("))).toBeGreaterThanOrEqual(0);
+    expect(t.fp_onboarding_drafts).toHaveLength(0);
+    expect(t.children).toHaveLength(0);
+  });
+
+  it("a MISSING object is success, not a failure (already-deleted = erased)", async () => {
+    const { db, t } = makeDb(seedWithBlobs());
+    // Empty store: every key answers "missing".
+    const { deps } = makeDeps(t, { blobConfigured: true, blobStore: new Set() });
+    deps.db = db;
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(true);
+    expect(out.stranded).toEqual([]);
+    expect(out.blobs).toMatchObject({ deleted: 0, missing: 3, errored: 0 });
+    // Rows still removed — a missing object does not block the erasure.
+    expect(t.fp_onboarding_drafts).toHaveLength(0);
+    expect(t.children).toHaveLength(0);
+    expect(out.parentAccountDeleted).toBe(true);
+  });
+
+  it("a STORE OUTAGE is reported honestly: stranded, ok:false, and the rows that name the objects are PRESERVED", async () => {
+    const { db, t } = makeDb(seedWithBlobs());
+    const { deps } = makeDeps(t, { blobConfigured: true, blobFails: true });
+    deps.db = db;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(false);
+    expect(out.blobs.errored).toBeGreaterThan(0);
+    expect(out.stranded.some((s) => s.startsWith("blob:error:"))).toBe(true);
+    // The draft row SURVIVES: deleting it would make its objects unreachable.
+    expect(t.fp_onboarding_drafts).toHaveLength(1);
+    expect(out.deleted.fp_onboarding_drafts).toBe(0);
+    // The child anchor and the parent account survive too, so a re-run finishes.
+    expect(t.children).toHaveLength(1);
+    expect(out.parentAccountDeleted).toBe(false);
+    expect(errors.mock.calls.some((c) => String(c[0]).includes("blob delete failed"))).toBe(true);
+    errors.mockRestore();
+  });
+
+  it("a THROWING adapter is treated as an outage, never as success", async () => {
+    const { db, t } = makeDb(seedWithBlobs());
+    const { deps } = makeDeps(t, { blobConfigured: true, blobThrows: true });
+    deps.db = db;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+    expect(out.ok).toBe(false);
+    expect(out.blobs.errored).toBeGreaterThan(0);
+    expect(t.fp_onboarding_drafts).toHaveLength(1);
+    errors.mockRestore();
+  });
+
+  it("resumes to completion once the store recovers (run 1 strands, run 2 finishes)", async () => {
+    const store = new Set([draftCover, draftPhoto, childCover]);
+    // A path-b child, so run 2 can still resolve the auth account after run 1
+    // deleted the profile rows (the claim's supabase_user_id is the durable
+    // handle — the existing resumability contract, unchanged by the blob work).
+    const seed = seedWithBlobs();
+    seed.funnel_student_provisioning = [
+      {
+        id: "claim1",
+        child_id: CHILD_UUID,
+        email: "kid@the120.school",
+        workspace_attempted_email: "kid@the120.school",
+        local_part: "kid",
+        supabase_user_id: "auth1",
+        state: "complete",
+      },
+    ];
+    const { db, t } = makeDb(seed);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { deps: d1 } = makeDeps(t, { blobConfigured: true, blobFails: true });
+    d1.db = db;
+    const first = await eraseFamily(d1, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+    expect(first.ok).toBe(false);
+
+    const { deps: d2 } = makeDeps(t, { blobConfigured: true, blobStore: store });
+    d2.db = db;
+    const second = await eraseFamily(d2, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+    expect(second.ok).toBe(true);
+    expect(second.stranded).toEqual([]);
+    expect(store.size).toBe(0);
+    expect(t.fp_onboarding_drafts).toHaveLength(0);
+    expect(t.children).toHaveLength(0);
+    expect(second.parentAccountDeleted).toBe(true);
+    errors.mockRestore();
+  });
+
+  it("NO ADAPTER + a real key is STRANDED, never silently skipped (unlike the Workspace legs)", async () => {
+    const { db, t } = makeDb(seedWithBlobs());
+    const { deps } = makeDeps(t, { blobConfigured: false });
+    deps.db = db;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(false);
+    // 3 distinct objects (2 draft + 1 child). 5 attempts, because the draft row
+    // is deliberately PRESERVED by the per-child pass and the family-level
+    // parent-scoped sweep then re-reads and re-attempts the same two keys —
+    // idempotent, and it keeps the sweep unconditional rather than
+    // state-dependent.
+    expect(out.blobs.unconfigured).toBe(5);
+    expect(new Set(out.stranded.filter((s) => s.startsWith("blob:unconfigured:")).map((s) => s.split(":").pop())).size).toBe(3);
+    expect(out.stranded.some((s) => s.startsWith("blob:unconfigured:"))).toBe(true);
+    expect(t.fp_onboarding_drafts).toHaveLength(1); // rows kept for the re-run
+    expect(t.children).toHaveLength(1);
+    expect(errors.mock.calls.some((c) => String(c[0]).includes("no blob adapter"))).toBe(true);
+    errors.mockRestore();
+  });
+
+  it("NO ADAPTER and NO keys (today's production shape) is a clean, complete erasure", async () => {
+    // The shipped cover path is template-only: cover_data_url is written inline
+    // and every blob key is NULL. Nothing to delete, nothing to strand.
+    const { db, t } = makeDb(seedFamily());
+    const { deps } = makeDeps(t, { blobConfigured: false });
+    deps.db = db;
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+    expect(out.ok).toBe(true);
+    expect(out.blobs).toEqual({ deleted: 0, missing: 0, errored: 0, refused: 0, unconfigured: 0 });
+    expect(t.fp_onboarding_drafts).toHaveLength(0);
+  });
+
+  it("a key OUTSIDE the subject's namespace is refused, not deleted (never another child's art)", async () => {
+    const foreign = `fp/v3/children/${DRAFT_B}/cover-1.png`; // a DIFFERENT owner
+    const seed = seedWithBlobs();
+    (seed.children[0] as Record<string, unknown>).fp_cover_blob_key = foreign;
+    const store = new Set([foreign, draftCover, draftPhoto]);
+    const { db, t } = makeDb(seed);
+    const { deps } = makeDeps(t, { blobConfigured: true, blobStore: store });
+    deps.db = db;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.blobs.refused).toBe(1);
+    expect(store.has(foreign)).toBe(true); // NOT deleted
+    expect(out.ok).toBe(false);
+    expect(out.stranded.some((s) => s.startsWith("blob:not_owned:"))).toBe(true);
+    // The mis-keyed child's anchor is preserved for triage.
+    expect(t.children).toHaveLength(1);
+    errors.mockRestore();
+  });
+
+  it("a failed DRAFT READ strands rather than pretending there were no drafts", async () => {
+    const { db, t } = makeDb(seedWithBlobs(), { selectFaultTable: "fp_onboarding_drafts" });
+    const { deps } = makeDeps(t, { blobConfigured: true, blobStore: new Set() });
+    deps.db = db;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+    expect(out.ok).toBe(false);
+    expect(out.stranded.some((s) => s.startsWith("fp_onboarding_drafts:read:"))).toBe(true);
+    expect(t.fp_onboarding_drafts).toHaveLength(1);
+    expect(t.children).toHaveLength(1);
+    errors.mockRestore();
+  });
+});
+
+/* ───────────────────────── Image Lab purge (#140/#143) ──────────────────── */
+
+/**
+ * The Image Lab is the THIRD store a family erasure has to reach into, and the
+ * only one whose purge is a procedure rather than a delete. These fixtures put
+ * the two hazards the migration's runbook names on the table:
+ *
+ *   * a COPY-FORWARD DESCENDANT (`run2` iterated from `run1`) that carries the
+ *     same child's authored text but has no `source_child_id` of its own, and
+ *   * a run belonging to nobody in this family (`run3`), which must survive.
+ *
+ * Keys are `runs/{run_id}/{image_id}` — the deterministic scheme the migration
+ * pins — because the executor re-derives ownership from it.
+ */
+function seedWithImageLab(): Tables {
+  const t = seedFamily();
+  t.fp_image_lab_runs = [
+    { id: "run1", source_child_id: "childA", iterated_from_run_id: null, resolved_prompt: "Hi, I'm Ada…" },
+    // The descendant: no child link of its own, reachable ONLY by lineage.
+    { id: "run2", source_child_id: null, iterated_from_run_id: "run1", resolved_prompt: "Hi, I'm Ada…" },
+    // Somebody else's run entirely.
+    { id: "run3", source_child_id: null, iterated_from_run_id: null, resolved_prompt: "a synthetic pitch" },
+  ];
+  t.fp_image_lab_images = [
+    { id: "img1", run_id: "run1", state: "done", attempted_at: "t0", storage_key: "runs/run1/img1" },
+    { id: "img2", run_id: "run2", state: "done", attempted_at: "t0", storage_key: "runs/run2/img2" },
+    { id: "img3", run_id: "run3", state: "done", attempted_at: "t0", storage_key: "runs/run3/img3" },
+  ];
+  return t;
+}
+
+const LAB_KEYS = ["runs/run1/img1", "runs/run2/img2", "runs/run3/img3"];
+
+describe("eraseFamily — the Image Lab purge (source_child_id is SET NULL, so order is everything)", () => {
+  it("deletes the child's runs AND their copy-forward descendants, objects first, leaving other runs alone", async () => {
+    const store = new Set(LAB_KEYS);
+    const { db, t, deleteLog } = makeDb(seedWithImageLab());
+    const { deps, imageLabCalls } = makeDeps(t, { imageLabStore: store });
+    deps.db = db;
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(true);
+    // run1 (linked) and run2 (its descendant) are gone; run3 is untouched.
+    expect((t.fp_image_lab_runs ?? []).map((r) => r.id)).toEqual(["run3"]);
+    expect(out.deleted.fp_image_lab_runs).toBe(2);
+    // Their image rows CASCADEd; run3's survives.
+    expect((t.fp_image_lab_images ?? []).map((r) => r.id)).toEqual(["img3"]);
+    // And the BYTES are really gone from the bucket — the whole point.
+    expect(imageLabCalls.sort()).toEqual(["runs/run1/img1", "runs/run2/img2"]);
+    expect([...store]).toEqual(["runs/run3/img3"]);
+    expect(out.imageLab.objectsDeleted).toBe(2);
+
+    // ORDER: the purge must precede the `children` delete, or source_child_id is
+    // SET NULL and the run survives with its provenance erased.
+    expect(deleteLog.indexOf("fp_image_lab_runs(2)")).toBeGreaterThanOrEqual(0);
+    expect(deleteLog.indexOf("fp_image_lab_runs(2)")).toBeLessThan(deleteLog.indexOf("children(1)"));
+  });
+
+  it("an object the store could not delete PRESERVES every run row (the row is the only record of its key)", async () => {
+    const store = new Set(LAB_KEYS);
+    const { db, t } = makeDb(seedWithImageLab());
+    const { deps } = makeDeps(t, { imageLabStore: store, imageLabFails: true });
+    deps.db = db;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(false);
+    expect(out.imageLab.objectsErrored).toBeGreaterThan(0);
+    expect(out.stranded.some((s) => s.startsWith("image_lab:error:"))).toBe(true);
+    // Nothing deleted: rows AND objects both survive for the re-run.
+    expect((t.fp_image_lab_runs ?? [])).toHaveLength(3);
+    expect(out.deleted.fp_image_lab_runs).toBe(0);
+    expect([...store].sort()).toEqual([...LAB_KEYS].sort());
+    // The child anchor is preserved, so the re-run can still find the runs.
+    expect((t.children ?? []).some((c) => c.id === "childA")).toBe(true);
+    errors.mockRestore();
+  });
+
+  it("an IN-FLIGHT cell defers the whole child rather than erasing around bytes still landing", async () => {
+    const seed = seedWithImageLab();
+    // The descendant's cell is latched with a vendor call running: no
+    // storage_key yet, so its object would land AFTER a purge that ran now.
+    seed.fp_image_lab_images[1] = {
+      id: "img2",
+      run_id: "run2",
+      state: "requested",
+      attempted_at: "t0",
+      storage_key: null,
+    };
+    const store = new Set(["runs/run1/img1", "runs/run3/img3"]);
+    const { db, t } = makeDb(seed);
+    const { deps, imageLabCalls } = makeDeps(t, { imageLabStore: store });
+    deps.db = db;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(false);
+    expect(out.imageLab.deferredInFlight).toBe(1);
+    expect(out.stranded).toContain("fp_image_lab_runs:in_flight:childA");
+    // NOTHING was touched — not even the settled sibling's object, because the
+    // whole child is deferred to the re-run.
+    expect(imageLabCalls).toEqual([]);
+    expect((t.fp_image_lab_runs ?? [])).toHaveLength(3);
+    expect((t.children ?? []).some((c) => c.id === "childA")).toBe(true);
+    errors.mockRestore();
+  });
+
+  it("a key outside its own run's namespace is refused, never deleted", async () => {
+    const seed = seedWithImageLab();
+    seed.fp_image_lab_images[0].storage_key = "runs/run3/img1"; // wrong run
+    const store = new Set(["runs/run3/img1", "runs/run2/img2", "runs/run3/img3"]);
+    const { db, t } = makeDb(seed);
+    const { deps } = makeDeps(t, { imageLabStore: store });
+    deps.db = db;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(false);
+    expect(out.imageLab.objectsRefused).toBe(1);
+    expect(out.stranded.some((s) => s.startsWith("image_lab:not_owned:"))).toBe(true);
+    expect(store.has("runs/run3/img1")).toBe(true); // NOT deleted
+    expect((t.fp_image_lab_runs ?? [])).toHaveLength(3); // rows preserved
+    errors.mockRestore();
+  });
+
+  it("a failed run READ strands rather than concluding the child had no runs", async () => {
+    const { db, t } = makeDb(seedWithImageLab(), { selectFaultTable: "fp_image_lab_runs" });
+    const { deps } = makeDeps(t, { imageLabStore: new Set(LAB_KEYS) });
+    deps.db = db;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(false);
+    expect(out.stranded.some((s) => s.startsWith("fp_image_lab_runs:read:"))).toBe(true);
+    expect((t.fp_image_lab_runs ?? [])).toHaveLength(3);
+    expect((t.children ?? []).some((c) => c.id === "childA")).toBe(true);
+    errors.mockRestore();
+  });
+
+  it("costs one SELECT and nothing else when the child has no runs (production today)", async () => {
+    const { db, t } = makeDb(seedFamily()); // no fp_image_lab_* rows at all
+    const { deps, imageLabCalls } = makeDeps(t, {});
+    deps.db = db;
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(true);
+    expect(out.deleted.fp_image_lab_runs).toBe(0);
+    expect(imageLabCalls).toEqual([]);
+    expect(out.imageLab).toEqual({
+      objectsDeleted: 0,
+      objectsMissing: 0,
+      objectsErrored: 0,
+      objectsRefused: 0,
+      deferredInFlight: 0,
+    });
+  });
+});
+
+describe("planSubjectBlobDeletes (pure)", () => {
+  const id = "44444444-5555-4666-8777-888888888888";
+  it("drops blanks, collapses duplicates, and applies the namespace guard", () => {
+    const plan = planSubjectBlobDeletes({
+      scope: "child",
+      ownerId: id,
+      keys: [
+        null,
+        undefined,
+        "   ",
+        ` fp/v3/children/${id}/cover-1.png `,
+        `fp/v3/children/${id}/cover-1.png`,
+        `fp/v3/drafts/${id}/cover-1.png`, // right owner, WRONG scope
+        "some/other/thing.png",
+      ],
+    });
+    expect(plan.map((p) => p.key)).toEqual([
+      `fp/v3/children/${id}/cover-1.png`,
+      `fp/v3/drafts/${id}/cover-1.png`,
+      "some/other/thing.png",
+    ]);
+    expect(plan.map((p) => p.owned)).toEqual([true, false, false]);
+  });
+
+  it("is empty when a subject owns no objects (the shipped, template-only case)", () => {
+    expect(planSubjectBlobDeletes({ scope: "draft", ownerId: id, keys: [null, null] })).toEqual([]);
   });
 });

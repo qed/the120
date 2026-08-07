@@ -77,10 +77,12 @@ import {
   checkOrigin,
   classifyAuthError,
   classifyIdentifier,
+  deriveCoverSessionFields,
   deriveRateLimitKeys,
   extractClientIp,
   parseLoginRequest,
   shapeRefusal,
+  type FpSessionBody,
   type LoginRefusalReason,
 } from "./login-rules";
 import { resolveChildGrade } from "../grade/grade-rules";
@@ -213,7 +215,7 @@ export async function POST(req: Request): Promise<Response> {
     const res = await admin
       .from("path_student_profiles")
       .select(
-        "id, user_id, child_id, family_id, children!inner(first_name, fp_username, birth_year, grade)"
+        "id, user_id, child_id, family_id, children!inner(first_name, fp_username, birth_year, grade, fp_cover_status, fp_cover_blob_key, fp_cover_data_url)"
       )
       .order("created_at", { ascending: true });
     if (res.error) {
@@ -396,23 +398,37 @@ export async function POST(req: Request): Promise<Response> {
       // The account owner proved themselves; the (ip,name) strikes serve nothing
       // (the IP aggregate stands and ages out).
       clearRateLimitBucket(nameKey);
-      return new Response(
-        JSON.stringify({
-          access_token: session.access_token,
-          refresh_token: session.refresh_token,
-          profile: { handle: profile.handle, firstName: candidate.firstName },
-          // Derived AT READ TIME (Unit 3; R9): birth_year first (never stale
-          // across school years), stored children.grade as the fallback, null
-          // when neither. UNCLAMPED even outside 3-12 — display code decides
-          // banding (bandForGrade answers null outside the bands). NEVER
-          // logged, same rule as the credentials above.
-          grade: resolveChildGrade(
-            { birthYear: candidate.birthYear, storedGrade: candidate.grade },
-            new Date()
-          ),
+      // ⚠ THE SHARED SIGN-IN CONTRACT. `FpSessionBody` lives in ./login-rules
+      // and is the SAME type /api/fp/handoff/exchange returns — the FP client
+      // adopts both through one path, so the annotation (not a comment) is what
+      // stops the two doors drifting. Field ORDER here is observable output:
+      // do not reorder.
+      const body: FpSessionBody = {
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+        profile: { handle: profile.handle, firstName: candidate.firstName },
+        // Derived AT READ TIME (Unit 3; R9): birth_year first (never stale
+        // across school years), stored children.grade as the fallback, null
+        // when neither. UNCLAMPED even outside 3-12 — display code decides
+        // banding (bandForGrade answers null outside the bands). NEVER
+        // logged, same rule as the credentials above.
+        grade: resolveChildGrade(
+          { birthYear: candidate.birthYear, storedGrade: candidate.grade },
+          new Date()
+        ),
+        // The comic cover (v3 Unit 7; R12). SPREAD, so the keys are ABSENT —
+        // not null — for a child with no cover, which is every child
+        // provisioned before v3. This SERVES the one artifact stored on the
+        // child row at signup; it renders nothing. The same pure function runs
+        // on the same three columns in the handoff exchange, so the two doors
+        // cannot answer differently for one kid. NEVER logged.
+        ...deriveCoverSessionFields({
+          coverStatus: candidate.coverStatus,
+          coverBlobKey: candidate.coverBlobKey,
+          coverDataUrl: candidate.coverDataUrl,
         }),
-        { status: 200, headers }
-      );
+      };
+      return new Response(JSON.stringify(body), { status: 200, headers });
     }
 
     // Unknown username (empty candidate set, after its equalizing dummy auth

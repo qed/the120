@@ -42,6 +42,17 @@ import { randomBytes } from "node:crypto";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Compile-time exhaustiveness for the `startSignup` result switch below. A new
+ * arm on `StartSignupResult` that this route forgets to map becomes a TYPE
+ * error here rather than a silent fall-through into the success response. The
+ * runtime body is the safe answer for the impossible case.
+ */
+function assertNever(value: never): Response {
+  console.error(`[fp/signup] unmapped start result: ${JSON.stringify(value)}`);
+  return new Response(null, { status: 500, headers: { "Cache-Control": "no-store" } });
+}
+
 function corsJsonHeaders(origin: string): Record<string, string> {
   return {
     "Content-Type": "application/json; charset=utf-8",
@@ -165,6 +176,9 @@ export async function POST(req: Request): Promise<Response> {
       signInParent: async () => ({ ok: false, outage: false }), // unused on the start path
       sendMail: (await import("@/app/lib/email")).sendEmail,
       mintToken: () => randomBytes(32).toString("base64url"),
+      // Unused on the LINK path — this door always starts in `link` mode. The
+      // 6-digit code belongs to the v3 /start Server Actions.
+      mintCode: () => "",
       now: () => Date.now(),
     };
 
@@ -180,32 +194,49 @@ export async function POST(req: Request): Promise<Response> {
       originBase: verdict.origin,
     });
 
-    if (result.kind === "existing_account") {
-      // Deliberate, documented enumeration signal (R10). Distinct from the
-      // generic refusal so the SPA can route to login/attach. Still 200/no-store.
-      return new Response(JSON.stringify({ ok: false, status: "existing_account" }), {
-        status: 200,
-        headers,
-      });
+    // EXHAUSTIVE over StartSignupResult, ending in assertNever (review FIX 6).
+    // This union is shared with the v3 code-mode door and has grown twice
+    // already; an if-cascade would let the NEXT widening fall through into the
+    // success response — which reads `result.attemptId` and would answer
+    // `verification_pending` for an outcome that never started anything. The
+    // switch makes that a COMPILE error instead.
+    switch (result.kind) {
+      case "existing_account":
+        // Deliberate, documented enumeration signal (R10). Distinct from the
+        // generic refusal so the SPA can route to login/attach. 200/no-store.
+        return new Response(JSON.stringify({ ok: false, status: "existing_account" }), {
+          status: 200,
+          headers,
+        });
+      case "locked":
+      case "pending_elsewhere":
+      case "retryable":
+        // All three are CODE-mode outcomes and this route always starts in link
+        // mode, so all three are unreachable here. Mapped explicitly onto the
+        // existing generic refusal, which keeps this door's WIRE CONTRACT
+        // byte-identical to what firstprofit.school ships today.
+        return refuse("outage");
+      case "failed":
+        // A failure here is our fault, not a bad guess — hand the strikes back.
+        releaseStrikes();
+        return refuse("outage");
+      case "started":
+        // Return the attempt id so the cross-origin SPA can carry it through the
+        // email-verify wait to the authenticated child-mint call (Unit 9); it is
+        // an opaque handle on THIS door (the child-mint route re-checks that the
+        // attempt is 'verified' and owned by the Bearer parent). The v3 door
+        // deliberately does NOT surface it — see v3-signup-core's FIX 1 header.
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            status: "verification_pending",
+            attemptId: result.attemptId,
+          }),
+          { status: 200, headers }
+        );
+      default:
+        return assertNever(result);
     }
-    if (result.kind === "failed") {
-      // A failure here is our fault, not a bad guess — hand the strikes back.
-      releaseStrikes();
-      return refuse("outage");
-    }
-
-    // Return the attempt id so the cross-origin SPA can carry it through the
-    // email-verify wait to the authenticated child-mint call (Unit 9); it is an
-    // opaque handle, not a credential (the child-mint route re-checks that the
-    // attempt is 'verified' and owned by the Bearer parent), so surfacing it is
-    // safe. `started` and a `tryResumePending` re-send both carry an attemptId.
-    return new Response(
-      JSON.stringify({ ok: true, status: "verification_pending", attemptId: result.attemptId }),
-      {
-        status: 200,
-        headers,
-      }
-    );
   } catch (err) {
     console.error(
       `[fp/signup] unexpected error: ${err instanceof Error ? err.message : String(err)}`

@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { fakeClient, type Store } from "@/app/api/fp/signup/__tests__/helpers/fake-supabase";
+import {
+  deriveCoverSessionFields,
+  FP_SESSION_BODY_REQUIRED_KEYS,
+} from "@/app/api/fp/login/login-rules";
 
 /**
  * Route-level coverage for POST /api/fp/login — the Slice B Unit 13 cutover to
@@ -61,11 +65,22 @@ const USER_ID = "user-alex-1";
 const CHILD_ID = "aaaaaaaa-1111-4111-8111-000000000001";
 const INTERNAL_EMAIL = `s-${CHILD_ID.toLowerCase()}@students.the120.invalid`;
 
+/** Stands in for the ONE artifact `POST /api/fp/cover` rendered at signup and
+ *  provisioning carried onto the child. This file renders nothing; the tie back
+ *  to the real render is app/fp/lib/__tests__/cover-one-render.test.ts. */
+const STORED_COVER = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
+
 /** Seed one provisioned FP student whose child row carries a lowercase username
  *  (and, for the Unit 3 grade tests, an optional roster birth_year/grade). */
 function seedChild(
   fpUsername: string | null,
-  roster?: { birthYear?: string; grade?: number | null }
+  roster?: {
+    birthYear?: string;
+    grade?: number | null;
+    coverStatus?: string | null;
+    coverBlobKey?: string | null;
+    coverDataUrl?: string | null;
+  }
 ): void {
   store.value = {
     path_student_profiles: [
@@ -80,6 +95,9 @@ function seedChild(
           fp_username: fpUsername,
           birth_year: roster?.birthYear ?? "",
           grade: roster?.grade ?? null,
+          fp_cover_status: roster?.coverStatus ?? null,
+          fp_cover_blob_key: roster?.coverBlobKey ?? null,
+          fp_cover_data_url: roster?.coverDataUrl ?? null,
         },
       },
     ],
@@ -282,6 +300,67 @@ describe("POST /api/fp/login — username-only resolution (Slice B U13)", () => 
     seedChild("alex", { birthYear: "2005" }); // grade 16 in 2026-27
     const res = await post({ identifier: "alex", password: "correct horse tulip" });
     expect((await res.json()).grade).toBe(16);
+  });
+
+  /* ───────────────────── the comic cover (v3 Unit 7; R12) ───────────────── */
+
+  it("OMITS the cover keys entirely for a child with no cover columns", async () => {
+    // Every child provisioned before v3. Absent, not null: an optional field
+    // that is always present is not optional, and The120 deploys BEFORE First
+    // Profit does — the older client must see exactly the body it knows.
+    seedChild("alex");
+    const body = await (await post({ identifier: "alex", password: "correct horse tulip" })).json();
+    expect(Object.keys(body).sort()).toEqual([...FP_SESSION_BODY_REQUIRED_KEYS].sort());
+    expect("coverUrl" in body).toBe(false);
+    expect("coverStatus" in body).toBe(false);
+  });
+
+  it("serves the child's ONE STORED cover, byte-for-byte, as an <img>-ready data URL", async () => {
+    seedChild("alex", { coverStatus: "final", coverBlobKey: null, coverDataUrl: STORED_COVER });
+    const body = await (await post({ identifier: "alex", password: "correct horse tulip" })).json();
+    expect(body.coverStatus).toBe("final");
+    // `toBe`, deliberately. The requirement is not "a cover" but "THE cover" —
+    // the exact artifact rendered once during parent signup. Nothing on this
+    // side of the product has a renderer to produce a substitute.
+    expect(body.coverUrl).toBe(STORED_COVER);
+    // And it is the SAME shared read the handoff exchange runs, on the same
+    // three columns — that is what makes the two doors incapable of disagreeing.
+    expect(body).toMatchObject(
+      deriveCoverSessionFields({
+        coverStatus: "final",
+        coverBlobKey: null,
+        coverDataUrl: STORED_COVER,
+      })
+    );
+  });
+
+  it("a 'final' status that NAMES a blob key yields the status but NO url", async () => {
+    // A future AI-drawn cover. This door cannot read blobs, so it must not
+    // claim a picture it cannot produce — the client falls back to the sprite.
+    seedChild("alex", {
+      coverStatus: "final",
+      coverBlobKey: "fp/v3/children/abc/cover-1.png",
+      coverDataUrl: STORED_COVER,
+    });
+    const body = await (await post({ identifier: "alex", password: "correct horse tulip" })).json();
+    expect(body.coverStatus).toBe("final");
+    expect("coverUrl" in body).toBe(false);
+  });
+
+  it("a 'final' child with NO stored artifact gets the status and NO picture", async () => {
+    // Provisioned between Unit 4 and the artifact migration. NOT backfilled by
+    // a re-render — that is exactly the bug this rework removed.
+    seedChild("alex", { coverStatus: "final", coverBlobKey: null });
+    const body = await (await post({ identifier: "alex", password: "correct horse tulip" })).json();
+    expect(body.coverStatus).toBe("final");
+    expect("coverUrl" in body).toBe(false);
+  });
+
+  it("passes a non-final status through verbatim and never invents progress copy", async () => {
+    seedChild("alex", { coverStatus: "none", coverDataUrl: STORED_COVER });
+    const body = await (await post({ identifier: "alex", password: "correct horse tulip" })).json();
+    expect(body.coverStatus).toBe("none");
+    expect("coverUrl" in body).toBe(false);
   });
 
   it("preserves the origin gate — a disallowed Origin is 403, not the generic 401", async () => {

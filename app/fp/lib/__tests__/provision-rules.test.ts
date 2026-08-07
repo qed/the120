@@ -247,7 +247,74 @@ describe("parseCandidateRow — fail-closed narrowing of the sign-in candidate j
       username: "maya",
       birthYear: "",
       grade: null,
+      coverStatus: null,
+      coverBlobKey: null,
+      coverDataUrl: null,
     });
+  });
+
+  it("carries the cover TRIPLE when the join selects it (v3 Unit 7 read path)", () => {
+    const stored = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
+    const parsed = parseCandidateRow({
+      ...valid,
+      children: {
+        first_name: "Maya",
+        fp_username: "maya",
+        fp_cover_status: "final",
+        fp_cover_blob_key: null,
+        fp_cover_data_url: stored,
+      },
+    });
+    expect(parsed?.coverStatus).toBe("final");
+    expect(parsed?.coverBlobKey).toBeNull();
+    // VERBATIM. This is the artifact rendered once at signup; nothing on the
+    // sign-in path may produce a substitute for it.
+    expect(parsed?.coverDataUrl).toBe(stored);
+  });
+
+  it("narrows a malformed cover triple to nulls — a cover can never cost a child their login", () => {
+    const parsed = parseCandidateRow({
+      ...valid,
+      children: {
+        first_name: "Maya",
+        fp_username: "maya",
+        fp_cover_status: 7,
+        fp_cover_blob_key: { key: "x" },
+        fp_cover_data_url: 42,
+      },
+    });
+    expect(parsed).not.toBeNull();
+    expect(parsed?.coverStatus).toBeNull();
+    expect(parsed?.coverBlobKey).toBeNull();
+    expect(parsed?.coverDataUrl).toBeNull();
+  });
+
+  it("REFUSES a stored cover that is not a bounded base64 SVG data URL", () => {
+    // The gate runs on the way OUT of the database because the value becomes an
+    // `<img src>` in a child's browser. Over the size ceiling it is REFUSED, not
+    // truncated: half a data URL is a broken image, which is worse than none.
+    for (const hostile of [
+      "https://evil.example/cover.svg",
+      "javascript:alert(1)",
+      "data:text/html;base64,PHNjcmlwdD4=",
+      "data:image/svg+xml;utf8,<svg/>",
+      "",
+      `data:image/svg+xml;base64,${"A".repeat(512 * 1024)}`,
+    ]) {
+      const parsed = parseCandidateRow({
+        ...valid,
+        children: {
+          first_name: "Maya",
+          fp_username: "maya",
+          fp_cover_status: "final",
+          fp_cover_blob_key: null,
+          fp_cover_data_url: hostile,
+        },
+      });
+      // The child still signs in — only the decoration is dropped.
+      expect(parsed).not.toBeNull();
+      expect(parsed?.coverDataUrl).toBeNull();
+    }
   });
 
   it("carries birth_year and grade when the join selects them (Unit 3 read path)", () => {

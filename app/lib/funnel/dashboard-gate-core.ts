@@ -36,9 +36,35 @@ import "server-only";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { VERIFIED_TASK_STATE } from "@/app/fp/lib/progress-core";
-import { type DashboardGateChild } from "@/app/lib/funnel/session-rules";
+import {
+  photoConsentVerdict,
+  type PhotoConsentRow,
+} from "@/app/api/fp/signup/consent-rules";
+import {
+  dashboardRegister,
+  deriveHasPassword,
+  familyHasFpChild,
+  type DashboardGateChild,
+} from "@/app/lib/funnel/session-rules";
+import { hasChosenPassword, isFunnelProvisioned } from "@/app/lib/funnel/resume-rules";
+import type { RemapContext } from "@/app/lib/v3-signup/remap-rules";
 import { parseApplicantState } from "@/app/lib/funnel/applicant-rules";
-import { isFunnelProvisioned } from "@/app/lib/funnel/resume-rules";
+
+/**
+ * The remap's contextual override facts for THIS family (`needsSetPasswordStep`).
+ * Derived once here, then handed to every destination producer the dashboard
+ * drives — the gate's redirect and each card's CTA — so the page cannot answer
+ * "where does this family go" two different ways.
+ *
+ * The signed-out / read-failed shape is all-false, which is `needsSetPasswordStep`
+ * = false: no override. Those shapes fail the gate open and render anyway, so
+ * the value is never consulted; all-false is the honest "we do not know".
+ */
+const NO_REMAP_CONTEXT: RemapContext = {
+  funnelStamped: false,
+  passwordChosen: false,
+  hasFpChild: false,
+};
 
 /** One raw child row as the gate's select returns it — untrusted wire shapes,
  *  coerced by the core, never by callers. */
@@ -48,6 +74,10 @@ export type DashboardGateChildRow = {
   created_at: unknown;
   status: unknown;
   arrived_at: unknown;
+  /** The per-child FP discriminator (plan Unit 8) — see `isFpChild`. Optional
+   *  on the wire type: a row read before this column was selected is a shape we
+   *  must tolerate, and absent reads as "not FP" everywhere. */
+  fp_username?: unknown;
 };
 
 export type DashboardGateDeps = {
@@ -73,6 +103,22 @@ export type DashboardGateDeps = {
   loadVerifiedTaskCounts: (
     childIds: readonly string[]
   ) => Promise<ReadonlyMap<string, number> | null>;
+  /**
+   * Which of these children currently pass the PHOTO/COVER consent gate (plan
+   * Unit 8) — `photoConsentVerdict` at >= `FP_PHOTO_CONSENT_MIN_VERSION`,
+   * honouring the per-child tombstone. Service-role by necessity
+   * (`fp_parental_consent` is RLS-on with zero policies); the only inputs are
+   * child ids already returned by THIS request's RLS'd children read.
+   *
+   * null = the read failed. The dashboard then shows NEITHER the "give
+   * permission" nor the "withdraw permission" affordance for anyone, which is
+   * the honest degrade: offering "withdraw" to a family who never consented, or
+   * "give permission" to one who just withdrew it, are both worse than offering
+   * nothing until the next page load.
+   */
+  loadPhotoConsentChildIds: (
+    childIds: readonly string[]
+  ) => Promise<ReadonlySet<string> | null>;
 };
 
 function realDeps(): DashboardGateDeps {
@@ -90,7 +136,7 @@ function realDeps(): DashboardGateDeps {
     loadChildRows: async () => {
       const { data, error } = await (await client())
         .from("children")
-        .select("id, applicant_state, created_at, status, arrived_at")
+        .select("id, applicant_state, created_at, status, arrived_at, fp_username")
         .order("created_at", { ascending: true });
       if (error || !data) return null;
       return data;
@@ -149,6 +195,55 @@ function realDeps(): DashboardGateDeps {
         return null;
       }
     },
+    loadPhotoConsentChildIds: async (childIds) => {
+      if (childIds.length === 0) return new Set<string>();
+      // Service-role for the same reason as the counts above: fp_parental_consent
+      // is RLS-on with ZERO policies, and the ids came from THIS request's RLS'd
+      // children read. What crosses back is a set of ids, never evidence rows.
+      try {
+        const db = supabaseAdmin();
+        const [consents, kids] = await Promise.all([
+          db
+            .from("fp_parental_consent")
+            .select("child_id, policy_version, accepted_at, revoked_at")
+            .in("child_id", childIds as string[]),
+          db
+            .from("children")
+            .select("id, photo_consent_revoked_at")
+            .in("id", childIds as string[]),
+        ]);
+        if (consents.error || kids.error) return null;
+        const tombstones = new Map<string, string | null>();
+        for (const k of (kids.data as Array<Record<string, unknown>> | null) ?? []) {
+          const stamp = k.photo_consent_revoked_at;
+          tombstones.set(String(k.id), typeof stamp === "string" ? stamp : null);
+        }
+        const byChild = new Map<string, PhotoConsentRow[]>();
+        for (const r of (consents.data as Array<Record<string, unknown>> | null) ?? []) {
+          const id = String(r.child_id);
+          const list = byChild.get(id) ?? [];
+          list.push({
+            policyVersion: typeof r.policy_version === "string" ? r.policy_version : null,
+            acceptedAt: typeof r.accepted_at === "string" ? r.accepted_at : null,
+            revokedAt: typeof r.revoked_at === "string" ? r.revoked_at : null,
+          });
+          byChild.set(id, list);
+        }
+        const open = new Set<string>();
+        for (const id of childIds) {
+          // The SHARED pure gate — the same verdict `/api/fp/cover` enforces, so
+          // the dashboard can never offer an affordance the endpoint refuses.
+          const verdict = photoConsentVerdict({
+            rows: byChild.get(id) ?? [],
+            revokedAt: tombstones.get(id) ?? null,
+          });
+          if (verdict.ok) open.add(id);
+        }
+        return open;
+      } catch {
+        return null;
+      }
+    },
   };
 }
 
@@ -162,6 +257,14 @@ export type DashboardGateFacts = {
    *  family is not in the path register OR the read failed — the dashboard
    *  renders the 0 floor either way (fail open, like every gate read). */
   verifiedTaskCounts: Record<string, number> | null;
+  /** Child ids whose photo/cover consent gate is currently OPEN (plan Unit 8).
+   *  null = not loaded (signed out / read failed) — the dashboard then offers
+   *  neither consent affordance rather than guessing. */
+  photoConsentChildIds: string[] | null;
+  /** The v2→v3 remap's contextual override facts for this family (v3 Unit 8
+   *  review, FIX 1). Consumed by `dashboardGateVerdict` and by every card's
+   *  `cardVerdict`, so the page has ONE answer per child. */
+  remapCtx: RemapContext;
 };
 
 /**
@@ -176,12 +279,26 @@ export async function loadDashboardGateFactsCore(
   try {
     const user = await deps.getUser();
     if (!user)
-      return { hasSession: false, hasPassword: false, children: null, verifiedTaskCounts: null };
-    const hasPassword = !isFunnelProvisioned(user.appMetadata);
+      return { hasSession: false, hasPassword: false, children: null, verifiedTaskCounts: null, photoConsentChildIds: null, remapCtx: NO_REMAP_CONTEXT };
 
     const childRows = await deps.loadChildRows();
-    if (!childRows)
-      return { hasSession: true, hasPassword, children: null, verifiedTaskCounts: null };
+    if (!childRows) {
+      // The read failed, so the FP discriminator is UNKNOWN. Fall back to the
+      // metadata bit alone, which is what this line always was: it can only
+      // under-report `hasPassword`, and the verdict's `children: null` cell
+      // fails open and renders regardless — a wrongly rendered dashboard
+      // strands nobody.
+      const hasPassword = deriveHasPassword({ appMetadata: user.appMetadata, children: null });
+      return { hasSession: true, hasPassword, children: null, verifiedTaskCounts: null, photoConsentChildIds: null, remapCtx: NO_REMAP_CONTEXT };
+    }
+    // The FP discriminator is per CHILD, so `hasPassword` can only be derived
+    // once the roster is in hand (plan Unit 8).
+    const hasPassword = deriveHasPassword({
+      appMetadata: user.appMetadata,
+      children: childRows.map((c) => ({
+        fpUsername: typeof c.fp_username === "string" ? c.fp_username : null,
+      })),
+    });
 
     // The composed-project fact — only `project_created` children consult it
     // (childNextScreen), so only they are asked about, mirroring /start.
@@ -194,38 +311,65 @@ export async function loadDashboardGateFactsCore(
       // A failed projects read must NOT default toward the mini-app for a
       // family who really composed — fail the whole gate open instead.
       if (loaded === null)
-        return { hasSession: true, hasPassword, children: null, verifiedTaskCounts: null };
+        return { hasSession: true, hasPassword, children: null, verifiedTaskCounts: null, photoConsentChildIds: null, remapCtx: NO_REMAP_CONTEXT };
       composed = loaded;
     }
 
-    // The screen-16 verified counts — only a path-register family (some child
-    // has EVER arrived, the sticky R12 fact) renders them, so only then is the
-    // read made; ALL child ids are asked about (the stat box is "all
-    // children"; a child with no fp profile simply comes back absent → 0).
-    // Unlike the reads above, a FAILURE here must not fail the gate: the
-    // dashboard still renders, with the bars at the honest 0 floor.
+    const children: DashboardGateChild[] = childRows.map((c) => ({
+      id: String(c.id),
+      applicantState: parseApplicantState(c.applicant_state),
+      createdAt: String(c.created_at),
+      hasComposedProject: composed.has(String(c.id)),
+      status: c.status,
+      // The sticky arrival fact (U11) — feeds dashboardRegister.
+      arrivedAt: (c.arrived_at as string | null) ?? null,
+      // The v3 FP discriminator (plan Unit 8) — feeds dashboardRegister, the
+      // gate verdict's `childNextScreen` call, and `deriveHasPassword` above.
+      fpUsername: typeof c.fp_username === "string" ? c.fp_username : null,
+    }));
+
+    // The screen-16 verified counts — only a PATH-REGISTER family renders them,
+    // so only then is the read made; ALL child ids are asked about (the stat
+    // box is "all children"; a child with no fp profile simply comes back
+    // absent → 0). Unlike the reads above, a FAILURE here must not fail the
+    // gate: the dashboard still renders, with the bars at the honest 0 floor.
+    //
+    // ⚠ THE CONDITION IS `dashboardRegister` ITSELF, NOT A COPY OF ITS
+    // PREDICATE (plan Unit 8). This used to be a hand-inlined
+    // `some(c => c.arrived_at != null)`, which is the same rule written twice —
+    // and v3 is exactly the change that would have broken the pair: widening
+    // the register to FP children without widening this line would have given
+    // every v3 family a PERMANENT 0 FLOOR on the very bars the path register
+    // exists to show. Calling the register function makes drift impossible
+    // rather than merely unlikely.
     let verifiedTaskCounts: Record<string, number> | null = null;
-    if (childRows.some((c) => c.arrived_at != null)) {
-      const counts = await deps.loadVerifiedTaskCounts(childRows.map((c) => String(c.id)));
+    if (dashboardRegister(children) === "path") {
+      const counts = await deps.loadVerifiedTaskCounts(children.map((c) => c.id));
       verifiedTaskCounts = counts === null ? null : Object.fromEntries(counts);
     }
+
+    // The photo/cover consent state (plan Unit 8). Asked for EVERY child, not
+    // just FP ones: a v2 applicant kid's parent may consent today so the cover
+    // exists the moment that kid is provisioned. A failed read arrives as null
+    // and the panel simply offers no consent affordance this page load.
+    const consentOpen = await deps.loadPhotoConsentChildIds(children.map((c) => c.id));
 
     return {
       hasSession: true,
       hasPassword,
       verifiedTaskCounts,
-      children: childRows.map((c) => ({
-        id: String(c.id),
-        applicantState: parseApplicantState(c.applicant_state),
-        createdAt: String(c.created_at),
-        hasComposedProject: composed.has(String(c.id)),
-        status: c.status,
-        // The sticky arrival fact (U11) — feeds dashboardRegister only.
-        arrivedAt: (c.arrived_at as string | null) ?? null,
-      })),
+      photoConsentChildIds: consentOpen === null ? null : [...consentOpen],
+      children,
+      // The remap override facts, derived from the SAME roster the verdict and
+      // the cards read (v3 Unit 8 review, FIX 1).
+      remapCtx: {
+        funnelStamped: isFunnelProvisioned(user.appMetadata),
+        passwordChosen: hasChosenPassword(user.appMetadata),
+        hasFpChild: familyHasFpChild(children),
+      },
     };
   } catch {
     // Fail open: a wrongly rendered dashboard strands nobody.
-    return { hasSession: false, hasPassword: false, children: null, verifiedTaskCounts: null };
+    return { hasSession: false, hasPassword: false, children: null, verifiedTaskCounts: null, photoConsentChildIds: null, remapCtx: NO_REMAP_CONTEXT };
   }
 }

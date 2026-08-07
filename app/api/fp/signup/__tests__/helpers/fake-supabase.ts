@@ -32,6 +32,27 @@
  * it is the absence of an answer, and only a fault that never resolves models
  * it).
  *
+ * ── PER-CALL SCOPING, AND WHY IT EXISTS (v3 Unit 4 review, FIX 5/6) ──
+ * A key like `"update:fp_onboarding_drafts"` names an OP ON A TABLE, not a call
+ * site — and a core that both RESERVES and SETTLES on one table issues several.
+ * A plan that faults them all can only ever exercise the FIRST, which is how a
+ * test came to claim it proved the settle-failure branch while actually proving
+ * the reservation-failure branch. So a fault may ALSO carry:
+ *
+ *   `onCalls`      — the 1-based call ordinals of its own `op:table` key it
+ *                    applies to. Ordinals count EVERY call of that key, faulted
+ *                    or not (a `hang` included — it is still a query issued), so
+ *                    `[2]` really is "the second one".
+ *   `concurrently` — a mutation applied to the table's rows AFTER the faulted op
+ *                    returns. Paired with `no-rows` this is the only honest
+ *                    model of a LOST COMPARE-AND-SET: our statement matched zero
+ *                    rows *because another writer got there first*, and the
+ *                    re-read must see what that writer wrote.
+ *
+ * A plan value may be a single fault or a LIST of them; the first whose
+ * `onCalls` matches (or which has none) wins. A fault with no `onCalls` applies
+ * to every call, which is the pre-existing behaviour, unchanged.
+ *
  * ── Two FIDELITY gaps this harness used to have, and how they were closed ──
  * A harness that is gentler than Postgres makes green tests lie, so the
  * following is an opt-in knob rather than silent kindness (opt-in because
@@ -68,15 +89,45 @@ type PgError = { message: string; code?: string; details?: string } | null;
 type Predicate = (row: Row) => boolean;
 
 /** One injected fault — see the module header's FAULT INJECTION note. */
-export type Fault =
+export type Fault = (
   | { kind: "error"; error: NonNullable<PgError> }
   | { kind: "no-rows" }
   | { kind: "coerce"; values: Row }
   /** Never settles — models a round trip that stalls rather than fails. */
-  | { kind: "hang" };
+  | { kind: "hang" }
+) & {
+  /**
+   * 1-based call ordinals of this fault's own `op:table` key that it applies to.
+   * Omitted = every call (the pre-existing behaviour). Ordinals count every call
+   * of the key, faulted or not, so a core that reserves then settles on one
+   * table can have exactly its settle faulted with `onCalls: [2]`.
+   */
+  onCalls?: readonly number[];
+  /**
+   * Applied to the table's rows AFTER the faulted op returns. With `no-rows` on
+   * an update this is what makes a LOST CAS realistic: the statement affected
+   * nothing because a concurrent writer had already moved the row, and the
+   * caller's re-read must observe that writer's value rather than its own.
+   */
+  concurrently?: (rows: Row[]) => void;
+};
 
-/** Faults keyed `"<op>:<table>"`, e.g. `"update:children"`. */
-export type FaultPlan = Record<string, Fault>;
+/** Faults keyed `"<op>:<table>"`, e.g. `"update:children"`. A list lets one key
+ *  carry several per-ordinal faults; the first match (or the first unscoped
+ *  entry) wins. */
+export type FaultPlan = Record<string, Fault | readonly Fault[]>;
+
+/** Resolve the fault, if any, that applies to call `ordinal` of `key`. */
+function pickFault(
+  plan: FaultPlan | undefined,
+  key: string,
+  ordinal: number
+): Fault | undefined {
+  const entry = plan?.[key];
+  if (!entry) return undefined;
+  const list = Array.isArray(entry) ? (entry as readonly Fault[]) : [entry as Fault];
+  return list.find((f) => f.onCalls === undefined || f.onCalls.includes(ordinal));
+}
 
 /** A per-table INSERT uniqueness guard: return a 23505-shaped error or null. */
 type UniqueGuard = (candidate: Row, existing: Row[]) => PgError;
@@ -97,6 +148,29 @@ const uniqueGuards: Record<string, UniqueGuard> = {
           code: "23505",
           message:
             'duplicate key value violates unique constraint "fp_parental_consent_active_attempt_uq"',
+        }
+      : null;
+  },
+  // New User Flow v3 Unit 3 (review FIX 2): migration 20260915120000 adds
+  //   UNIQUE (parent_id, lower(kid_first_name), lower(kid_last_name))
+  //   WHERE status = 'active'
+  // — the DB arbiter that makes the loser of a two-tab add-kid race LOSE.
+  // v3AddKid classifies this 23505 as the authoritative duplicate/resume
+  // outcome, so it is exactly the kind of constraint that changes control flow
+  // and therefore belongs here (module header).
+  fp_onboarding_drafts: (cand, existing) => {
+    if (cand.status !== "active") return null;
+    if (cand.kid_first_name == null || cand.kid_last_name == null) return null;
+    const key = (r: Row) =>
+      `${String(r.kid_first_name).toLowerCase()}\u0000${String(r.kid_last_name).toLowerCase()}`;
+    const clash = existing.some(
+      (r) => r.status === "active" && r.parent_id === cand.parent_id && key(r) === key(cand)
+    );
+    return clash
+      ? {
+          code: "23505",
+          message:
+            'duplicate key value violates unique constraint "fp_onboarding_drafts_active_kid_uq"',
         }
       : null;
   },
@@ -132,6 +206,10 @@ function orPredicate(expr: string): Predicate {
     const [col, op, ...rest] = arm.split(".");
     const val = rest.join(".");
     if (op === "is" && val === "null") return (r: Row) => r[col] == null;
+    // `<col>.not.is.null` is the draft reaper's "names an object in either blob
+    // column" read. Added here rather than worked around, per the module
+    // header: a core reaching for an operator this fake lacks widens the FAKE.
+    if (op === "not" && val === "is.null") return (r: Row) => r[col] != null;
     if (op === "eq") return (r: Row) => String(r[col]) === val;
     throw new Error(`fake-supabase: unsupported or() arm "${arm}"`);
   });
@@ -180,14 +258,34 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
   /** Recording state — written always, read only when `recordCalls` is set. */
   private selectCols: string | null = null;
   private filterLog: RecordedFilter[] = [];
+  /** Memoized so one terminated call consumes exactly one ordinal, whether the
+   *  fault lookup happens in `hangs()` or in `execute()`. */
+  private faultResolved = false;
+  private resolvedFault: Fault | undefined;
 
   constructor(
     private store: Store,
     private table: string,
-    private faults?: FaultPlan,
-    private options: FakeClientOptions = {}
+    private faults: FaultPlan | undefined,
+    private options: FakeClientOptions = {},
+    /** Shared across every builder from one `fakeClient`, so `onCalls` ordinals
+     *  count calls made by the whole core run rather than by one builder. */
+    private callCounts: Map<string, number> = new Map()
   ) {
     if (!store[table]) store[table] = [];
+  }
+
+  /** The fault for THIS call, consuming one ordinal of its `op:table` key.
+   *  Resolved lazily because the op is only known once the setters have run. */
+  private faultForThisCall(): Fault | undefined {
+    if (!this.faultResolved) {
+      this.faultResolved = true;
+      const key = `${this.op}:${this.table}`;
+      const ordinal = (this.callCounts.get(key) ?? 0) + 1;
+      this.callCounts.set(key, ordinal);
+      this.resolvedFault = pickFault(this.faults, key, ordinal);
+    }
+    return this.resolvedFault;
   }
 
   private rows(): Row[] {
@@ -300,9 +398,18 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
 
   /* -------- execution -------- */
   private execute(): { rows: Row[]; error: PgError } {
-    const fault = this.faults?.[`${this.op}:${this.table}`];
-    if (fault?.kind === "error") return { rows: [], error: fault.error };
-    if (fault?.kind === "no-rows") return { rows: [], error: null };
+    const fault = this.faultForThisCall();
+    // `concurrently` models the OTHER writer: it lands after our statement
+    // returns, so the caller's own re-read is what observes it.
+    const concurrently = () => fault?.concurrently?.(this.rows());
+    if (fault?.kind === "error") {
+      concurrently();
+      return { rows: [], error: fault.error };
+    }
+    if (fault?.kind === "no-rows") {
+      concurrently();
+      return { rows: [], error: null };
+    }
     switch (this.op) {
       case "insert": {
         const inserted: Row[] = [];
@@ -403,7 +510,7 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
   /** A `hang` fault never settles — the ONE thing an `error` fault cannot model,
    *  and the only way to exercise a caller's timeout. */
   private hangs(): boolean {
-    return this.faults?.[`${this.op}:${this.table}`]?.kind === "hang";
+    return this.faultForThisCall()?.kind === "hang";
   }
   /** Record the query as ISSUED — before the fault check, so a stalled or failed
    *  round trip is still observable. Inert unless a sink was supplied. */
@@ -498,14 +605,21 @@ export function fakeClient(
   from: (t: string) => Builder;
   rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: PgError }>;
 } {
+  // ONE counter per client, shared by every builder and the rpc seam, so
+  // `onCalls` ordinals are per core run rather than per query object.
+  const callCounts = new Map<string, number>();
   return {
-    from: (table: string) => new Builder(store, table, faults, options ?? {}),
+    from: (table: string) => new Builder(store, table, faults, options ?? {}, callCounts),
     // The one RPC the FP site routes call. Implemented via the EXECUTABLE TS
     // SPEC of the SQL function (fp-public-site-rules extractSiteContent —
     // "THE SPEC LIVES HERE"), so route-level tests exercise the real deps
     // builder's RPC seam against the pinned semantics. Faultable like any op.
     rpc: (fn: string, args?: Record<string, unknown>) => {
-      const fault = faults?.[`rpc:${fn}`];
+      const key = `rpc:${fn}`;
+      const ordinal = (callCounts.get(key) ?? 0) + 1;
+      callCounts.set(key, ordinal);
+      const fault = pickFault(faults, key, ordinal);
+      if (fault?.kind === "hang") return new Promise<never>(() => {});
       if (fault?.kind === "error") return Promise.resolve({ data: null, error: fault.error });
       if (fn === "fp_public_site_content") {
         const { headline, oneLiner, products } = extractSiteContent(args?.p_doc);

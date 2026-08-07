@@ -176,6 +176,12 @@ export const ARRIVAL_SCREEN = {
     title: "Still setting things up",
     body: "This is taking a little longer than usual. Everything is saved and nothing is wrong — check back in a few minutes.",
     retry: "Check again",
+    /* The line that keeps a bounded timeout from reading as a failed payment.
+     * A family who has just paid $250 and then watches a spinner give up will
+     * reach for their card again if nothing on the screen says not to — and a
+     * second seat deposit is a refund, a support thread, and a family who
+     * trusts us less. Stated as fact, not reassurance. */
+    paid: "Your deposit went through. There is nothing to pay again.",
   },
   ready: {
     title: "Your child's 120 address",

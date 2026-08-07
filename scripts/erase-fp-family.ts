@@ -7,10 +7,19 @@
  * PASS/FAIL summary, a non-zero exit on failure).
  *
  * ⚠ THIS PERMANENTLY DELETES A FAMILY. It hard-deletes a family's accounts,
- * child roster, game data, consent evidence, and (credential-gated) suspends +
- * deletes the children's Workspace mailboxes. There is NO undo and NO ownership
- * check inside eraseFamily — the target is exactly the ids you pass. During
- * Slice B acceptance this is bounded to TEST families only.
+ * child roster, game data, consent evidence, the v3 kid-first onboarding drafts
+ * (name, age, story answers, cover) and handoff sign-in codes, DELETES the
+ * cover/photo objects those rows name in the blob store, and (credential-gated)
+ * suspends + deletes the children's Workspace mailboxes. There is NO undo and NO
+ * ownership check inside eraseFamily — the target is exactly the ids you pass.
+ * During Slice B acceptance this is bounded to TEST families only.
+ *
+ * ── BLOB STORE ───────────────────────────────────────────────────────────────
+ * No blob adapter exists yet (the cover path is template-only and writes NULL
+ * keys), so `scriptEraseFamilyDeps().blobConfigured` is false. That is NOT a
+ * silent skip: if a row ever names an object and no adapter is wired, the core
+ * STRANDS it and this script exits non-zero. The dry-run counts the objects a
+ * real run would delete and warns when they cannot be.
  *
  * ── AUTH: SERVICE-ROLE ONLY ──────────────────────────────────────────────────
  * This is a privileged admin operation, like the other seed/backfill scripts. It
@@ -75,6 +84,12 @@ type PreviewChild = {
   fpProfiles: number;
   pathProfiles: number;
   mailboxLocalPart: string | null;
+  /** v3: one-time sign-in codes bound to this child. */
+  handoffCodes: number;
+  /** v3: onboarding drafts (kid name, age, story answers, cover) for this child. */
+  drafts: number;
+  /** v3: external blob objects that WOULD be deleted (draft + child covers). */
+  blobs: number;
 };
 
 /**
@@ -85,16 +100,23 @@ type PreviewChild = {
 async function enumeratePreview(
   db: SupabaseClient,
   input: EraseFamilyInput
-): Promise<{ children: PreviewChild[]; error: string | null }> {
-  let q = db.from("children").select("id").eq("parent_id", input.parentUserId);
+): Promise<{ children: PreviewChild[]; orphanDrafts: number; orphanBlobs: number; error: string | null }> {
+  let q = db.from("children").select("id, fp_cover_blob_key").eq("parent_id", input.parentUserId);
   if (input.childIds !== undefined) q = q.in("id", input.childIds as string[]);
   const { data, error } = await q;
-  if (error) return { children: [], error: error.message };
-  const ids = ((data ?? []) as { id: string }[]).map((r) => r.id);
+  if (error) return { children: [], orphanDrafts: 0, orphanBlobs: 0, error: error.message };
+  const rows = (data ?? []) as { id: string; fp_cover_blob_key?: string | null }[];
+
+  const countKeys = (drafts: { photo_blob_key?: string | null; cover_blob_key?: string | null }[]): number =>
+    drafts.reduce(
+      (n, d) => n + (d.photo_blob_key ? 1 : 0) + (d.cover_blob_key ? 1 : 0),
+      0
+    );
 
   const children: PreviewChild[] = [];
-  for (const childId of ids) {
-    const [pp, psp, prov] = await Promise.all([
+  for (const row of rows) {
+    const childId = row.id;
+    const [pp, psp, prov, codes, drafts] = await Promise.all([
       db.from("fp_player_profiles").select("id").eq("child_id", childId),
       db.from("path_student_profiles").select("id").eq("child_id", childId),
       db
@@ -102,16 +124,46 @@ async function enumeratePreview(
         .select("email")
         .eq("child_id", childId)
         .maybeSingle(),
+      db.from("fp_handoff_codes").select("id").eq("child_id", childId),
+      db
+        .from("fp_onboarding_drafts")
+        .select("id, photo_blob_key, cover_blob_key")
+        .eq("child_id", childId),
     ]);
     const email = (prov.data as { email?: string | null } | null)?.email ?? null;
+    const draftRows = (drafts.data ?? []) as {
+      photo_blob_key?: string | null;
+      cover_blob_key?: string | null;
+    }[];
     children.push({
       childId,
       fpProfiles: (pp.data ?? []).length,
       pathProfiles: (psp.data ?? []).length,
       mailboxLocalPart: email && email.includes("@") ? localPartOnly(email) : null,
+      handoffCodes: (codes.data ?? []).length,
+      drafts: draftRows.length,
+      blobs: countKeys(draftRows) + (row.fp_cover_blob_key ? 1 : 0),
     });
   }
-  return { children, error: null };
+
+  // Full-family scope also sweeps the parent's abandoned drafts (child_id NULL),
+  // which the per-child pass above cannot see.
+  let orphanDrafts = 0;
+  let orphanBlobs = 0;
+  if (input.childIds === undefined) {
+    const { data: parentDrafts } = await db
+      .from("fp_onboarding_drafts")
+      .select("id, child_id, photo_blob_key, cover_blob_key")
+      .eq("parent_id", input.parentUserId);
+    const orphans = ((parentDrafts ?? []) as {
+      child_id?: string | null;
+      photo_blob_key?: string | null;
+      cover_blob_key?: string | null;
+    }[]).filter((d) => !d.child_id);
+    orphanDrafts = orphans.length;
+    orphanBlobs = countKeys(orphans);
+  }
+  return { children, orphanDrafts, orphanBlobs, error: null };
 }
 
 function printSummary(summary: EraseFamilySummary): void {
@@ -128,6 +180,13 @@ function printSummary(summary: EraseFamilySummary): void {
   console.log(
     `workspace: suspended=${summary.workspace.suspended} deleted=${summary.workspace.deleted} ` +
       `missing=${summary.workspace.missing} skipped=${summary.workspace.skipped} errored=${summary.workspace.errored}`
+  );
+  console.log(
+    `blobs:     deleted=${summary.blobs.deleted} missing=${summary.blobs.missing} ` +
+      `errored=${summary.blobs.errored} refused=${summary.blobs.refused} unconfigured=${summary.blobs.unconfigured}` +
+      (summary.blobs.errored + summary.blobs.refused + summary.blobs.unconfigured > 0
+        ? "  ⚠ objects may SURVIVE — see stranded"
+        : "")
   );
   console.log("order (ordered op log):");
   for (const op of summary.order) console.log(`  ${op}`);
@@ -180,13 +239,23 @@ async function main(): Promise<void> {
       for (const c of preview.children) {
         console.log(
           `  child ${c.childId}: fp_player_profiles=${c.fpProfiles} path_student_profiles=${c.pathProfiles} ` +
+            `fp_handoff_codes=${c.handoffCodes} fp_onboarding_drafts=${c.drafts} blob_objects=${c.blobs} ` +
             `mailbox=${c.mailboxLocalPart ?? "(none)"}${c.mailboxLocalPart ? " (would suspend+delete)" : ""}`
         );
       }
     }
     if (input.childIds === undefined) {
       console.log(
-        "WOULD also remove: fp_parental_consent + fp_signup_attempts for the parent, and DELETE the parent auth account."
+        `WOULD also remove: ${preview.orphanDrafts} abandoned fp_onboarding_drafts row(s) for this parent ` +
+          `(child_id NULL, ${preview.orphanBlobs} blob object[s]), fp_parental_consent + fp_signup_attempts for the parent, ` +
+          "and DELETE the parent auth account."
+      );
+    }
+    const totalBlobs =
+      preview.children.reduce((n, c) => n + c.blobs, 0) + preview.orphanBlobs;
+    if (totalBlobs > 0 && !deps.blobConfigured) {
+      console.error(
+        `⚠ ${totalBlobs} external blob object(s) are referenced but NO blob adapter is configured — a real run would STRAND them (the objects would survive). Wire the adapter before erasing.`
       );
     }
     console.log(

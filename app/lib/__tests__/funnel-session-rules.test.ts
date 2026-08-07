@@ -8,6 +8,7 @@ import {
   childNextScreen,
   dashboardGateVerdict,
   deriveEnrolled,
+  deriveHasPassword,
   resolveReentry,
   resolveResumeChild,
   screenRoute,
@@ -25,6 +26,11 @@ import {
   APPLICANT_STATES,
   parseApplicantState,
 } from "@/app/lib/funnel/applicant-rules";
+import { cardVerdict } from "@/app/dashboard/data";
+import {
+  SET_PASSWORD_PATH,
+  V3_ADD_KID_HREF,
+} from "@/app/lib/v3-signup/remap-rules";
 
 /**
  * Unit 2's decision surface (Decision 2, R9, R9a, R9b). The R9a matrix is
@@ -216,17 +222,41 @@ describe("the named scenarios the plan pins", () => {
   });
 });
 
-describe("screenRoute", () => {
-  it("maps every navigable screen to a route and the in-place screens to null", () => {
-    expect(screenRoute({ screen: "capture", reason: "cold" })).toBe("/start");
-    expect(screenRoute({ screen: "children_grid", reason: "resume" })).toBe("/start/children");
+describe("screenRoute — v3 destinations, through the remap table (v3 Unit 8)", () => {
+  it("maps every navigable screen to a v3 route and the in-place screens to null", () => {
+    // The v2 literals are GONE on purpose: /start's capture explainer, the
+    // add-child grid and the mini-app seam are all retired, and this function
+    // now reads app/lib/v3-signup/remap-rules.ts rather than owning routes.
+    expect(screenRoute({ screen: "capture", reason: "cold" })).toBe("/start?step=parent");
+    expect(screenRoute({ screen: "children_grid", reason: "resume" })).toBe("/start?step=kid");
     expect(screenRoute({ screen: "child_resume", childId: "abc", reason: "resume" })).toBe(
-      "/start/child/abc"
+      "/start?step=kid"
     );
     expect(screenRoute({ screen: "sign_in", reason: "enrolled" })).toBe("/dashboard");
     expect(screenRoute({ screen: "dashboard", reason: "enrolled" })).toBe("/dashboard");
+    // Still IN-PLACE render states — this is the property that makes the table
+    // verdict→verdict rather than route→route.
     expect(screenRoute({ screen: "link_expired", reason: "link_expired" })).toBeNull();
     expect(screenRoute({ screen: "link_used", reason: "link_used" })).toBeNull();
+  });
+
+  it("a CONVERTED FUNNEL PARENT is diverted to the set-password step, once", () => {
+    const converted = { funnelStamped: true, passwordChosen: false, hasFpChild: false };
+    expect(screenRoute({ screen: "child_resume", childId: "abc", reason: "resume" }, converted)).toBe(
+      "/set-password"
+    );
+    // Non-flow cells are override-immune: there is nothing to provision.
+    expect(screenRoute({ screen: "dashboard", reason: "enrolled" }, converted)).toBe("/dashboard");
+    expect(screenRoute({ screen: "link_used", reason: "link_used" }, converted)).toBeNull();
+    // …and the divert ENDS. Once the stamp exists, the flow route returns.
+    expect(
+      screenRoute({ screen: "child_resume", childId: "abc", reason: "resume" }, { ...converted, passwordChosen: true })
+    ).toBe("/start?step=kid");
+    // A beta/FP family predates the stamp but already chose a real password at
+    // verifyCompletion — they must never be asked for another one.
+    expect(
+      screenRoute({ screen: "child_resume", childId: "abc", reason: "resume" }, { ...converted, hasFpChild: true })
+    ).toBe("/start?step=kid");
   });
 });
 
@@ -417,11 +447,64 @@ describe("dashboardGateVerdict — the narrow redirect cohort, everyone else ren
       ...over,
     });
 
-  it("a funnel-provisioned family with an `added` child is redirected into the mini-app", () => {
+  it("a funnel-provisioned family with an `added` child is redirected — THROUGH THE REMAP (v3 Unit 8 review, FIX 1)", () => {
+    // The v2 literal `/start/child/c1` is gone from this gate. It was the
+    // LOUDEST second producer of destinations: it server-redirects the whole
+    // page, so a mid-application v2 family never reached the card whose CTA the
+    // review caught — they were dropped into the still-live v2 mini-app and
+    // could finish a v2 dossier with no First Profit account.
     expect(gate({})).toEqual({
       action: "redirect",
       childId: "c1",
-      route: "/start/child/c1",
+      route: V3_ADD_KID_HREF,
+    });
+  });
+
+  it("the gate and the card agree for the SAME child (the anti-drift pin)", () => {
+    // Two producers, one table. If either stops reading `childNextRoute` this
+    // reddens — which is the whole point of the fix.
+    for (const state of ["added", "project_created"] as const) {
+      const kid = { ...child("c1", state), hasComposedProject: false };
+      const verdict = gate({ children: [kid] });
+      const card = cardVerdict(
+        { id: "c1", status: "draft" as never, applicantState: state },
+        [],
+        false
+      );
+      const cta = card.kind === "funnel" ? card.primaryCta : undefined;
+      expect(verdict).toEqual({ action: "redirect", childId: "c1", route: V3_ADD_KID_HREF });
+      expect(cta && "href" in cta ? cta.href : null, state).toBe(
+        verdict.action === "redirect" ? verdict.route : null
+      );
+    }
+  });
+
+  it("the converted-funnel-parent divert reaches the gate too: /set-password, not the kid step", () => {
+    // Same family, same child — the one contextual override in the table. If
+    // the gate ignored `remapCtx` it would walk them into the v3 flow and then
+    // strand them at a sign-in form whose password they have never been told.
+    const ctx = { funnelStamped: true, passwordChosen: false, hasFpChild: false };
+    expect(gate({ remapCtx: ctx })).toEqual({
+      action: "redirect",
+      childId: "c1",
+      route: SET_PASSWORD_PATH,
+    });
+    // ...and the card for that same child names the same destination.
+    const card = cardVerdict(
+      { id: "c1", status: "draft" as never, applicantState: "added" },
+      [],
+      false,
+      null,
+      ctx
+    );
+    const cta = card.kind === "funnel" ? card.primaryCta : undefined;
+    expect(cta && "href" in cta ? cta.href : null).toBe(SET_PASSWORD_PATH);
+    // Once the stamp lands, both move on to the kid step — the divert TERMINATES.
+    const done = { ...ctx, passwordChosen: true };
+    expect(gate({ remapCtx: done })).toEqual({
+      action: "redirect",
+      childId: "c1",
+      route: V3_ADD_KID_HREF,
     });
   });
 
@@ -435,8 +518,48 @@ describe("dashboardGateVerdict — the narrow redirect cohort, everyone else ren
     expect(gate({ children: [owing] })).toEqual({
       action: "redirect",
       childId: "c1",
-      route: "/start/child/c1",
+      route: V3_ADD_KID_HREF,
     });
+  });
+
+  it("FIX 5d: a MIXED family (FP kid + a v2 applicant mid-funnel) RENDERS — the sibling is a card, not a detour", () => {
+    // The composition the review asked for. An FP child makes this a password
+    // family (`deriveHasPassword`), so the gate must render — and the v2
+    // sibling's unfinished work becomes a CARD on that dashboard whose CTA
+    // points at the kid step. What must never happen is the whole family being
+    // server-redirected into a step that belongs to one child.
+    const fpKid = { ...child("fp-kid", "added", "2026-07-01T00:00:00Z"), fpUsername: "remi.newal" };
+    for (const siblingState of ["added", "project_created"] as const) {
+      const sibling = {
+        ...child("v2-kid", siblingState, "2026-07-02T00:00:00Z"),
+        hasComposedProject: false,
+      };
+      expect(
+        dashboardGateVerdict({
+          hasSession: true,
+          // What deriveHasPassword answers for this family — asserted, not assumed.
+          hasPassword: deriveHasPassword({
+            appMetadata: { funnel: true },
+            children: [fpKid, sibling],
+          }),
+          children: [fpKid, sibling],
+          stay: false,
+        }),
+        siblingState
+      ).toEqual({ action: "render" });
+
+      // ...and the sibling's own card still offers the kid step.
+      const card = cardVerdict(
+        { id: "v2-kid", status: "draft" as never, applicantState: siblingState },
+        [],
+        false
+      );
+      const cta = card.kind === "funnel" ? card.primaryCta : undefined;
+      const href = cta && "href" in cta ? cta.href : null;
+      // `project_created` + composed=false is the re-compose cell → kid step;
+      // `added` likewise. Neither is a v2 route any more.
+      expect(href, siblingState).toBe(V3_ADD_KID_HREF);
+    }
   });
 
   it("a password family with an `added` child renders — matrix rule 2 wins", () => {
@@ -469,7 +592,7 @@ describe("dashboardGateVerdict — the narrow redirect cohort, everyone else ren
       gate({
         children: [child("never", null, "2026-06-01T00:00:00Z"), child("c1", "added")],
       })
-    ).toEqual({ action: "redirect", childId: "c1", route: "/start/child/c1" });
+    ).toEqual({ action: "redirect", childId: "c1", route: V3_ADD_KID_HREF });
   });
 
   it("the stay parameter always renders, even for the redirect cohort", () => {

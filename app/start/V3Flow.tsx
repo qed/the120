@@ -1,0 +1,240 @@
+"use client";
+
+/**
+ * The v3 flow's shell (plan Unit 3). Layout and navigation only — every decision
+ * lives in app/lib/v3-signup/flow-rules.ts, so the server render and the
+ * hydrated client can never disagree about which screen a URL means.
+ *
+ * ── `?step=` IS THE STEP STATE (the MiniAppShell precedent) ──
+ * The step DERIVES from the URL on every render; `go()` only WRITES it. That is
+ * what makes browser Back walk the ladder and a refresh restore the screen —
+ * and it is why this is not `useState(initialStep)`, which reads the prop once
+ * and then ignores every later navigation (the exact bug MiniAppShell's header
+ * documents).
+ *
+ * The DRAFT ROW is the resume anchor behind it: the server resolves the facts
+ * from the draft, so a refresh mid-flow lands on the right screen with the right
+ * content, and a URL that claims more progress than the draft supports is
+ * clamped by `resolveV3Step`.
+ *
+ * ── WHY LOCAL FACTS SHADOW THE SERVER'S ──
+ * A step-2 submit mints the draft through a Server Action, and the props from
+ * the last server render do not know about it yet. So the two facts the client
+ * can establish for itself (the parent verified; a draft now exists and is
+ * named) are held locally and merged over the server's. `router.refresh()` then
+ * reconciles the real state in the background. Without this, "Start their
+ * journey" would clamp straight back to step 2.
+ */
+
+import { useCallback, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import {
+  resolveV3Step,
+  type V3FlowFacts,
+  type V3Step,
+} from "@/app/lib/v3-signup/flow-rules";
+import type { V3DraftView } from "@/app/lib/v3-signup/v3-onboarding-core";
+import { StepParent } from "./StepParent";
+import { StepAddKid } from "./StepAddKid";
+import { StepCover } from "./StepCover";
+import { StepStory } from "./StepStory";
+import { StepAccountReady } from "./StepAccountReady";
+import { V3BrandHeader } from "./v3-ui";
+
+const STEP_LABELS: Record<V3Step, string> = {
+  parent: "Your details",
+  kid: "Add your kid",
+  cover: "Their cover",
+  story: "Page 1",
+  ready: "Account ready",
+};
+
+const STEP_ORDER: V3Step[] = ["parent", "kid", "cover", "story", "ready"];
+
+/**
+ * NOTE (review FIX 9a): this shell deliberately takes NO `existingKids` prop.
+ * It had one, plus a `<span hidden data-existing-kids>` whose only job was to
+ * keep the unused prop from being flagged dead — a marker element shipped to
+ * every family to satisfy a linter. The duplicate guard consumes that data
+ * SERVER-side, and page.tsx still has the value for whichever later unit wants
+ * to render "your kids" here.
+ */
+export function V3Flow({
+  initialStep,
+  facts,
+  draft,
+  parentEmail,
+  consentPolicy,
+  coverAiLive,
+}: {
+  initialStep: V3Step;
+  facts: V3FlowFacts;
+  draft: V3DraftView | null;
+  parentEmail: string | null;
+  consentPolicy: { version: string; hash: string; text: string };
+  /** Server-read `COVER_AI_LIVE` (v3 Unit 4). Off = the cover step shows no
+   *  photo affordance at all, because there is no vendor to send a minor's
+   *  photo to and no store to put it in. The endpoint refuses a photo body
+   *  independently, so a stale bundle cannot re-open the door. */
+  coverAiLive: boolean;
+}) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const reduced = useReducedMotion();
+
+  // Facts this session established after the last server render (see header).
+  const [localFacts, setLocalFacts] = useState<Partial<V3FlowFacts>>({});
+  const [localDraftId, setLocalDraftId] = useState<string | null>(draft?.id ?? null);
+
+  const merged: V3FlowFacts = useMemo(
+    () => ({ ...facts, ...localFacts }),
+    [facts, localFacts]
+  );
+
+  const rawStep = searchParams.get("step");
+  // First paint uses the SERVER's resolution (props), so nothing flashes; every
+  // render after that re-resolves from the URL against the merged facts.
+  const step: V3Step = rawStep === null ? initialStep : resolveV3Step(rawStep, merged);
+
+  const go = useCallback(
+    (next: V3Step) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("step", next);
+      router.push(`?${params.toString()}`, { scroll: true });
+      // Bring the server's facts up to date behind the navigation; the local
+      // shadow above keeps the screen correct until it lands.
+      router.refresh();
+    },
+    [router, searchParams]
+  );
+
+  const draftId = localDraftId ?? draft?.id ?? null;
+  const firstName = draft?.firstName?.trim() || "your kid";
+
+  return (
+    <div className="v3-grain min-h-screen w-full bg-v3-cream text-v3-ink">
+      <V3BrandHeader
+        step={STEP_ORDER.indexOf(step) + 1}
+        totalSteps={STEP_ORDER.length}
+        stepLabel={STEP_LABELS[step]}
+      />
+
+      <main>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={step}
+            initial={reduced ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduced ? undefined : { opacity: 0, y: -8 }}
+            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+          >
+            {step === "parent" && (
+              <StepParent
+                consentPolicy={consentPolicy}
+                onVerified={() => {
+                  setLocalFacts((f) => ({ ...f, parentVerified: true }));
+                  go("kid");
+                }}
+              />
+            )}
+
+            {step === "kid" && (
+              <StepAddKid
+                consentPolicy={consentPolicy}
+                // A draft that is already NAMED means the family walked back to
+                // correct it; an unnamed draft (or none) is a fresh add.
+                draftId={merged.kidNamed ? draftId : null}
+                initialFullName={
+                  draft ? `${draft.firstName} ${draft.lastName}`.trim() : ""
+                }
+                initialAge={draft?.age != null ? String(draft.age) : ""}
+                onAdded={(id) => {
+                  setLocalDraftId(id);
+                  setLocalFacts((f) => ({ ...f, hasDraft: true, kidNamed: true }));
+                  go("cover");
+                }}
+                onResumeExisting={(kid) => {
+                  // A live DRAFT can be resumed in place. A provisioned CHILD
+                  // cannot — this flow only ever mints — so the family is sent
+                  // to the dashboard, which owns every existing kid.
+                  if (kid.kind === "draft") {
+                    setLocalDraftId(kid.id);
+                    setLocalFacts((f) => ({ ...f, hasDraft: true, kidNamed: true }));
+                    go("cover");
+                    return;
+                  }
+                  router.push("/dashboard");
+                }}
+              />
+            )}
+
+            {step === "cover" && draftId && (
+              <StepCover
+                draftId={draftId}
+                firstName={firstName}
+                age={draft?.age ?? null}
+                coverAiLive={coverAiLive}
+                onContinue={() => go("story")}
+                onBack={() => go("kid")}
+              />
+            )}
+
+            {step === "story" && draftId && (
+              <StepStory
+                draftId={draftId}
+                firstName={firstName}
+                initialAnswers={draft?.answers ?? {}}
+                onContinue={() => go("ready")}
+                onBack={() => go("cover")}
+              />
+            )}
+
+            {step === "ready" && draftId && (
+              <StepAccountReady
+                draftId={draftId}
+                firstName={firstName}
+                age={draft?.age ?? null}
+                onBack={() => go("story")}
+              />
+            )}
+
+            {/* The one impossible-by-clamp combination, rendered rather than
+                blank: a step past `kid` with no draft id in hand. Reachable only
+                if the draft read failed on this render, so the honest move is to
+                send the family back one rung rather than show an empty page. */}
+            {step !== "parent" && step !== "kid" && !draftId && (
+              <section className="mx-auto w-full max-w-xl px-5 py-16 text-center">
+                <p className="text-base leading-relaxed text-v3-stone">
+                  We lost track of that sign-up. Start from your kid&rsquo;s name and we will pick
+                  it back up.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => go("kid")}
+                  className="v3-label mt-5 inline-flex min-h-[44px] items-center text-v3-profit underline underline-offset-4"
+                >
+                  Back to your kid&rsquo;s details
+                </button>
+              </section>
+            )}
+          </motion.div>
+        </AnimatePresence>
+
+        {/* Signed-in families get a way out of the flow on every screen. Kept
+            out of the sticky header so it never competes with the step meter on
+            a 390px row. */}
+        {parentEmail && step !== "ready" && (
+          <div className="mx-auto w-full max-w-5xl px-5 pb-12">
+            <a
+              href="/dashboard"
+              className="v3-label inline-flex min-h-[44px] items-center text-v3-stone underline underline-offset-4 hover:text-v3-ink"
+            >
+              Parent dashboard
+            </a>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}

@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   consentVerdict,
   currentPolicyHash,
+  fpProvisioningConsentVerdict,
   hashPolicyText,
   isPublishedConsentVersion,
   parseConsentAccept,
+  photoConsentVerdict,
   FP_CONSENT_POLICY,
   FP_PARENTAL_CONSENT_VERSIONS,
   FP_CONSENT_MIN_VERSION,
+  FP_PHOTO_CONSENT_MIN_VERSION,
 } from "../consent-rules";
 
 /* ------------------------------------------------------------- the registry */
@@ -163,5 +166,234 @@ describe("2026-08-03.1 policy bump (Phase A cohort instrument)", () => {
     expect(FP_CONSENT_POLICY.text).toContain("first name");
     expect(FP_CONSENT_POLICY.text).toContain("age band");
     expect(FP_CONSENT_POLICY.text).toContain("saved game progress");
+  });
+});
+
+/* ------------------------------------- the 2026-08-05.1 bump (New User Flow v3) */
+
+describe("2026-08-05.1 policy bump (v3 photo + AI cover + draft storage)", () => {
+  it("is published AND is the version the server currently renders", () => {
+    expect(isPublishedConsentVersion("2026-08-05.1")).toBe(true);
+    expect(FP_CONSENT_POLICY.version).toBe("2026-08-05.1");
+    expect(FP_PARENTAL_CONSENT_VERSIONS[FP_PARENTAL_CONSENT_VERSIONS.length - 1]).toBe("2026-08-05.1");
+  });
+
+  it("binds by hash: the current version with the current text is ok, with any other text is a mismatch", () => {
+    expect(
+      consentVerdict({ echoedVersion: "2026-08-05.1", echoedHash: currentPolicyHash() })
+    ).toBe("ok");
+    // The 2026-08-03.1 text echoed under the new version number is exactly the
+    // tamper/drift case the hash exists to catch.
+    const priorText = FP_CONSENT_POLICY.text.replace(
+      "I consent to First Profit collecting a photo of my child",
+      "I do not consent to any photo of my child"
+    );
+    expect(consentVerdict({ echoedVersion: "2026-08-05.1", echoedHash: hashPolicyText(priorText) })).toBe(
+      "version_mismatch"
+    );
+  });
+
+  it("discloses all three R1 clauses (account, photo -> third-party AI cover incl. future kid uploads, storage incl. the draft)", () => {
+    // (a) creating the child's account
+    expect(FP_CONSENT_POLICY.text).toContain("creating an account for my child");
+    // (b) photo -> third-party AI image service -> comic cover, incl. FUTURE
+    //     uploads the child themselves starts from inside First Profit
+    expect(FP_CONSENT_POLICY.text).toContain("collecting a photo of my child");
+    expect(FP_CONSENT_POLICY.text).toContain("third-party artificial intelligence image service");
+    expect(FP_CONSENT_POLICY.text).toContain("comic book cover");
+    expect(FP_CONSENT_POLICY.text).toContain("future photo my child chooses to upload from inside First Profit");
+    // (c) storing answers + generated cover on the profile, incl. the PRE-ACCOUNT draft
+    expect(FP_CONSENT_POLICY.text).toContain("answers to the signup questions");
+    expect(FP_CONSENT_POLICY.text).toContain("draft record that is created before the account exists");
+  });
+
+  it("carries every pre-existing disclosure forward (additive only, never a narrowing)", () => {
+    for (const phrase of [
+      "first name",
+      "age band",
+      "birth year",
+      "stuck",
+      "twelve months",
+      "saved game progress",
+      "review or delete my child's account",
+    ]) {
+      expect(FP_CONSENT_POLICY.text).toContain(phrase);
+    }
+  });
+
+  it("has no em dashes anywhere in the rendered text (repo style)", () => {
+    expect(FP_CONSENT_POLICY.text).not.toContain("—");
+  });
+});
+
+/* ------------------------------------------------------------- the two anchors */
+
+describe("the two consent anchors (mint vs photo)", () => {
+  it("keeps the MINT anchor pinned at 2026-08-01.1 across the bump", () => {
+    // Moving it would send every pre-deploy consent into consentGate's
+    // stale -> compensate loop, DELETING just-minted children on retry.
+    expect(FP_CONSENT_MIN_VERSION).toBe("2026-08-01.1");
+  });
+
+  it("points the PHOTO anchor at the new version, and they are genuinely different", () => {
+    expect(FP_PHOTO_CONSENT_MIN_VERSION).toBe("2026-08-05.1");
+    expect(FP_PHOTO_CONSENT_MIN_VERSION).not.toBe(FP_CONSENT_MIN_VERSION);
+    expect(isPublishedConsentVersion(FP_PHOTO_CONSENT_MIN_VERSION)).toBe(true);
+  });
+
+  it("an OLD-version consent still PASSES the mint anchor while FAILING the photo anchor", () => {
+    // The beta cohort / v2 applicant case: they keep minting children fine and
+    // simply have no cover until a fresh consent is captured.
+    expect(fpProvisioningConsentVerdict("2026-08-01.1")).toEqual({ ok: true });
+    expect(fpProvisioningConsentVerdict("2026-08-03.1")).toEqual({ ok: true });
+
+    const stale = photoConsentVerdict({
+      rows: [{ policyVersion: "2026-08-03.1", acceptedAt: "2026-08-03T10:00:00.000Z" }],
+    });
+    expect(stale.ok).toBe(false);
+    if (!stale.ok) expect(stale.reason).toBe("stale");
+  });
+});
+
+/* ------------------------------------------------------- the photo/cover gate */
+
+describe("photoConsentVerdict (EXISTS over plural rows + tombstone)", () => {
+  const current = "2026-08-05.1";
+
+  it("refuses when the child has no consent rows at all", () => {
+    const v = photoConsentVerdict({ rows: [] });
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.reason).toBe("no_consent");
+  });
+
+  it("allows when ONE of several rows qualifies (per-child active consents are legitimately plural)", () => {
+    // Per-attempt uniqueness, the add-another-kid loop, and attempt-less legacy
+    // capture rows all produce plural actives; a single-row read would coin-flip.
+    const v = photoConsentVerdict({
+      rows: [
+        { policyVersion: "2026-08-01.1", acceptedAt: "2026-08-01T09:00:00.000Z" },
+        { policyVersion: current, acceptedAt: "2026-08-05T09:00:00.000Z" },
+      ],
+    });
+    expect(v.ok).toBe(true);
+    if (v.ok) expect(v.policyVersion).toBe(current);
+  });
+
+  it("ignores a row revoked individually", () => {
+    const v = photoConsentVerdict({
+      rows: [
+        {
+          policyVersion: current,
+          acceptedAt: "2026-08-05T09:00:00.000Z",
+          revokedAt: "2026-08-05T10:00:00.000Z",
+        },
+      ],
+    });
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.reason).toBe("all_revoked");
+  });
+
+  it("ignores a row accepted BEFORE the child's tombstone and honors one accepted AFTER", () => {
+    const tombstone = "2026-08-06T12:00:00.000Z";
+
+    // The sweep-vs-concurrent-capture race: an unrevoked row that landed at or
+    // before the revocation instant must NOT silently re-open the gate.
+    const before = photoConsentVerdict({
+      rows: [{ policyVersion: current, acceptedAt: "2026-08-06T11:59:59.000Z" }],
+      revokedAt: tombstone,
+    });
+    expect(before.ok).toBe(false);
+    if (!before.ok) expect(before.reason).toBe("pre_tombstone");
+
+    // Exactly AT the tombstone is the racing insert, and it loses too.
+    const atInstant = photoConsentVerdict({
+      rows: [{ policyVersion: current, acceptedAt: tombstone }],
+      revokedAt: tombstone,
+    });
+    expect(atInstant.ok).toBe(false);
+
+    // A deliberate re-consent afterwards re-opens the gate.
+    const after = photoConsentVerdict({
+      rows: [
+        { policyVersion: current, acceptedAt: "2026-08-06T11:59:59.000Z" },
+        { policyVersion: current, acceptedAt: "2026-08-07T08:00:00.000Z" },
+      ],
+      revokedAt: tombstone,
+    });
+    expect(after.ok).toBe(true);
+  });
+
+  it("does not count a row whose accepted_at cannot be placed against a tombstone (fail closed)", () => {
+    const v = photoConsentVerdict({
+      rows: [{ policyVersion: current, acceptedAt: "not a date" }],
+      revokedAt: "2026-08-06T12:00:00.000Z",
+    });
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.reason).toBe("pre_tombstone");
+  });
+
+  it("accepts Date and epoch-ms timestamps as well as ISO strings", () => {
+    const v = photoConsentVerdict({
+      rows: [{ policyVersion: current, acceptedAt: new Date("2026-08-07T08:00:00.000Z") }],
+      revokedAt: Date.parse("2026-08-06T12:00:00.000Z"),
+    });
+    expect(v.ok).toBe(true);
+  });
+
+  it("refuses a row with a missing or unpublishable version rather than inferring consent", () => {
+    const v = photoConsentVerdict({ rows: [{ policyVersion: null, acceptedAt: "2026-08-07T08:00:00.000Z" }] });
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.reason).toBe("stale");
+  });
+
+  /* ------- ordering alone is not proof: the PUBLISHED guard (fail closed) ------ */
+
+  it("REFUSES an unpublished but textually-newer version instead of opening the gate on it", () => {
+    // The proven hole: "2099-01-01.1" sorts past every anchor we will ever set,
+    // and before the published guard this returned { ok: true } - opening the
+    // minor's-photo / third-party-AI gate on a version nobody ever published or
+    // rendered. Consent is never inferred from a version number alone.
+    const v = photoConsentVerdict({
+      rows: [{ policyVersion: "2099-01-01.1", acceptedAt: "2026-08-07T08:00:00.000Z" }],
+    });
+    expect(v.ok).toBe(false);
+    if (!v.ok) {
+      expect(v.reason).toBe("unknown_version");
+      // Distinct from `stale` on purpose: there is nothing older to re-consent
+      // from, so reporting it as stale would hide a bogus version number.
+      expect(v.reason).not.toBe("stale");
+      expect(isPublishedConsentVersion("2099-01-01.1")).toBe(false);
+    }
+  });
+
+  it("still ALLOWS the published current version (the guard costs the happy path nothing)", () => {
+    const v = photoConsentVerdict({
+      rows: [{ policyVersion: current, acceptedAt: "2026-08-07T08:00:00.000Z" }],
+    });
+    expect(v.ok).toBe(true);
+    if (v.ok) expect(v.policyVersion).toBe(current);
+    expect(isPublishedConsentVersion(current)).toBe(true);
+  });
+
+  it("still refuses a PUBLISHED older version below the photo anchor as `stale`, exactly as before", () => {
+    // The pre-v3 family: a real, published, rendered consent that simply predates
+    // the photo disclosures. That refusal is `stale` (re-consent fixes it), never
+    // `unknown_version`.
+    const v = photoConsentVerdict({
+      rows: [{ policyVersion: "2026-08-01.1", acceptedAt: "2026-08-01T09:00:00.000Z" }],
+    });
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.reason).toBe("stale");
+  });
+
+  it("prefers the published qualifying row when an unpublished claim sits beside it", () => {
+    const v = photoConsentVerdict({
+      rows: [
+        { policyVersion: "2099-01-01.1", acceptedAt: "2026-08-07T08:00:00.000Z" },
+        { policyVersion: current, acceptedAt: "2026-08-07T09:00:00.000Z" },
+      ],
+    });
+    expect(v.ok).toBe(true);
+    if (v.ok) expect(v.policyVersion).toBe(current);
   });
 });

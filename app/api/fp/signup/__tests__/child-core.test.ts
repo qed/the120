@@ -676,6 +676,115 @@ describe("createChild — U12 fp_username claimed via service-role admin write",
   });
 });
 
+/* ------------------------- v3 Unit 3: the OPTIONAL lastName (review FIX 4) */
+
+describe("createChild — the v3 optional lastName, and the FP door's byte-identical parity", () => {
+  it("the insert payload carries last_name, trimmed and bounded", async () => {
+    const { deps, calls } = build();
+    const res = await createChild(deps, { ...input, lastName: "  Newal  " });
+    expect(res.ok).toBe(true);
+    expect(childInserts(calls)[0]?.row?.last_name).toBe("Newal");
+  });
+
+  it("an over-long last name is BOUNDED at the insert (80 chars, the funnel's own name bound)", async () => {
+    const { deps, calls } = build();
+    await createChild(deps, { ...input, lastName: "N".repeat(200) });
+    expect(childInserts(calls)[0]?.row?.last_name).toBe("N".repeat(80));
+  });
+
+  it("a two-name input seeds the username base as `firstname.lastname`", async () => {
+    // This is the whole point of the switch from mintUsername to
+    // mintUsernameFromNames: the v3 handle shape. It must reach the SERVICE-ROLE
+    // claim, and it must stay inside the storage CHECK / login regex, which
+    // admit `.` as an interior character but not as an edge one.
+    const { deps, calls } = build();
+    const res = await createChild(deps, { ...input, firstName: "Remi", lastName: "Newal" });
+    expect(res).toMatchObject({ ok: true, username: "remi.newal" });
+    const claimed = String(usernameClaims(calls)[0]?.row?.fp_username);
+    expect(claimed).toBe("remi.newal");
+    // generator ⊆ CHECK === login regex (the three-party nesting invariant).
+    expect(claimed).toMatch(/^[a-z0-9]([a-z0-9._+@-]*[a-z0-9])?$/);
+  });
+
+  it("the collision suffix lands on the DOTTED base, not on the first name", async () => {
+    const { deps, calls } = build({ existingUsernames: ["remi.newal"] });
+    const res = await createChild(deps, { ...input, firstName: "Remi", lastName: "Newal" });
+    expect(res).toMatchObject({ ok: true, username: "remi.newal2" });
+    expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("remi.newal2");
+  });
+
+  it("an UNDERIVABLE last name degrades to the first-name base — never a trailing dot", async () => {
+    // A dotted base with an empty right-hand side would be `remi.`, which the
+    // storage CHECK rejects (both ends must be alphanumeric).
+    const { deps, calls } = build();
+    const res = await createChild(deps, { ...input, firstName: "Remi", lastName: "🙂" });
+    expect(res).toMatchObject({ ok: true, username: "remi" });
+    expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("remi");
+  });
+
+  it("PARITY: omitting lastName is byte-identical to the pre-change wiring at BOTH call sites", async () => {
+    // The FP HTTP door (firstprofit.school) collects a first name only and
+    // omits lastName. `mintUsernameFromNames` with no last name IS
+    // `mintUsername`, and last_name keeps the column's '' default — so the live
+    // door's behaviour must be unchanged by the v3 widening. Both call sites are
+    // covered: the pre-seed `ilike` probe's base, and the claim itself.
+    const omitted = build();
+    const resOmitted = await createChild(omitted.deps, { ...input, firstName: "Dana" });
+    const nulled = build();
+    const resNulled = await createChild(nulled.deps, {
+      ...input,
+      firstName: "Dana",
+      lastName: null,
+    });
+    const empty = build();
+    const resEmpty = await createChild(empty.deps, {
+      ...input,
+      firstName: "Dana",
+      lastName: "   ",
+    });
+
+    for (const res of [resOmitted, resNulled, resEmpty]) {
+      expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana" });
+    }
+    for (const { calls } of [omitted, nulled, empty]) {
+      // The roster row's last_name is the column default, never the literal
+      // "null" a naive `${input.lastName}` would have written.
+      expect(childInserts(calls)[0]?.row?.last_name).toBe("");
+      // Call site 1: the taken-set pre-seed probes the BARE base.
+      const seed = calls.find(
+        (c) => c.client === "admin" && c.table === "children" && c.op === "select"
+      );
+      expect(seed?.filters["ilike:fp_username"]).toBe("dana%");
+      // Call site 2: the service-role claim writes the first-name-only handle.
+      expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("dana");
+    }
+  });
+
+  it("PARITY: the multi-word FIRST name still strips to a dash-free handle when a last name is present", async () => {
+    // `Mary Jane` + `Smith` must not become `mary-jane.smith` (the 23514 the
+    // separator-strip fix exists to prevent) — each SEGMENT is slugged
+    // independently and only the joining dot survives.
+    const { deps, calls } = build();
+    const res = await createChild(deps, { ...input, firstName: "Mary Jane", lastName: "Smith" });
+    expect(res).toMatchObject({ ok: true, username: "maryjane.smith" });
+    expect(String(usernameClaims(calls)[0]?.row?.fp_username)).toMatch(/^[a-z0-9]+\.[a-z0-9]+$/);
+  });
+
+  it("the password's name guard still uses the FIRST name only (lastName is deliberately not part of it here)", async () => {
+    // The v3 credential builder applies the stricter full-name check upstream;
+    // this core must NOT tighten, or an FP-door password that was valid before
+    // would start failing.
+    const { deps } = build();
+    const res = await createChild(deps, {
+      ...input,
+      firstName: "Dana",
+      lastName: "Ledger",
+      childPassword: "orangeledgerkite",
+    });
+    expect(res.ok).toBe(true);
+  });
+});
+
 /* --------------------------------------- U14: single-path (no credentialChoice) */
 
 describe("createChild — U14 single username+password path", () => {

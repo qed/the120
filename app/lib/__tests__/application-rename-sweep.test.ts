@@ -70,10 +70,20 @@ const ALLOWLIST: ReadonlyArray<{ file: string; count: number; reason: string }> 
       "(type union + constructor) — a code key, not copy; renaming it is a " +
       "behavior change out of Unit 2's scope.",
   },
+  // app/dashboard/data.ts is no longer allowlisted (v3 Unit 9): its single hit
+  // was the `next.intent === "dossier"` guard inside the `submittedPlus`
+  // computation, and `submittedPlus` existed only to decide whether a card
+  // carried the v2 review-walk link. That link retired with the v2 flow, the
+  // guard went with it, and the file is now a genuine ZERO — which the
+  // straggler sweep above enforces from here on.
   {
-    file: "app/dashboard/data.ts",
-    count: 1,
-    reason: "Consumes the same `\"dossier\"` intent discriminant (one guard).",
+    file: "app/lib/v3-signup/remap-rules.ts",
+    count: 2,
+    reason:
+      "The v2→v3 remap table's KEY for that same intent discriminant " +
+      "(`ChildNextKey` member + its table row). The key is `surface.intent` " +
+      "by construction, so it is spelled by session-rules' union, not chosen " +
+      "here — a code key no parent ever sees.",
   },
   {
     file: "app/lib/nurture/rules.ts",

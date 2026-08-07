@@ -24,6 +24,7 @@
  */
 
 import type { RoleGrant } from "./access-rules";
+import { asStoredCoverDataUrl } from "./cover-store-rules";
 
 /* ------------------------------------------------------------ system email */
 
@@ -255,6 +256,24 @@ export type SignInCandidate = {
   /** `children.grade` (int, nullable) — the stored-roster fallback when
    *  birth_year is unset. Absent/non-int narrows to null. NEVER logged. */
   grade: number | null;
+  /**
+   * The child's cover TRIPLE: `children.fp_cover_status`,
+   * `children.fp_cover_blob_key` and `children.fp_cover_data_url` (all text,
+   * all nullable). Only the FP login path selects them; absent/non-string
+   * narrows to null.
+   *
+   * They travel together on purpose: no one of them is the cover. The status
+   * says whether the row claims a picture, the key says whether that picture
+   * lives in the object store, and `coverDataUrl` is the PICTURE ITSELF — the
+   * single artifact rendered during parent signup and carried here by
+   * `planCoverCarry` (v3 Unit 7; migration 20260917120000). A door serves bytes
+   * only when the three agree; reading the status alone would let a caller
+   * conclude "there is a cover" from a word rather than from something it can
+   * actually hand over.
+   */
+  coverStatus: string | null;
+  coverBlobKey: string | null;
+  coverDataUrl: string | null;
 };
 
 /**
@@ -311,6 +330,23 @@ export function parseCandidateRow(row: {
   const birthYear = typeof rawBirthYear === "string" ? rawBirthYear : "";
   const rawGrade = (child as { grade?: unknown }).grade;
   const grade = typeof rawGrade === "number" && Number.isInteger(rawGrade) ? rawGrade : null;
+  // fp_cover_status / fp_cover_blob_key / fp_cover_data_url (v3 Unit 7):
+  // OPTIONAL on the row for exactly the same reason as birth_year/grade — only
+  // the FP login path selects them, every pre-v3 child has NULL, and a
+  // malformed value narrows to null rather than dropping a real student out of
+  // the candidate set. A cover is DECORATION; it must never be able to cost a
+  // child their login.
+  const rawCoverStatus = (child as { fp_cover_status?: unknown }).fp_cover_status;
+  const coverStatus = typeof rawCoverStatus === "string" ? rawCoverStatus : null;
+  const rawCoverKey = (child as { fp_cover_blob_key?: unknown }).fp_cover_blob_key;
+  const coverBlobKey = typeof rawCoverKey === "string" ? rawCoverKey : null;
+  // The stored artifact is GATED, not merely narrowed: it becomes an `<img src>`
+  // in a child's browser, and it is bounded in length so a corrupted column can
+  // never inflate a sign-in response. Over the bound is refused, not truncated —
+  // half a data URL is a broken image.
+  const coverDataUrl = asStoredCoverDataUrl(
+    (child as { fp_cover_data_url?: unknown }).fp_cover_data_url
+  );
   return {
     profileId: row.id,
     userId: row.user_id,
@@ -320,6 +356,9 @@ export function parseCandidateRow(row: {
     username,
     birthYear,
     grade,
+    coverStatus,
+    coverBlobKey,
+    coverDataUrl,
   };
 }
 

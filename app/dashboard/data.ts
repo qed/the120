@@ -8,7 +8,9 @@ import {
   applicantStateAllowsReserve,
   type ApplicantState,
 } from "@/app/lib/funnel/applicant-rules";
-import { childNextScreen } from "@/app/lib/funnel/session-rules";
+import { childNextRoute, childNextScreen, isFpChild } from "@/app/lib/funnel/session-rules";
+import { FIRST_PROFIT_SIGN_IN_URL } from "@/app/lib/v3-signup/flow-rules";
+import { v3RemapRoute, type RemapContext } from "@/app/lib/v3-signup/remap-rules";
 import { MANIFEST_2026_27 } from "@/app/fp/content/manifest";
 
 /**
@@ -72,6 +74,11 @@ export const statusMeta = (s: SeatStatus) => STATUS_FLOW[statusIndex(s)] ?? UNKN
  *  step that no longer exists. */
 export const RESERVE_GATE_MESSAGE =
   "The 120's seats are spoken for right now — your child is on the waitlist, and we'll email you the moment a spot opens.";
+
+/** The remap table's own answer for the `dashboard` verdict — read from the
+ *  table rather than written again here, so "is this destination the page we
+ *  are already on" cannot drift from the route the table hands out. */
+const DASHBOARD_HREF = v3RemapRoute({ screen: "dashboard" }) ?? "/dashboard";
 
 /** A live paid deposit exists. Always derive from the FULL deposit list —
  *  a refund-then-repay child has multiple rows and a single find() can grab
@@ -197,6 +204,12 @@ export function bandNote(grade: number | ""): string {
 const WAITLIST_CARD_NOTE = "Seats open when plans change. We contact you first.";
 const PENDING_DEPOSIT_NOTE =
   "Payment processing. Bank debits can take a few days. No further action needed.";
+/** ONE label for every card whose remap destination is the v3 kid step
+ *  (`mini_app.resume`, `mini_app.compose`, `dashboard.dossier`,
+ *  `status_only.waitlisted`). They all open the same screen, so they say the
+ *  same thing — and what that screen does is set up a First Profit account, not
+ *  continue an application v3 no longer has. */
+const V3_KID_STEP_CTA_LABEL = "Start building";
 
 /** What the funnel card's primary affordance IS — layout renders, never
  *  decides (repo convention: components are layout-only). */
@@ -216,7 +229,10 @@ export type FunnelCardCta =
   | { kind: "reserve"; label: string }
   /** Green reserved badge; `href` present only when the arrival surface is
    *  this child's verdict (live deposit at `deposited`). */
-  | { kind: "reserved"; label: string; href?: string };
+  | { kind: "reserved"; label: string; href?: string }
+  /** THE FP CELL (v3 Unit 8): this child holds a First Profit account. The
+   *  destination is First Profit itself, not any The120 surface. */
+  | { kind: "keep_building"; label: string; href: string };
 
 export type CardVerdict =
   /** NULL applicant_state: render today's card EXACTLY as-is. */
@@ -231,11 +247,18 @@ export type CardVerdict =
       /** Small mono context line (waitlist / clearing-debit), no CTA. */
       note?: string;
       primaryCta?: FunnelCardCta;
-      /** The R13 review-walk entry: read-only mini-app, `submitted`+ only.
-       *  Always the outlined blue pill twin (2026-07-30: the red mono
-       *  "Open application" links are retired — every card carries only the
-       *  blue CTA pair, Continue application / Review application). */
-      secondaryReviewLink?: { label: string; href: string };
+      /* ── RETIRED (v3 plan Unit 9): `secondaryReviewLink`. ──
+       * It was the R13 review-walk entry — an outlined "Review application"
+       * pill pointing at the v2 literal `/start/child/<id>`, the read-only
+       * walkthrough of a submitted application. Unit 8 deliberately LEFT it as
+       * a v2 literal while that walkthrough was still real content; this unit
+       * archived the walkthrough (`archive/new-user-v2/child/[childId]`), so
+       * the link now has nothing to open. Its URL still resolves — the retired
+       * route redirects to the dashboard — which is exactly why the field had
+       * to go rather than be left: a button labelled "Review application" that
+       * returns the family to the page they are standing on is worse than no
+       * button. There is no v3 walkthrough to retarget it at; v3 families have
+       * no application to review. Removed, not repointed. */
       /** Direct reserve (2026-08-02): pre-submission cells whose child passes
        *  the relaxed gate carry the reserve action as a SECONDARY button —
        *  the primary CTA stays "Continue application" (the `/start` flow is
@@ -279,7 +302,10 @@ export type CardVerdict =
  *    `deposited` row).
  */
 export function cardVerdict(
-  child: Pick<Child, "id" | "status" | "applicantState">,
+  child: Pick<Child, "id" | "status" | "applicantState"> & {
+    /** The v3 FP discriminator (plan Unit 8); absent reads as "not FP". */
+    fpUsername?: string | null;
+  },
   deposits: { status: string }[],
   hasComposedProject: boolean,
   /** The ACTIVE project's name (2026-07-30): when the card's cell is the
@@ -287,38 +313,75 @@ export function cardVerdict(
    *  generic "PROJECT CREATED". Null/empty falls back to the generic line
    *  (the name always exists in the row — compose inserts the fallback name
    *  before the model runs — so the fallback here is read-failure armor). */
-  activeProjectName: string | null = null
+  activeProjectName: string | null = null,
+  /**
+   * The converted-funnel-parent facts (`needsSetPasswordStep`), threaded from
+   * the dashboard gate's server read. Optional: a caller with no user record
+   * gets the un-diverted destination, which is what every producer without a
+   * `ctx` already gets (`remapV2Verdict`'s own contract).
+   */
+  remapCtx?: RemapContext
 ): CardVerdict {
   const liveDeposit = hasPaidDeposit(deposits);
   const next = childNextScreen({
     applicantState: child.applicantState,
     liveDeposit,
     hasComposedProject,
+    // The v3 per-child discriminator (plan Unit 8).
+    fpProvisioned: isFpChild({ fpUsername: child.fpUsername }),
   });
+
+  // ── THE FP CELL, FIRST AND UNCONDITIONAL (v3 Unit 8) ──
+  // Returned ABOVE the reserve computation on purpose. An FP child sits on
+  // `applicant_state = 'added'` with no deposit, which is precisely the shape
+  // the funnel cells read as "mid-application, un-deposited" — so falling
+  // through would show a First Profit family "Continue application" and a live
+  // "$250 reserve" CTA for a program they are already inside. There is nothing
+  // to reserve and nothing to continue; there is a kid with an account.
+  if (next.surface === "first_profit") {
+    return {
+      kind: "funnel",
+      statusLine: "FIRST PROFIT",
+      tone: "green",
+      primaryCta: {
+        kind: "keep_building",
+        label: "Keep building",
+        href: FIRST_PROFIT_SIGN_IN_URL,
+      },
+    };
+  }
 
   // NULL applicant_state: render today's card EXACTLY as-is.
   if (next.surface === "dashboard" && next.intent === "legacy") {
     return { kind: "legacy" };
   }
 
-  const miniAppHref = `/start/child/${child.id}`;
-  // `submitted`-and-later, read off the verdict: the pre-submission cells are
-  // exactly the mini_app surfaces (`added`, compose owed) and the `dossier`
-  // intent (`project_created` with a project); every other cell is at or past
-  // submission and carries the R13 review-walk link.
-  const submittedPlus =
-    next.surface !== "mini_app" &&
-    !(next.surface === "dashboard" && next.intent === "dossier");
-  // 2026-07-30 (item 43, superseding item 17): the review entry opens the
-  // READ-ONLY WALKTHROUGH of the application flow — forward/back only, the
-  // landing rule starts it at the top. The one-page summary is retired.
-  const secondaryReviewLink = submittedPlus
-    ? { label: "Review application", href: miniAppHref }
-    : undefined;
+  // ── THE CTA DESTINATION COMES FROM THE ONE REMAP TABLE (v3 Unit 8 review) ──
+  // It used to be the v2 literal `/start/child/<id>`, built here. That made the
+  // dashboard card a SECOND producer of destinations, disagreeing with
+  // `resolveReentry`/`screenRoute` and `/resume/[token]` for the same child: a
+  // mid-application v2 family was diverted into the v3 kid flow by an emailed
+  // link and into the still-live v2 mini-app by their own card — the split
+  // state the hard launch exists to close. `childNextRoute` is that one table,
+  // and it is also what makes Unit 9's archival of the v2 child routes a
+  // single edit rather than a hunt.
+  const ctaHref = childNextRoute(next, remapCtx);
+  // A cell whose v3 destination IS the dashboard has nothing left to continue —
+  // the family is already looking at it. Render no primary CTA rather than a
+  // button that links to the page it sits on. No cell that reaches this line
+  // answers `dashboard` today (Unit 9's review moved the last two — `dossier`
+  // and `waitlisted` — onto the kid step, because "no CTA" turned out to mean
+  // "no way forward at all" for them); the guard stays because it is what keeps
+  // a future re-point from shipping a button that reloads the page.
+  const ctaTarget = ctaHref && ctaHref !== DASHBOARD_HREF ? ctaHref : null;
+  // The v2 review-walk link (`/start/child/<id>`) used to be computed here for
+  // every `submitted`-and-later cell. Unit 9 archived the walkthrough it opened;
+  // see the `secondaryReviewLink` note on the verdict type above for why it was
+  // removed rather than repointed.
 
   // Pre-guard 1: ENROLLED (see the precedence docblock).
   if (next.surface === "dashboard" && next.intent === "enrolled") {
-    return { kind: "funnel", statusLine: "ENROLLED", tone: "red", secondaryReviewLink };
+    return { kind: "funnel", statusLine: "ENROLLED", tone: "red" };
   }
 
   // Pre-guard 2: the paid-deposit bridge — every live-paid cell except the
@@ -333,7 +396,6 @@ export function cardVerdict(
         label: "Seat reserved ✓",
         ...(next.surface === "arrival" ? { href: "/start/arrival" } : {}),
       },
-      secondaryReviewLink,
     };
   }
 
@@ -358,23 +420,26 @@ export function cardVerdict(
       // project was invalidated (the re-compose obligation).
       // 2026-07-30: pre-name cells all read APPLICATION JUST STARTED — the
       // customized company name takes over the moment one exists.
-      return next.intent === "resume"
-        ? {
-            kind: "funnel",
-            statusLine: "APPLICATION JUST STARTED",
-            tone: "red",
-            primaryCta: { kind: "start", label: "Continue application", href: miniAppHref },
-            note: pendingNote,
-            secondaryReserveCta: reserveCta,
-          }
-        : {
-            kind: "funnel",
-            statusLine: "APPLICATION JUST STARTED",
-            tone: "red",
-            primaryCta: { kind: "compose", label: "Continue application", href: miniAppHref },
-            note: pendingNote,
-            secondaryReserveCta: reserveCta,
-          };
+      return {
+        kind: "funnel",
+        statusLine: "APPLICATION JUST STARTED",
+        tone: "red",
+        ...(ctaTarget
+          ? {
+              primaryCta: {
+                kind: next.intent === "resume" ? ("start" as const) : ("compose" as const),
+                // ONE label across every cell that remaps to the kid step
+                // (Unit 9 review): they all lead to the same screen now, and
+                // "Continue application" was describing a thing v3 does not
+                // have, on a button that opens First Profit onboarding.
+                label: V3_KID_STEP_CTA_LABEL,
+                href: ctaTarget,
+              },
+            }
+          : {}),
+        note: pendingNote,
+        secondaryReserveCta: reserveCta,
+      };
     case "dashboard":
       // Only `dossier` reaches here — `legacy` and `enrolled` returned above.
       return {
@@ -385,7 +450,22 @@ export function cardVerdict(
         // (2026-07-30).
         statusLine: activeProjectName?.trim() || "APPLICATION JUST STARTED",
         tone: "red",
-        primaryCta: { kind: "continue_dossier", label: "Continue application", href: miniAppHref },
+        // The v2 dossier editor is retired with the flow, and for one release
+        // this cell's remap answered `dashboard`, which left the card with a
+        // status line and NO BUTTON — the family that had done the MOST v2 work
+        // was the one with nowhere to go. The table now sends them at the kid
+        // step like every other family with a child and no First Profit
+        // account, and this shape (unchanged, because it was always the table
+        // that decided) picks the button back up.
+        ...(ctaTarget
+          ? {
+              primaryCta: {
+                kind: "continue_dossier" as const,
+                label: V3_KID_STEP_CTA_LABEL,
+                href: ctaTarget,
+              },
+            }
+          : {}),
         note: pendingNote,
         secondaryReserveCta: reserveCta,
       };
@@ -402,7 +482,6 @@ export function cardVerdict(
             statusLine: activeProjectName?.trim() || "SUBMITTED FOR REVIEW",
             tone: "red",
             note: pendingNote,
-            secondaryReviewLink,
             secondaryReserveCta: reserveCta,
           };
         case "in_review":
@@ -411,17 +490,31 @@ export function cardVerdict(
             statusLine: activeProjectName?.trim() || "UNDER REVIEW",
             tone: "red",
             note: pendingNote,
-            secondaryReviewLink,
             secondaryReserveCta: reserveCta,
           };
         case "waitlisted":
-          // F7: never a payment CTA — checkout is closed for this family.
+          // F7 still holds: never a PAYMENT CTA — checkout is closed for this
+          // family, paid or not. What they get instead (Unit 9 review) is the
+          // ONBOARDING CTA every other kid-owning family gets: the launch email
+          // tells them "there is no waitlist any more, sign in and your kid can
+          // start building today", and until this cell carried a forward path
+          // the dashboard answered that promise with a badge and nothing else.
+          // The href is the remap table's, so it is the same destination the
+          // email's own resume path resolves to.
           return {
             kind: "funnel",
             statusLine: "WAITLISTED",
             tone: "red",
             note: WAITLIST_CARD_NOTE,
-            secondaryReviewLink,
+            ...(ctaTarget
+              ? {
+                  primaryCta: {
+                    kind: "start" as const,
+                    label: V3_KID_STEP_CTA_LABEL,
+                    href: ctaTarget,
+                  },
+                }
+              : {}),
           };
         default: {
           const exhaustive: never = next;
@@ -441,7 +534,6 @@ export function cardVerdict(
         primaryCta: reserveCta,
         // R1: the outlined pill twin — beside Reserve when it renders, alone
         // (R1a) when reserve is suppressed (pending debit / gate refusal).
-        secondaryReviewLink,
       };
     case "arrival":
       // Unreachable: `arrival` exists only with a live deposit, which the
@@ -452,7 +544,6 @@ export function cardVerdict(
         statusLine: "SEAT RESERVED",
         tone: "green",
         primaryCta: { kind: "reserved", label: "Seat reserved ✓", href: "/start/arrival" },
-        secondaryReviewLink,
       };
     default: {
       const exhaustive: never = next;
@@ -1025,6 +1116,14 @@ export type Child = {
    *  never written by the dashboard. Decides which children render the
    *  KEEP BUILDING (Path) card inside the Path-register shell. */
   arrivedAt: string | null;
+  /**
+   * `children.fp_username` (v3 Unit 8): the child's First Profit login handle,
+   * non-null iff they hold an account. Two jobs on this dashboard — it is the
+   * FP card cell's discriminator, and it is what the per-kid credentials panel
+   * SHOWS the parent (kid emails are non-deliverable `.invalid`, so there is no
+   * "email me my username" path; the dashboard is the only place it lives).
+   */
+  fpUsername: string | null;
 };
 
 export type Parent = {
@@ -1061,6 +1160,8 @@ export function emptyChild(id: string): Child {
     applicantState: null,
     // Arrival is server-stamped only — a fresh child has never arrived.
     arrivedAt: null,
+    // fp_username is service-role-only (trigger-guarded) — never client-set.
+    fpUsername: null,
   };
 }
 

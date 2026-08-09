@@ -241,6 +241,58 @@ ${itemsHtml}
   return { subject, html, text: textLines.join("\n") };
 }
 
+/* ───────────────────────────── fpv03 U3c: kid login-code email ──────────── */
+
+export type LoginCodeEmailInput = {
+  parentFirstName?: string | null;
+  childFirstName: string;
+  /** The 6-digit code, verbatim. It rides ONLY this email — never a log line —
+   *  and the html part escapes it like every interpolation (defense in depth;
+   *  it is server-minted digits by construction). */
+  code: string;
+};
+
+/**
+ * The parent-notification email for a kid's "email my parent a code" sign-in
+ * (fpv03 U3c). A TRANSACTIONAL SECURITY notice like buildFpSiteLiveNotice: it
+ * is the parent's real-time signal that someone is signing in as their kid,
+ * so it carries NO unsubscribe footer (suppressing it would defeat the point
+ * — suppression for revoked-consent families is enforced at the send
+ * boundary instead). Pure builder; the send owns suppression + delivery.
+ */
+export function buildLoginCodeEmail(input: LoginCodeEmailInput): RenderedEmail {
+  const parent = (input.parentFirstName ?? "").trim() || "there";
+  const child = input.childFirstName.trim();
+  const code = input.code.trim();
+  // "Your kid Remi" with a name, plain "Your kid" without — never doubled.
+  const kidPhrase = child ? `Your kid ${child}` : "Your kid";
+
+  const subject = headerSafe(
+    child ? `${child}'s First Profit sign-in code` : "Your kid's First Profit sign-in code"
+  );
+
+  const html = shell(
+    `  <p style="margin: 0 0 16px;">Hi ${escapeHtml(parent)},</p>
+  <p style="margin: 0 0 16px;">${escapeHtml(kidPhrase)} is signing in to First Profit. Their code:</p>
+  <p style="margin: 0 0 16px; font-size: 28px; font-weight: 700; letter-spacing: 6px;">${escapeHtml(code)}</p>
+  <p style="margin: 0 0 16px;">Expires in ten minutes.</p>
+  <p style="margin: 0; font-size: 13px; color: #8a93a6;">If this wasn't your kid, you can ignore this email. The code only works together with their username.</p>`,
+    null
+  );
+
+  const text = [
+    `Hi ${parent},`,
+    ``,
+    `${kidPhrase} is signing in to First Profit. Their code: ${code}. Expires in ten minutes.`,
+    ``,
+    `If this wasn't your kid, you can ignore this email. The code only works together with their username.`,
+    ``,
+    FOOTER_TEXT,
+  ].join("\n");
+
+  return { subject, html, text };
+}
+
 /* ─────────────────────────────────────────────────────── suppression rules */
 
 /** The family fields the suppression rule reads. Mirrors the welcome path's

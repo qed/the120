@@ -5,14 +5,21 @@ import { describe, expect, it } from "vitest";
 import { classifyIdentifier } from "@/app/api/fp/login/login-rules";
 import {
   appendUsernameSuffix,
+  FP_USERNAME_DOMAIN,
   generateUsernameBase,
   generateUsernameLocalPart,
+  MAX_USERNAME_LOCAL_LENGTH,
   mintUsername,
   mintUsernameFromNames,
   pickUniqueUsername,
   USERNAME_FALLBACK_BASE,
+  usernameLocalPart,
+  withUsernameDomain,
   MAX_USERNAME_ATTEMPTS,
 } from "../fp-username-rules";
+
+/** fpv03 U3c: every MINTED handle is email-shaped — `<local>@firstprofit.school`. */
+const AT = `@${FP_USERNAME_DOMAIN}`;
 
 /**
  * The pure username decisions (Slice B Unit 12): fold+slug base derivation, the
@@ -112,12 +119,12 @@ describe("pickUniqueUsername — suffixer (alex → alex2 → alex3)", () => {
   });
 });
 
-describe("mintUsername — generate-if-missing (fallback on unfoldable)", () => {
-  it("derives and picks the clean handle for a normal name", () => {
+describe("mintUsername — generate-if-missing (email-shaped since fpv03 U3c)", () => {
+  it("derives and picks the clean email-shaped handle for a normal name", () => {
     expect(mintUsername({ firstName: "Alex", isTaken: () => false })).toEqual({
       ok: true,
-      username: "alex",
-      base: "alex",
+      username: `alex${AT}`,
+      base: `alex${AT}`,
       attempt: 1,
       usedFallback: false,
     });
@@ -127,26 +134,51 @@ describe("mintUsername — generate-if-missing (fallback on unfoldable)", () => 
     const res = mintUsername({ firstName: "🙂", isTaken: () => false });
     expect(res).toEqual({
       ok: true,
-      username: USERNAME_FALLBACK_BASE,
-      base: USERNAME_FALLBACK_BASE,
+      username: `${USERNAME_FALLBACK_BASE}${AT}`,
+      base: `${USERNAME_FALLBACK_BASE}${AT}`,
       attempt: 1,
       usedFallback: true,
     });
   });
 
-  it("suffixes the fallback base too when 'student' is taken", () => {
-    const taken = new Set([USERNAME_FALLBACK_BASE]);
+  it("suffixes the fallback base too when 'student' is taken — digits BEFORE the @", () => {
+    const taken = new Set([`${USERNAME_FALLBACK_BASE}${AT}`]);
     const res = mintUsername({ firstName: "", isTaken: (c) => taken.has(c) });
-    expect(res).toMatchObject({ ok: true, username: `${USERNAME_FALLBACK_BASE}2`, usedFallback: true });
+    expect(res).toMatchObject({
+      ok: true,
+      username: `${USERNAME_FALLBACK_BASE}2${AT}`,
+      usedFallback: true,
+    });
   });
 
-  it("suffixes a real base past a collision", () => {
-    const taken = new Set(["alex"]);
+  it("suffixes a real base past a collision — digits BEFORE the @", () => {
+    const taken = new Set([`alex${AT}`]);
     expect(mintUsername({ firstName: "Alex", isTaken: (c) => taken.has(c) })).toMatchObject({
       ok: true,
-      username: "alex2",
+      username: `alex2${AT}`,
       usedFallback: false,
     });
+  });
+});
+
+describe("withUsernameDomain / usernameLocalPart (fpv03 U3c)", () => {
+  it("appends the fixed domain", () => {
+    expect(withUsernameDomain("remi.newal")).toBe(`remi.newal${AT}`);
+  });
+
+  it("bounds the local part and never leaves it ending on punctuation after the cut", () => {
+    const long = `${"a".repeat(MAX_USERNAME_LOCAL_LENGTH - 1)}.zzzz`;
+    const out = withUsernameDomain(long);
+    const local = out.slice(0, out.indexOf("@"));
+    expect(local.length).toBeLessThanOrEqual(MAX_USERNAME_LOCAL_LENGTH);
+    expect(local).toMatch(/[a-z0-9]$/);
+    // Total stays under the storage CHECK's 80 even with suffix headroom.
+    expect(out.length + 3).toBeLessThanOrEqual(80);
+  });
+
+  it("usernameLocalPart strips the domain and passes a plain handle through", () => {
+    expect(usernameLocalPart(`remi.newal${AT}`)).toBe("remi.newal");
+    expect(usernameLocalPart("remi.newal")).toBe("remi.newal");
   });
 });
 
@@ -179,41 +211,45 @@ describe("generator === CHECK === unique index === login namespace (^[a-z0-9]+$)
     }
   });
 
-  it("mintUsername output (base AND final username, incl. suffix) ALWAYS matches both regexes", () => {
-    // Suffix the first pick so the collision path is exercised too — a numeric
-    // suffix must not break `^[a-z0-9]+$` either.
+  // The MINTED handle is email-shaped since fpv03 U3c; its LOCAL PART must
+  // still be the alnum-only slug (dot-joined), and the whole handle must fit
+  // the broadened (email-shaped) acceptors — asserted by the nesting-invariant
+  // block below against the real classifyIdentifier + migration CHECK.
+  it("mintUsername output's LOCAL PART (incl. suffix) always matches the strict slug shape", () => {
     for (const name of names) {
       const taken = new Set<string>();
       for (let i = 0; i < 3; i += 1) {
         const mint = mintUsername({ firstName: name, isTaken: (c) => taken.has(c) });
         expect(mint.ok).toBe(true);
         if (mint.ok) {
-          expect(mint.username).toMatch(LOGIN_USERNAME_FORMAT);
-          expect(mint.username).toMatch(DB_CHECK_FORMAT);
-          expect(mint.base).toMatch(LOGIN_USERNAME_FORMAT);
+          expect(mint.username.endsWith(AT)).toBe(true);
+          expect(usernameLocalPart(mint.username)).toMatch(/^[a-z0-9]+$/);
           taken.add(mint.username.toLowerCase());
         }
       }
     }
   });
 
-  it("the specific P0 cases land on their alnum-only handles", () => {
+  it("the specific P0 cases land on their alnum-only local parts", () => {
     expect(mintUsername({ firstName: "Mary Jane", isTaken: () => false })).toMatchObject({
       ok: true,
-      username: "maryjane",
+      username: `maryjane${AT}`,
       usedFallback: false,
     });
     expect(mintUsername({ firstName: "Anna-Lee", isTaken: () => false })).toMatchObject({
       ok: true,
-      username: "annalee",
+      username: `annalee${AT}`,
       usedFallback: false,
     });
   });
 
   it("a separators-only first name falls back to `student` (never an empty/invalid handle)", () => {
     const mint = mintUsername({ firstName: "- -", isTaken: () => false });
-    expect(mint).toMatchObject({ ok: true, username: USERNAME_FALLBACK_BASE, usedFallback: true });
-    if (mint.ok) expect(mint.username).toMatch(LOGIN_USERNAME_FORMAT);
+    expect(mint).toMatchObject({
+      ok: true,
+      username: `${USERNAME_FALLBACK_BASE}${AT}`,
+      usedFallback: true,
+    });
   });
 });
 
@@ -244,14 +280,14 @@ describe("generateUsernameLocalPart — firstname.lastname", () => {
 });
 
 describe("mintUsernameFromNames — collision suffix BEFORE the @", () => {
-  it("first kid gets the clean handle, the next gets the numeric suffix", () => {
+  it("first kid gets the clean handle, the next gets the numeric suffix before the @", () => {
     const taken = new Set<string>();
     const first = mintUsernameFromNames({
       firstName: "Remi",
       lastName: "Newal",
       isTaken: (c) => taken.has(c),
     });
-    expect(first).toMatchObject({ ok: true, username: "remi.newal", attempt: 1 });
+    expect(first).toMatchObject({ ok: true, username: `remi.newal${AT}`, attempt: 1 });
     if (first.ok) taken.add(first.username);
 
     const second = mintUsernameFromNames({
@@ -259,7 +295,7 @@ describe("mintUsernameFromNames — collision suffix BEFORE the @", () => {
       lastName: "Newal",
       isTaken: (c) => taken.has(c),
     });
-    expect(second).toMatchObject({ ok: true, username: "remi.newal2", attempt: 2 });
+    expect(second).toMatchObject({ ok: true, username: `remi.newal2${AT}`, attempt: 2 });
     if (second.ok) taken.add(second.username);
 
     const third = mintUsernameFromNames({
@@ -267,7 +303,13 @@ describe("mintUsernameFromNames — collision suffix BEFORE the @", () => {
       lastName: "Newal",
       isTaken: (c) => taken.has(c),
     });
-    expect(third).toMatchObject({ ok: true, username: "remi.newal3" });
+    expect(third).toMatchObject({ ok: true, username: `remi.newal3${AT}` });
+  });
+
+  it("NFKC/diacritic fold carries through to the email-shaped handle", () => {
+    expect(
+      mintUsernameFromNames({ firstName: "Álex", lastName: "Ó Súilleabháin", isTaken: () => false })
+    ).toMatchObject({ ok: true, username: `alex.osuilleabhain${AT}` });
   });
 
   it("`underivable` first name keeps the `student` base through the two-name variant", () => {
@@ -276,7 +318,11 @@ describe("mintUsernameFromNames — collision suffix BEFORE the @", () => {
       lastName: "Newal",
       isTaken: () => false,
     });
-    expect(mint).toMatchObject({ ok: true, username: USERNAME_FALLBACK_BASE, usedFallback: true });
+    expect(mint).toMatchObject({
+      ok: true,
+      username: `${USERNAME_FALLBACK_BASE}${AT}`,
+      usedFallback: true,
+    });
   });
 
   it("is byte-identical to mintUsername when no last name is supplied", () => {
@@ -319,6 +365,7 @@ describe("THE THREE-PARTY NESTING INVARIANT: generator ⊆ DB CHECK === login re
   const NAMES: Array<[string, string]> = [
     ["Remi", "Newal"],
     ["Mary Jane", "van der Berg"],
+    ["Jean-Luc", "Ng"],
     ["Anna-Lee", "O'Brien"],
     ["José", "Ó Súilleabháin"],
     ["Weiß", "Schäfer"],
@@ -359,7 +406,7 @@ describe("THE THREE-PARTY NESTING INVARIANT: generator ⊆ DB CHECK === login re
   });
 
   it("the generator is a STRICT SUBSET: it never emits the punctuation the acceptors merely tolerate", () => {
-    const GENERATOR_SHAPE = /^[a-z0-9]+(\.[a-z0-9]+)?[0-9]*$/;
+    const GENERATOR_SHAPE = /^[a-z0-9]+(\.[a-z0-9]+)?[0-9]*@firstprofit\.school$/;
     for (const [first, last] of NAMES) {
       const mint = mintUsernameFromNames({ firstName: first, lastName: last, isTaken: () => false });
       if (mint.ok) expect(mint.username).toMatch(GENERATOR_SHAPE);

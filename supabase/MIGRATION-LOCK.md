@@ -8,9 +8,24 @@ below (2026-07-29) is out of date and is kept only as history:
 | v3 new-user flow | `120-The120` on `feat/new-user-flow-v3` | through `20260916120000_fp_reserved_handle_auth` |
 | Watchtower | `120-The120-watchtower` on `feat/watchtower` | none yet |
 | Image Lab | `120-The120-image-lab` on `feat/image-lab-category-prompts` | `20260919120000_fp_image_lab` (**applied**), `20260920120000_fp_image_lab_cell_prompts` (authored, **not yet applied**) |
+| fpv03 U3c (login code + username legacy) | `120-The120` on `feat/new-user-flow-v3` | `20260921120000_fp_login_code_and_username_legacy` (authored, **not yet applied**) |
 
-**Holder: Image Lab**, for `20260920120000_fp_image_lab_cell_prompts.sql` only.
-Ask Peter before a second lane authors while that is outstanding.
+**Holders: Image Lab** (`20260920120000_fp_image_lab_cell_prompts.sql`) **and
+fpv03 U3c** (`20260921120000_fp_login_code_and_username_legacy.sql`). Both are
+authored-but-unapplied and additive-only, touching disjoint tables
+(`fp_image_lab_cell_prompts` vs the new `fp_login_codes` + `children`
+column/guard), so they do not collide with each other. Ask Peter before a THIRD
+lane authors while either is outstanding.
+
+⚠ `20260921120000` was chosen as the next free `12:00:00` slot AFTER Image Lab's
+top authored file (`20260920120000`), which is itself provisional (authored with
+no DB credentials). So — exactly like `20260920120000` — the live ledger has NOT
+been queried for `20260921120000`. Whoever applies it MUST run the ledger query
+below first and rename the file to the true next-free slot if either provisional
+number has since been taken; the migration's own header repeats this and the
+parity test resolves the file by glob, so the rename is free. Deploy-first
+discipline: this migration lands BEFORE the `/api/fp/login-code` routes and
+BEFORE `scripts/migrate-fp-usernames.ts` runs.
 
 ⚠ `20260920120000` is a PROVISIONAL slot. It was authored from a worktree with
 no database credentials, so **the ledger query below has not been run for it**.

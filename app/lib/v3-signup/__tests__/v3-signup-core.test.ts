@@ -1014,7 +1014,7 @@ describe("integration: the v3 deps carry a family all the way to a playable chil
 
     const child = store.children.find((c) => c.id === minted.childId);
     expect(child).toMatchObject({ parent_id: verified.parentId, first_name: "Cedric" });
-    expect(child?.fp_username).toBe("cedric");
+    expect(child?.fp_username).toBe("cedric@firstprofit.school");
     expect(attemptRow(store, verified.attemptId)).toMatchObject({
       state: "child_created",
       child_id: minted.childId,

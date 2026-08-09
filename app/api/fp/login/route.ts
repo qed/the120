@@ -57,7 +57,7 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import {
-  childUsernameMatches,
+  childLoginUsernameMatches,
   deriveStudentEmail,
   MAX_SIGN_IN_CANDIDATES,
   parseCandidateRow,
@@ -215,7 +215,7 @@ export async function POST(req: Request): Promise<Response> {
     const res = await admin
       .from("path_student_profiles")
       .select(
-        "id, user_id, child_id, family_id, children!inner(first_name, fp_username, birth_year, grade, fp_cover_status, fp_cover_blob_key, fp_cover_data_url)"
+        "id, user_id, child_id, family_id, children!inner(first_name, fp_username, fp_username_legacy, birth_year, grade, fp_cover_status, fp_cover_blob_key, fp_cover_data_url)"
       )
       .order("created_at", { ascending: true });
     if (res.error) {
@@ -250,7 +250,9 @@ export async function POST(req: Request): Promise<Response> {
       // Path) after the initial backfill. The durable follow-up (not built here)
       // is a children-INSERT auto-username trigger so every new child is born
       // loginable — see app/lib/fp/fp-username-rules.ts mintUsername header.
-      if (childUsernameMatches(candidate.username, classified.normalized)) candidates.push(candidate);
+      // fpv03 U3c: resolve by fp_username OR the fp_username_legacy alias (a
+      // migrated child keeps signing in with the handle they memorized).
+      if (childLoginUsernameMatches(candidate, classified.normalized)) candidates.push(candidate);
       if (candidates.length >= MAX_SIGN_IN_CANDIDATES) break;
     }
 

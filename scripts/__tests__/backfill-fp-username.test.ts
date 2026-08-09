@@ -85,8 +85,8 @@ describe("backfillUsernames — dry-run (default)", () => {
     expect(s.scanned).toBe(2);
     expect(s.filled).toBe(2);
     expect(s.samples).toEqual([
-      { childId: "c1", username: "alex" },
-      { childId: "c2", username: "bella" },
+      { childId: "c1", username: "alex@firstprofit.school" },
+      { childId: "c2", username: "bella@firstprofit.school" },
     ]);
     // Nothing persisted.
     expect(store.every((r) => r.fp_username === null)).toBe(true);
@@ -101,8 +101,8 @@ describe("backfillUsernames — apply", () => {
     ]));
     const s = await backfillUsernames(db, { apply: true });
     expect(s.filled).toBe(2);
-    expect(store.find((r) => r.id === "c1")?.fp_username).toBe("alex");
-    expect(store.find((r) => r.id === "c2")?.fp_username).toBe("bella");
+    expect(store.find((r) => r.id === "c1")?.fp_username).toBe("alex@firstprofit.school");
+    expect(store.find((r) => r.id === "c2")?.fp_username).toBe("bella@firstprofit.school");
   });
 
   it("global uniqueness: two same-named children get distinct suffixed handles", async () => {
@@ -115,17 +115,17 @@ describe("backfillUsernames — apply", () => {
     expect(s.filled).toBe(3);
     expect(s.suffixed).toBe(2);
     const handles = store.map((r) => r.fp_username).sort();
-    expect(handles).toEqual(["alex", "alex2", "alex3"]);
+    expect(handles).toEqual(["alex2@firstprofit.school", "alex3@firstprofit.school", "alex@firstprofit.school"]);
   });
 
   it("seeds the taken-set from EXISTING usernames so a new child does not collide", async () => {
     const { db, store } = fakeDb(rows([
-      ["c1", "Alex", "alex"], // already has one
+      ["c1", "Alex", "alex@firstprofit.school"], // already has one
       ["c2", "Alex", null], // must become alex2
     ]));
     const s = await backfillUsernames(db, { apply: true });
     expect(s.scanned).toBe(1); // only the NULL row scanned
-    expect(store.find((r) => r.id === "c2")?.fp_username).toBe("alex2");
+    expect(store.find((r) => r.id === "c2")?.fp_username).toBe("alex2@firstprofit.school");
   });
 
   it("idempotent: a re-run fills nothing and reassigns nothing", async () => {
@@ -145,7 +145,7 @@ describe("backfillUsernames — apply", () => {
     const { db, store } = fakeDb(rows([["c1", "🙂", null]]));
     const s = await backfillUsernames(db, { apply: true });
     expect(s.fallbacks).toBe(1);
-    expect(store[0]?.fp_username).toBe("student");
+    expect(store[0]?.fp_username).toBe("student@firstprofit.school");
   });
 
   it("multi-word / hyphenated existing names backfill to dash-FREE `^[a-z0-9]+$` handles (no fail-loud abort) — the P0 seam", async () => {
@@ -161,19 +161,19 @@ describe("backfillUsernames — apply", () => {
     const s = await backfillUsernames(db, { apply: true });
     expect(s.filled).toBe(3);
     expect(s.fallbacks).toBe(0);
-    expect(store.find((r) => r.id === "c1")?.fp_username).toBe("maryjane");
-    expect(store.find((r) => r.id === "c2")?.fp_username).toBe("annalee");
-    expect(store.find((r) => r.id === "c3")?.fp_username).toBe("lilyrose");
-    for (const r of store) expect(r.fp_username).toMatch(/^[a-z0-9]+$/);
+    expect(store.find((r) => r.id === "c1")?.fp_username).toBe("maryjane@firstprofit.school");
+    expect(store.find((r) => r.id === "c2")?.fp_username).toBe("annalee@firstprofit.school");
+    expect(store.find((r) => r.id === "c3")?.fp_username).toBe("lilyrose@firstprofit.school");
+    for (const r of store) expect(r.fp_username).toMatch(/^[a-z0-9]+@firstprofit\.school$/);
   });
 
   it("resolves a 23505 conflict by re-picking the next suffix", async () => {
     const f = fakeDb(rows([["c1", "Alex", null]]));
-    f.setConflictOnce("alex"); // the index rejects 'alex' once
+    f.setConflictOnce("alex@firstprofit.school"); // the index rejects 'alex' once
     const s = await backfillUsernames(f.db, { apply: true });
     expect(s.conflictsResolved).toBe(1);
     expect(s.filled).toBe(1);
-    expect(f.store[0]?.fp_username).toBe("alex2");
+    expect(f.store[0]?.fp_username).toBe("alex2@firstprofit.school");
   });
 });
 
@@ -204,14 +204,14 @@ describe("backfillUsernames — batching / paging", () => {
     // page 1, the mint would have proposed alex3, hit the index, and needed a
     // conflict re-pick. (Guards the seed-truncation regression the design prevents.)
     const f = fakeDb(rows([
-      ["c1", "Alex", "alex"],
-      ["c2", "Alex", "alex2"],
-      ["c3", "Alex", "alex3"],
+      ["c1", "Alex", "alex@firstprofit.school"],
+      ["c2", "Alex", "alex2@firstprofit.school"],
+      ["c3", "Alex", "alex3@firstprofit.school"],
       ["c4", "Alex", null],
     ]));
     const s = await backfillUsernames(f.db, { apply: true, pageSize: 2 });
     expect(s.scanned).toBe(1); // only the NULL row
-    expect(f.store.find((r) => r.id === "c4")?.fp_username).toBe("alex4");
+    expect(f.store.find((r) => r.id === "c4")?.fp_username).toBe("alex4@firstprofit.school");
     expect(s.conflictsResolved).toBe(0); // the seed prevented any index conflict
     expect(s.suffixed).toBe(1);
     // The username seed actually PAGED (more than one bounded read, cursor-advanced).
@@ -290,7 +290,7 @@ describe("backfill-fp-username ENTRYPOINT — loads and runs (dry-run wiring smo
     expect(summary.apply).toBe(false);
     expect(summary.scanned).toBe(1);
     expect(summary.filled).toBe(1);
-    expect(summary.samples).toEqual([{ childId: "c1", username: "alex" }]);
+    expect(summary.samples).toEqual([{ childId: "c1", username: "alex@firstprofit.school" }]);
     expect(lines.join("\n")).toContain("DRY-RUN");
   });
 });

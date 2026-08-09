@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildStudentCreateUserPayload,
   buildStudentGrants,
+  childLoginUsernameMatches,
   childUsernameMatches,
   deriveStudentEmail,
   isParentOfFamily,
@@ -245,6 +246,7 @@ describe("parseCandidateRow — fail-closed narrowing of the sign-in candidate j
       familyId: "fam-1",
       firstName: "Maya",
       username: "maya",
+      usernameLegacy: null,
       birthYear: "",
       grade: null,
       coverStatus: null,
@@ -407,6 +409,44 @@ describe("childUsernameMatches — case-insensitive FP login resolution (U13)", 
 
   it("FAILS CLOSED on an empty identifier — never resolves a blank onto a real child", () => {
     expect(childUsernameMatches("alex", "")).toBe(false);
+  });
+});
+
+describe("childLoginUsernameMatches — fp_username OR the legacy alias (fpv03 U3c)", () => {
+  it("matches the primary handle", () => {
+    expect(
+      childLoginUsernameMatches(
+        { username: "remi.newal@firstprofit.school", usernameLegacy: "remi" },
+        "remi.newal@firstprofit.school"
+      )
+    ).toBe(true);
+  });
+
+  it("matches the LEGACY alias with the same exact/case-folded rules", () => {
+    expect(
+      childLoginUsernameMatches(
+        { username: "remi.newal@firstprofit.school", usernameLegacy: "remi" },
+        "remi"
+      )
+    ).toBe(true);
+    expect(
+      childLoginUsernameMatches(
+        { username: "remi.newal@firstprofit.school", usernameLegacy: "Remi" },
+        "remi"
+      )
+    ).toBe(true);
+  });
+
+  it("FAILS CLOSED when neither column matches, and on null/absent values", () => {
+    expect(
+      childLoginUsernameMatches(
+        { username: "remi.newal@firstprofit.school", usernameLegacy: "remi" },
+        "maya"
+      )
+    ).toBe(false);
+    expect(childLoginUsernameMatches({ username: null, usernameLegacy: null }, "remi")).toBe(false);
+    expect(childLoginUsernameMatches({ username: null }, "remi")).toBe(false);
+    expect(childLoginUsernameMatches({ username: null, usernameLegacy: "" }, "")).toBe(false);
   });
 });
 

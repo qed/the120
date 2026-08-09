@@ -125,7 +125,7 @@ describe("signup E2E — single username+password child path", () => {
     // children row under the parent, carrying the claimed fp_username (U12).
     const child = h.store.children.find((r) => r.id === childId);
     expect(child).toMatchObject({ parent_id: parentId, first_name: "Dana", grade: 5 });
-    expect(child?.fp_username).toBe("dana"); // globally-unique username claimed
+    expect(child?.fp_username).toBe("dana@firstprofit.school"); // globally-unique username claimed
 
     // path-a `.invalid` auth account carrying the parent-set password.
     const childEmail = deriveStudentEmail(childId);
@@ -180,7 +180,7 @@ describe("signup E2E — single username+password child path", () => {
     expect(candidate).toBeTruthy();
     // The typed identifier "dana" (already normalized lowercase) resolves the
     // child by their fp_username.
-    expect(childUsernameMatches(candidate!.username, "dana")).toBe(true);
+    expect(childUsernameMatches(candidate!.username, "dana@firstprofit.school")).toBe(true);
 
     // The login route then signInWithPassword(deriveStudentEmail(childId), pw):
     // that account exists and carries the parent-set child password, so the sign

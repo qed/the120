@@ -131,6 +131,24 @@ export function childUsernameMatches(
   return dbUsername.toLowerCase() === normalizedIdentifier;
 }
 
+/**
+ * fpv03 U3c: whether the typed (already-normalized) identifier resolves this
+ * child by EITHER their current `fp_username` OR their pre-migration
+ * `fp_username_legacy` alias — the same exact, case-folded comparison for
+ * both columns (one function, so the login route and the login-code request
+ * resolver can never disagree on what "matches" means). FAILS CLOSED on
+ * null/empty stored values via childUsernameMatches.
+ */
+export function childLoginUsernameMatches(
+  child: { username: string | null; usernameLegacy?: string | null },
+  normalizedIdentifier: string
+): boolean {
+  return (
+    childUsernameMatches(child.username, normalizedIdentifier) ||
+    childUsernameMatches(child.usernameLegacy ?? null, normalizedIdentifier)
+  );
+}
+
 /* -------------------------------------------------------- password strength */
 
 export const STUDENT_PASSWORD_MIN_LENGTH = 10;
@@ -249,6 +267,10 @@ export type SignInCandidate = {
   familyId: string;
   firstName: string;
   username: string | null;
+  /** `children.fp_username_legacy` (fpv03 U3c) — the pre-migration username
+   *  kept as a login ALIAS. NULL for every un-migrated child; absent/non-string
+   *  narrows to null (an unmatchable alias), never a dropped row. */
+  usernameLegacy: string | null;
   /** `children.birth_year` (text; '' = unset sentinel). Only the FP login path
    *  selects it — absent narrows to '' (unset), never a dropped row. Feeds the
    *  read-time grade derivation (Unit 3); NEVER logged. */
@@ -321,6 +343,10 @@ export function parseCandidateRow(row: {
   // resolved by the FP username login.
   const rawUsername = (child as { fp_username?: unknown }).fp_username;
   const username = typeof rawUsername === "string" ? rawUsername : null;
+  // fp_username_legacy (fpv03 U3c): same narrowing posture — optional on the
+  // row, malformed/absent narrows to null (unmatchable), never a dropped row.
+  const rawUsernameLegacy = (child as { fp_username_legacy?: unknown }).fp_username_legacy;
+  const usernameLegacy = typeof rawUsernameLegacy === "string" ? rawUsernameLegacy : null;
   // birth_year / grade (Unit 3): OPTIONAL on the row — only the FP login path
   // selects them (the /fp name path does not). Malformed values narrow to the
   // unset sentinel ('' / null), NEVER a dropped row: grade is display
@@ -354,6 +380,7 @@ export function parseCandidateRow(row: {
     familyId: row.family_id,
     firstName,
     username,
+    usernameLegacy,
     birthYear,
     grade,
     coverStatus,

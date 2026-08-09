@@ -36,6 +36,43 @@ import { buildFwLocalBaseFromFirstName } from "@/app/lib/fp/fw-provision-rules";
  *  via the same suffixer, and changeable later. */
 export const USERNAME_FALLBACK_BASE = "student";
 
+/**
+ * fpv03 U3c: every MINTED username is EMAIL-SHAPED —
+ * `firstname.lastname@firstprofit.school`. The domain is a fixed suffix the
+ * minter appends; it is NOT a deliverable mailbox (usernames stay opaque
+ * lowercase strings — the login route has no email auth branch, and the auth
+ * account's real address remains the derived `.invalid` one). Collision
+ * suffixes go BEFORE the `@` (`remi.newal2@firstprofit.school`), which
+ * `appendUsernameSuffix` already guarantees for any email-shaped base.
+ */
+export const FP_USERNAME_DOMAIN = "firstprofit.school";
+
+/**
+ * Bound on the LOCAL part so `local + suffix + @domain` always fits the
+ * storage CHECK's 80-char cap even after the collision suffixer adds digits.
+ * 80 − ("@" + domain = 19) − (suffix headroom for MAX_USERNAME_ATTEMPTS = 3)
+ * = 58. Truncation then strips any trailing non-alphanumeric so a cut can
+ * never end the local part on a dot (which both acceptors refuse).
+ */
+export const MAX_USERNAME_LOCAL_LENGTH = 58;
+
+/** `remi.newal` → `remi.newal@firstprofit.school`, with the local part bounded
+ *  (and re-trimmed to end alphanumeric) so the final handle always passes the
+ *  DB CHECK and the login regex. */
+export function withUsernameDomain(localPart: string): string {
+  let local = localPart.slice(0, MAX_USERNAME_LOCAL_LENGTH);
+  local = local.replace(/[^a-z0-9]+$/, "");
+  return `${local}@${FP_USERNAME_DOMAIN}`;
+}
+
+/** The local part of a minted (email-shaped) username — what the child-core
+ *  taken-set pre-seed probes with (`ilike '<local>%'`), so the probe still
+ *  matches suffixed siblings (`remi.newal2@…`) AND legacy plain handles. */
+export function usernameLocalPart(username: string): string {
+  const at = username.indexOf("@");
+  return at === -1 ? username : username.slice(0, at);
+}
+
 /** Bound on the collision search — mirrors MAX_LOCAL_PART_ATTEMPTS / the FW
  *  rule and its reasoning: reaching it means something is very wrong (hundreds
  *  of identically-named children) and guessing further would be worse. */
@@ -246,7 +283,11 @@ export function mintUsernameFromNames(input: {
   isTaken: (candidate: string) => boolean;
 }): UsernameMint {
   const derived = generateUsernameLocalPart(input.firstName, input.lastName);
-  const base = derived.ok ? derived.base : USERNAME_FALLBACK_BASE;
+  // fpv03 U3c: the minted handle is EMAIL-SHAPED (`remi.newal@firstprofit.school`).
+  // The suffixer places collision digits before the `@` (`remi.newal2@…`), so
+  // dedup keeps the domain intact. Both callers (child-core, the backfill /
+  // migration scripts) mint through here, so every NEW handle shares the shape.
+  const base = withUsernameDomain(derived.ok ? derived.base : USERNAME_FALLBACK_BASE);
   const pick = pickUniqueUsername({ base, isTaken: input.isTaken });
   if (!pick.ok) return pick;
   return {

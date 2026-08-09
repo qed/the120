@@ -202,6 +202,10 @@ export const ERASURE_TABLE_LEDGER: Record<string, TableLedgerEntry> = {
     disposition: "erased-explicitly",
     note: "Step 4b (by child_id) + step 7c (by parent_id, for abandoned drafts). MUST precede the children delete: child_id is ON DELETE SET NULL, so a roster delete first would orphan the row. Its two blob keys are deleted at the store first.",
   },
+  fp_login_codes: {
+    disposition: "erased-by-cascade",
+    note: "child_id -> children ON DELETE CASCADE (fpv03 U3c, migration 20260921120000). Ten-minute sign-in-code ephemera, hash-at-rest only; unlike fp_handoff_codes there is no explicit-early delete because a surviving row grants nothing once the child row (and its path_student_profiles mapping) is gone — the redeem refuses at the child read.",
+  },
 
   /* ── consent + signup evidence ── */
   fp_parental_consent: {
@@ -365,6 +369,7 @@ export const COLUMN_AUDITED_TABLES = [
   "children",
   "fp_onboarding_drafts",
   "fp_handoff_codes",
+  "fp_login_codes",
   "funnel_student_provisioning",
   "funnel_released_aliases",
 ] as const;
@@ -411,6 +416,9 @@ export const ERASURE_COLUMN_LEDGER: Record<string, Record<string, ColumnDisposit
         "family_goal",
         "arrived_at",
         "fp_username",
+        // fpv03 U3c: the pre-migration username kept as a login alias — same
+        // fate as fp_username (the roster row delete erases both).
+        "fp_username_legacy",
         "photo_consent_revoked_at",
         // v3 Unit 7/8 carry: the cover status/counter and the two columns the
         // brief called out — the kid's AGE and their STORY ANSWERS. All erased
@@ -452,6 +460,22 @@ export const ERASURE_COLUMN_LEDGER: Record<string, Record<string, ColumnDisposit
 
   fp_handoff_codes: all(
     ["id", "code_hash", "child_id", "created_at", "expires_at", "used_at", "consumed_ip", "consumed_ua"],
+    "row-deleted"
+  ),
+
+  // fpv03 U3c: same posture as fp_handoff_codes — a credential table small
+  // enough that every column is audited; the children cascade takes the rows.
+  fp_login_codes: all(
+    [
+      "id",
+      "child_id",
+      "code_hash",
+      "created_at",
+      "expires_at",
+      "consumed_at",
+      "consumed_ip",
+      "consumed_ua",
+    ],
     "row-deleted"
   ),
 

@@ -261,6 +261,91 @@ export const V3_SITE_PREVIEW_NAMESPACE = "fp-v3-site-preview";
 
 export const V3_SITE_PREVIEW_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 60 };
 
+/* ───────────── fpv03 U3c: parent-emailed 6-digit login code ─────────────── */
+
+/**
+ * `POST /api/fp/login-code/request` — anonymous, cross-origin, and it SENDS
+ * MAIL to a parent, so the per-USERNAME budget is the tightest in this module:
+ * a kid taps the button once, maybe twice; anything past 3 in a window is a
+ * mail-bombing loop aimed at one family's inbox. Keyed on the username ALONE
+ * (not (ip, username)) precisely because the harm — parent inbox flooding —
+ * is per-account, not per-source: varying the IP must not buy more mail.
+ * The per-IP backstop bounds the vary-the-username flood the same way
+ * SIGN_IN_IP_RATE_LIMIT does for the login route.
+ *
+ * ⚠ VOLUMETRIC ONLY (in-memory, per-instance, empty on cold start). The
+ * durable mail bound is MAX_OUTSTANDING_LOGIN_CODES on fp_login_codes rows.
+ */
+export const FP_LOGIN_CODE_REQUEST_NAMESPACE = "fp-login-code-req";
+export const FP_LOGIN_CODE_REQUEST_IP_NAMESPACE = "fp-login-code-req-ip";
+
+export const FP_LOGIN_CODE_REQUEST_RATE_LIMIT: RateLimitConfig = {
+  windowMs: 15 * 60_000,
+  limit: 3,
+};
+
+export const FP_LOGIN_CODE_REQUEST_IP_RATE_LIMIT: RateLimitConfig = {
+  windowMs: 15 * 60_000,
+  limit: 20,
+};
+
+/**
+ * Per-PARENT-INBOX request cap (fpv03 U3c review, FIX 2). The per-username
+ * bucket (3/15min) bounds mail to ONE kid's login, but a family has several
+ * kids with several guessable usernames, so an attacker (or a chaotic sibling)
+ * can flood ONE parent's inbox by cycling usernames. Keyed on the RESOLVED
+ * parent id, this is the bucket that actually bounds a family inbox: 5 code
+ * emails per 15 minutes covers a two-or-three-kid family each asking once or
+ * twice in a sitting, while capping the mail-bomb regardless of how many child
+ * usernames point at that inbox. Recorded AFTER username resolution (an unknown
+ * username has no parent to flood), inside the route's constant-refusal
+ * try/catch.
+ *
+ * ⚠ VOLUMETRIC, and DURABLE-cap-free by design: unlike the guess surface, mail
+ * volume has no durable per-row counter — the outstanding-codes cap
+ * (MAX_OUTSTANDING_LOGIN_CODES) bounds LIVE codes per child, and this bounds
+ * MAIL per family.
+ */
+export const FP_LOGIN_CODE_REQUEST_PARENT_NAMESPACE = "fp-login-code-req-parent";
+
+export const FP_LOGIN_CODE_REQUEST_PARENT_RATE_LIMIT: RateLimitConfig = {
+  windowMs: 15 * 60_000,
+  limit: 5,
+};
+
+/**
+ * `POST /api/fp/login-code/redeem` — the guess surface, and here THE limiter IS
+ * the load-bearing control (fpv03 U3c review, FIX 1), not a volumetric backstop.
+ * The 6-digit code has 10^6 entropy and, unlike the v3 verify code, there is NO
+ * durable per-row guess counter — a durable counter keyed on a GUESSABLE public
+ * username would let an attacker lock a kid's only recovery door. So the correct
+ * code always redeems, and brute force is bounded HERE:
+ *
+ *   - per (ip, username): 5 / 15 min. Five tries per window against 10^6 is a
+ *     ~7.5e-6 chance of hitting a live code across a whole window, and a family
+ *     that fat-fingers the code still has several corrections.
+ *   - per IP: 40 / 15 min, the login route's backstop against a caller varying
+ *     the username to dodge the (ip, username) bucket.
+ *
+ * Keyed in a distinct namespace so a code-guessing flood never spends the
+ * password door's budget. Being in-memory and empty on cold start weakens the
+ * bound only across an instance recycle, which is far too coarse to matter
+ * against 10^6 within a 15-minute window; a durable limiter store is the
+ * follow-up if this ever needs hardening, NOT a per-code lock.
+ */
+export const FP_LOGIN_CODE_REDEEM_NAMESPACE = "fp-login-code-redeem";
+export const FP_LOGIN_CODE_REDEEM_IP_NAMESPACE = "fp-login-code-redeem-ip";
+
+export const FP_LOGIN_CODE_REDEEM_RATE_LIMIT: RateLimitConfig = {
+  windowMs: 15 * 60_000,
+  limit: 5,
+};
+
+export const FP_LOGIN_CODE_REDEEM_IP_RATE_LIMIT: RateLimitConfig = {
+  windowMs: 15 * 60_000,
+  limit: 40,
+};
+
 /** Events still inside the window (future-stamped ones included). Non-mutating. */
 export function pruneEvents(events: readonly number[], now: number, windowMs: number): number[] {
   return events.filter((t) => now - t < windowMs);

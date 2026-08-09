@@ -22,6 +22,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendEmail } from "@/app/lib/email";
 import { unsubscribeUrl } from "@/app/lib/nurture/unsubscribe-url";
 import {
+  buildLoginCodeEmail,
   buildProgressDigest,
   buildSignupRecap,
   digestHasContent,
@@ -125,6 +126,62 @@ export async function sendSignupRecap(db: Db, input: SendSignupRecapInput): Prom
   } catch (err) {
     console.error(`[fp/parent-email] recap send threw: ${err instanceof Error ? err.message : String(err)}`);
     return { status: "error", error: "recap send threw" };
+  }
+}
+
+/* ─────────────────────────── fpv03 U3c: kid login-code send */
+
+export type SendLoginCodeEmailInput = {
+  /** The child's parent auth id (children.parent_id → the family row). */
+  parentId: string;
+  childFirstName: string;
+  /** The 6-digit code, plaintext — this send is the ONLY place it leaves the
+   *  process. NEVER logged; only the hash is at rest. */
+  code: string;
+};
+
+/**
+ * Email a kid's sign-in code to their PARENT, best-effort. Resolves the family
+ * from the parent id, applies the standard suppression gate (test family /
+ * unsubscribed / merged / no email — the compliance boundary lives HERE, so
+ * the login-code route cannot accidentally mail a suppressed family), renders
+ * the pure builder, and sends via Resend. No idempotency key: each request
+ * mints a DIFFERENT code, so a retry is a new email by design (bounded by the
+ * route's per-username budget and the outstanding-codes cap). Reply-to stays
+ * the sendEmail default (admissions@the120.school).
+ */
+export async function sendLoginCodeEmail(
+  db: Db,
+  input: SendLoginCodeEmailInput
+): Promise<ParentEmailOutcome> {
+  try {
+    const family = await loadFamilyByParent(db, input.parentId);
+    if (family === "error") return { status: "error", error: "family lookup failed" };
+    if (!family) return { status: "no_family" };
+
+    const suppression = parentEmailSuppression(family);
+    if (suppression !== "ok") return { status: "suppressed", reason: suppression, familyId: family.id };
+
+    const to = (family.email ?? "").trim();
+    const rendered = buildLoginCodeEmail({
+      parentFirstName: firstNameOf(family.parent_name),
+      childFirstName: input.childFirstName,
+      code: input.code,
+    });
+    const sent = await sendEmail({
+      to,
+      subject: rendered.subject,
+      html: rendered.html,
+      text: rendered.text,
+    });
+    if (!sent.ok) return { status: "send_failed", error: sent.error };
+    return { status: "sent", familyId: family.id };
+  } catch (err) {
+    // NEVER include the code in a log line, whatever threw.
+    console.error(
+      `[fp/parent-email] login-code send threw: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return { status: "error", error: "login-code send threw" };
   }
 }
 

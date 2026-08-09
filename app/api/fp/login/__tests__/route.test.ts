@@ -75,6 +75,7 @@ const STORED_COVER = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
 function seedChild(
   fpUsername: string | null,
   roster?: {
+    usernameLegacy?: string | null;
     birthYear?: string;
     grade?: number | null;
     coverStatus?: string | null;
@@ -93,6 +94,7 @@ function seedChild(
         children: {
           first_name: "Alex",
           fp_username: fpUsername,
+          fp_username_legacy: roster?.usernameLegacy ?? null,
           birth_year: roster?.birthYear ?? "",
           grade: roster?.grade ?? null,
           fp_cover_status: roster?.coverStatus ?? null,
@@ -181,6 +183,31 @@ describe("POST /api/fp/login — username-only resolution (Slice B U13)", () => 
     expect(dummyArgs.password).toBe("correct horse tulip");
     // The strike stands (not released): an unknown username is a real failed guess.
     expect(rateRef.released).toEqual([]);
+  });
+
+  it("resolves the fp_username_legacy ALIAS through the real handler (fpv03 U3c)", async () => {
+    // A migrated child keeps signing in with the handle they memorized: the
+    // route's select string must ASK for children.fp_username_legacy AND the
+    // candidate scan must match it via childLoginUsernameMatches. Seed a child
+    // whose PRIMARY handle is a new-style address but whose legacy alias is the
+    // old short name, then sign in with the alias.
+    seedChild("alex.new@firstprofit.school", { usernameLegacy: "alex" });
+    const res = await post({ identifier: "alex", password: "correct horse tulip" });
+    expect(res.status).toBe(200);
+    // Signed in against the child's UNCHANGED internal identity — proof the alias
+    // resolved to THIS child, not that the primary handle happened to match.
+    expect(authRef.calls).toHaveLength(1);
+    expect(authRef.calls[0]).toEqual({
+      email: INTERNAL_EMAIL,
+      password: "correct horse tulip",
+    });
+  });
+
+  it("resolves the legacy alias case-insensitively too", async () => {
+    seedChild("alex.new@firstprofit.school", { usernameLegacy: "alex" });
+    const res = await post({ identifier: "ALEX", password: "correct horse tulip" });
+    expect(res.status).toBe(200);
+    expect(authRef.calls[0]).toMatchObject({ email: INTERNAL_EMAIL });
   });
 
   it("a correct username with a WRONG password returns the SAME generic 401 (no oracle)", async () => {

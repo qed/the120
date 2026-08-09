@@ -289,7 +289,7 @@ describe("createChild — happy path", () => {
   it("creates child row + auth + path_student_profiles + player profile; claims consent; advances the attempt", async () => {
     const { deps, calls, authCreated } = build();
     const res = await createChild(deps, input);
-    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana" });
+    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana@firstprofit.school" });
 
     // Every resource created.
     expect(insert(calls, "parent", "children")).toBe(true);
@@ -407,7 +407,7 @@ describe("createChild — refusals before any mint", () => {
   it("grade is optional: an omitted grade still mints (FP captures an age band, not a grade)", async () => {
     const { deps } = build();
     const res = await createChild(deps, { ...input, grade: undefined });
-    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana" });
+    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana@firstprofit.school" });
   });
 });
 
@@ -568,7 +568,7 @@ describe("createChild — attempt-advance is non-fatal", () => {
     const { deps, calls } = build({ advError: true });
     const res = await createChild(deps, input);
     // The child is real and playable; the failed advance is a durable marker only.
-    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana" });
+    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana@firstprofit.school" });
     expect(del(calls, "admin", "children")).toBe(false);
     expect(del(calls, "admin", "path_student_profiles")).toBe(false);
   });
@@ -597,28 +597,28 @@ describe("createChild — U12 fp_username claimed via service-role admin write",
     // "Dana" folds/slugs to "dana"; first child of the name gets the clean handle.
     const claims = usernameClaims(calls);
     expect(claims).toHaveLength(1);
-    expect(claims[0]?.row?.fp_username).toBe("dana");
+    expect(claims[0]?.row?.fp_username).toBe("dana@firstprofit.school");
     expect(claims[0]?.filters?.id).toBe("child1");
   });
 
   it("a pre-seeded existing username pushes the new child onto the next suffix (global uniqueness)", async () => {
-    const { deps, calls } = build({ existingUsernames: ["dana"] });
+    const { deps, calls } = build({ existingUsernames: ["dana@firstprofit.school"] });
     const res = await createChild(deps, input);
     expect(res.ok).toBe(true);
-    expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("dana2");
+    expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("dana2@firstprofit.school");
   });
 
   it("23505 on the first claim → re-pick the next suffix and retry; the child keeps its row", async () => {
     const { deps, calls } = build({ usernameConflictInserts: 1 });
     const res = await createChild(deps, input);
-    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana2" });
+    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana2@firstprofit.school" });
     // The parent inserts the child exactly once; the retry is on the admin claim.
     expect(childInserts(calls)).toHaveLength(1);
     const claims = usernameClaims(calls);
     // Two claim attempts: the first (dana) conflicted, the second (dana2) won.
     expect(claims).toHaveLength(2);
-    expect(claims[0]?.row?.fp_username).toBe("dana");
-    expect(claims[1]?.row?.fp_username).toBe("dana2");
+    expect(claims[0]?.row?.fp_username).toBe("dana@firstprofit.school");
+    expect(claims[1]?.row?.fp_username).toBe("dana2@firstprofit.school");
     // The child was claimed successfully — no compensation.
     expect(del(calls, "admin", "children")).toBe(false);
   });
@@ -647,7 +647,7 @@ describe("createChild — U12 fp_username claimed via service-role admin write",
     const { deps, calls } = build();
     const res = await createChild(deps, { ...input, firstName: "🙂🙂" });
     expect(res.ok).toBe(true);
-    expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("student");
+    expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("student@firstprofit.school");
   });
 
   it("a MULTI-WORD first name mints a dash-FREE `^[a-z0-9]+$` handle (Mary Jane → maryjane, no 23514) — the P0 seam", async () => {
@@ -658,12 +658,12 @@ describe("createChild — U12 fp_username claimed via service-role admin write",
     // must now carry the stripped handle and succeed on the FIRST attempt.
     const { deps, calls } = build();
     const res = await createChild(deps, { ...input, firstName: "Mary Jane" });
-    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "maryjane" });
+    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "maryjane@firstprofit.school" });
     const claims = usernameClaims(calls);
     // ONE claim (no 23514 retry — the handle is CHECK-valid on the first write) ...
     expect(claims).toHaveLength(1);
-    expect(claims[0]?.row?.fp_username).toBe("maryjane");
-    expect(String(claims[0]?.row?.fp_username)).toMatch(/^[a-z0-9]+$/);
+    expect(claims[0]?.row?.fp_username).toBe("maryjane@firstprofit.school");
+    expect(String(claims[0]?.row?.fp_username)).toMatch(/^[a-z0-9]+@firstprofit\.school$/);
     // ... and the child is NOT compensated.
     expect(del(calls, "admin", "children")).toBe(false);
   });
@@ -672,7 +672,7 @@ describe("createChild — U12 fp_username claimed via service-role admin write",
     const { deps, calls } = build();
     const res = await createChild(deps, { ...input, firstName: "Anna-Lee" });
     expect(res.ok).toBe(true);
-    expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("annalee");
+    expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("annalee@firstprofit.school");
   });
 });
 
@@ -699,18 +699,18 @@ describe("createChild — the v3 optional lastName, and the FP door's byte-ident
     // admit `.` as an interior character but not as an edge one.
     const { deps, calls } = build();
     const res = await createChild(deps, { ...input, firstName: "Remi", lastName: "Newal" });
-    expect(res).toMatchObject({ ok: true, username: "remi.newal" });
+    expect(res).toMatchObject({ ok: true, username: "remi.newal@firstprofit.school" });
     const claimed = String(usernameClaims(calls)[0]?.row?.fp_username);
-    expect(claimed).toBe("remi.newal");
+    expect(claimed).toBe("remi.newal@firstprofit.school");
     // generator ⊆ CHECK === login regex (the three-party nesting invariant).
     expect(claimed).toMatch(/^[a-z0-9]([a-z0-9._+@-]*[a-z0-9])?$/);
   });
 
   it("the collision suffix lands on the DOTTED base, not on the first name", async () => {
-    const { deps, calls } = build({ existingUsernames: ["remi.newal"] });
+    const { deps, calls } = build({ existingUsernames: ["remi.newal@firstprofit.school"] });
     const res = await createChild(deps, { ...input, firstName: "Remi", lastName: "Newal" });
-    expect(res).toMatchObject({ ok: true, username: "remi.newal2" });
-    expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("remi.newal2");
+    expect(res).toMatchObject({ ok: true, username: "remi.newal2@firstprofit.school" });
+    expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("remi.newal2@firstprofit.school");
   });
 
   it("an UNDERIVABLE last name degrades to the first-name base — never a trailing dot", async () => {
@@ -718,8 +718,8 @@ describe("createChild — the v3 optional lastName, and the FP door's byte-ident
     // storage CHECK rejects (both ends must be alphanumeric).
     const { deps, calls } = build();
     const res = await createChild(deps, { ...input, firstName: "Remi", lastName: "🙂" });
-    expect(res).toMatchObject({ ok: true, username: "remi" });
-    expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("remi");
+    expect(res).toMatchObject({ ok: true, username: "remi@firstprofit.school" });
+    expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("remi@firstprofit.school");
   });
 
   it("PARITY: omitting lastName is byte-identical to the pre-change wiring at BOTH call sites", async () => {
@@ -744,7 +744,7 @@ describe("createChild — the v3 optional lastName, and the FP door's byte-ident
     });
 
     for (const res of [resOmitted, resNulled, resEmpty]) {
-      expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana" });
+      expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana@firstprofit.school" });
     }
     for (const { calls } of [omitted, nulled, empty]) {
       // The roster row's last_name is the column default, never the literal
@@ -756,7 +756,7 @@ describe("createChild — the v3 optional lastName, and the FP door's byte-ident
       );
       expect(seed?.filters["ilike:fp_username"]).toBe("dana%");
       // Call site 2: the service-role claim writes the first-name-only handle.
-      expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("dana");
+      expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("dana@firstprofit.school");
     }
   });
 
@@ -766,8 +766,8 @@ describe("createChild — the v3 optional lastName, and the FP door's byte-ident
     // independently and only the joining dot survives.
     const { deps, calls } = build();
     const res = await createChild(deps, { ...input, firstName: "Mary Jane", lastName: "Smith" });
-    expect(res).toMatchObject({ ok: true, username: "maryjane.smith" });
-    expect(String(usernameClaims(calls)[0]?.row?.fp_username)).toMatch(/^[a-z0-9]+\.[a-z0-9]+$/);
+    expect(res).toMatchObject({ ok: true, username: "maryjane.smith@firstprofit.school" });
+    expect(String(usernameClaims(calls)[0]?.row?.fp_username)).toMatch(/^[a-z0-9]+\.[a-z0-9]+@firstprofit\.school$/);
   });
 
   it("the password's name guard still uses the FIRST name only (lastName is deliberately not part of it here)", async () => {
@@ -791,7 +791,7 @@ describe("createChild — U14 single username+password path", () => {
   it("always mints the `.invalid` account from the parent-set password (no path branch)", async () => {
     const { deps, calls, authCreated } = build();
     const res = await createChild(deps, input);
-    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana" });
+    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana@firstprofit.school" });
     // The `.invalid` account is minted with the parent-set password ...
     expect(authCreated).toEqual([{ childId: "child1", password: "orangeledgerkite" }]);
     // ... and path_student_profiles.user_id is that minted account's id.

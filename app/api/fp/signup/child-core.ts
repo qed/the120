@@ -64,7 +64,7 @@ import { consentGate } from "./consent-core";
 import { ensurePlayerProfile } from "../login/profile-core";
 import { ensurePathFamilyForParent } from "@/app/lib/fp/provision-core";
 import { validateStudentPassword } from "@/app/lib/fp/provision-rules";
-import { mintUsernameFromNames } from "@/app/lib/fp/fp-username-rules";
+import { mintUsernameFromNames, usernameLocalPart } from "@/app/lib/fp/fp-username-rules";
 import { gradeVerdict } from "@/app/lib/funnel/child-rules";
 import { APPLICANT_ENTRY_STATE } from "@/app/lib/funnel/applicant-rules";
 
@@ -335,10 +335,14 @@ export async function createChild(
     // the `base%` prefix probe stays cheap and index-friendly either way.
     const seedBase = mintUsernameFromNames({ firstName, lastName, isTaken: () => false });
     if (seedBase.ok) {
+      // Probe by the LOCAL part (the base is email-shaped since fpv03 U3c and
+      // the collision suffix goes BEFORE the `@`, so a full-base prefix would
+      // miss `remi.newal2@…`; the local-part prefix matches suffixed siblings
+      // and legacy plain handles alike).
       const existing = await admin
         .from("children")
         .select("fp_username")
-        .ilike("fp_username", `${seedBase.base}%`);
+        .ilike("fp_username", `${usernameLocalPart(seedBase.base)}%`);
       if (!existing.error) {
         for (const r of (existing.data as Array<{ fp_username?: unknown }> | null) ?? []) {
           if (typeof r.fp_username === "string") taken.add(r.fp_username.toLowerCase());

@@ -46,6 +46,13 @@ const addKidSchema = z
     // The ONLY way past the duplicate guard, and it must be an explicit literal
     // choice the parent made — not a defaulted flag a client can drift into.
     differentChild: z.literal(true).optional(),
+    // fpv03 U3: the S04 photo checkbox, DEFAULT ON in the UI. `true` means the
+    // parent UNCHECKED it (declined photo use), and the per-child
+    // photo-consent tombstone is stamped when the child is created. A plain
+    // boolean rather than literal(true) so a client that sends `false` is
+    // harmlessly a no-op instead of a whole-add refusal; the core acts only on
+    // `=== true`. FAIL-SAFE: absent/false = no tombstone.
+    photoDeclined: z.boolean().optional(),
   })
   .strict();
 

@@ -312,7 +312,9 @@ async function loadPhotoConsent(
   if (input.attemptId) {
     const res = await db
       .from("fp_parental_consent")
-      .select("policy_version, accepted_at, revoked_at")
+      // `evidence` rides along for the verdict's photo_declined read (fpv03 U3
+      // review, FIX A): the decline travels WITH the acceptance row.
+      .select("policy_version, accepted_at, revoked_at, evidence")
       .eq("parent_id", input.parentId)
       .eq("signup_attempt_id", input.attemptId);
     if (res.error) {
@@ -326,7 +328,7 @@ async function loadPhotoConsent(
   if (input.childId) {
     const res = await db
       .from("fp_parental_consent")
-      .select("policy_version, accepted_at, revoked_at")
+      .select("policy_version, accepted_at, revoked_at, evidence")
       .eq("parent_id", input.parentId)
       .eq("child_id", input.childId);
     if (res.error) {
@@ -366,6 +368,8 @@ function toConsentRows(data: unknown): PhotoConsentRow[] {
       typeof r.revoked_at === "string" || typeof r.revoked_at === "number"
         ? (r.revoked_at as string | number)
         : null,
+    // Raw jsonb, narrowed by the verdict itself (absent/malformed = no claim).
+    evidence: r.evidence,
   }));
 }
 

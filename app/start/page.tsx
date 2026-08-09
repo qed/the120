@@ -7,7 +7,6 @@ import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { FP_CONSENT_POLICY, currentPolicyHash } from "@/app/api/fp/signup/consent-rules";
 import { loadV3OnboardingState } from "@/app/lib/v3-signup/v3-onboarding-core";
 import { resolveV3Step } from "@/app/lib/v3-signup/flow-rules";
-import { isCoverAiLive } from "@/app/api/fp/cover/cover-rules";
 import { shouldRedirectToDashboard } from "./start-redirect-rules";
 import { V3Flow } from "./V3Flow";
 
@@ -86,8 +85,6 @@ export default async function V3StartPage({
           parentVerified: false,
           hasDraft: false,
           kidNamed: false,
-          coverSettled: false,
-          storyStarted: false,
           childCreated: false,
         },
       };
@@ -132,11 +129,9 @@ export default async function V3StartPage({
         hash: currentPolicyHash(),
         text: FP_CONSENT_POLICY.text,
       }}
-      // v3 Unit 4. Read on the SERVER: the flag decides whether a minor's photo
-      // is collected at all, so it must not be inferable or overridable from the
-      // client bundle. Off today, and the cover endpoint refuses a photo body
-      // regardless of what any bundle believes.
-      coverAiLive={isCoverAiLive(process.env.COVER_AI_LIVE)}
+      // fpv03 U3: `coverAiLive` is no longer passed — the cover step left
+      // signup. The /api/fp/cover endpoint still reads COVER_AI_LIVE itself,
+      // so a stale bundle's cover screen keeps exactly the gate it had.
     />
   );
 }

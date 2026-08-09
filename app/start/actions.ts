@@ -416,6 +416,8 @@ export async function v3EditKidAction(input: unknown): Promise<V3AddKidResult> {
   }
 }
 
+// ⚠ DORMANT since fpv03 U3 (StepStory is unmounted; kept live for deploy skew —
+// see the dormant-surfaces list in app/lib/v3-signup/flow-rules.ts).
 export async function v3SaveStoryAction(input: unknown): Promise<V3SaveResult> {
   try {
     const ctx = await parentContext();

@@ -39,16 +39,16 @@ import {
 import type { V3DraftView } from "@/app/lib/v3-signup/v3-onboarding-core";
 import { StepParent } from "./StepParent";
 import { StepAddKid } from "./StepAddKid";
-import { StepCover } from "./StepCover";
-import { StepStory } from "./StepStory";
+// StepCover / StepStory are NO LONGER MOUNTED (fpv03 U3: cover/story retired
+// from signup; the files stay until a later cleanup, and their server surfaces
+// — v3SaveStoryAction, /api/fp/cover — stay live so an old tab mid-flow can
+// still finish; only UI reachability is gone).
 import { StepAccountReady } from "./StepAccountReady";
 import { STEP_ORDER, V3BrandHeader } from "./v3-ui";
 
 const STEP_LABELS: Record<V3Step, string> = {
   parent: "Your details",
   kid: "Add your kid",
-  cover: "Their cover",
-  story: "Page 1",
   ready: "Account ready",
 };
 
@@ -66,18 +66,12 @@ export function V3Flow({
   draft,
   parentEmail,
   consentPolicy,
-  coverAiLive,
 }: {
   initialStep: V3Step;
   facts: V3FlowFacts;
   draft: V3DraftView | null;
   parentEmail: string | null;
   consentPolicy: { version: string; hash: string; text: string };
-  /** Server-read `COVER_AI_LIVE` (v3 Unit 4). Off = the cover step shows no
-   *  photo affordance at all, because there is no vendor to send a minor's
-   *  photo to and no store to put it in. The endpoint refuses a photo body
-   *  independently, so a stale bundle cannot re-open the door. */
-  coverAiLive: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -124,13 +118,14 @@ export function V3Flow({
         step={STEP_ORDER.indexOf(step) + 1}
         totalSteps={STEP_ORDER.length}
         stepLabel={STEP_LABELS[step]}
-        // fpv03 (Unit 2): the reskinned parent step carries its own in-content
-        // progress kicker, so the header shows the mock's ACCOUNT chip instead
-        // of doubling the meter. A signed-in parent gets the same /dashboard
-        // destination the escape link below already offers; signed-out it is a
-        // static label, because there is no account menu on this screen today.
+        // fpv03 (Unit 2, extended by U3 to the reskinned kid step): the
+        // reskinned screens carry their own in-content progress kicker, so the
+        // header shows the mock's ACCOUNT chip instead of doubling the meter.
+        // A signed-in parent gets the same /dashboard destination the escape
+        // link below already offers; signed-out it is a static label, because
+        // there is no account menu on this screen today.
         end={
-          step === "parent" ? (
+          step === "parent" || step === "kid" ? (
             parentEmail ? (
               <Link
                 href="/dashboard"
@@ -180,7 +175,9 @@ export function V3Flow({
                 onAdded={(id) => {
                   setLocalDraftId(id);
                   setLocalFacts((f) => ({ ...f, hasDraft: true, kidNamed: true }));
-                  go("cover");
+                  // fpv03 U3: cover/story retired — add-kid walks straight to
+                  // the ready screen, which provisions on arrival.
+                  go("ready");
                 }}
                 onResumeExisting={(kid) => {
                   // A live DRAFT can be resumed in place. A provisioned CHILD
@@ -189,32 +186,11 @@ export function V3Flow({
                   if (kid.kind === "draft") {
                     setLocalDraftId(kid.id);
                     setLocalFacts((f) => ({ ...f, hasDraft: true, kidNamed: true }));
-                    go("cover");
+                    go("ready");
                     return;
                   }
                   router.push("/dashboard");
                 }}
-              />
-            )}
-
-            {step === "cover" && draftId && (
-              <StepCover
-                draftId={draftId}
-                firstName={firstName}
-                age={draft?.age ?? null}
-                coverAiLive={coverAiLive}
-                onContinue={() => go("story")}
-                onBack={() => go("kid")}
-              />
-            )}
-
-            {step === "story" && draftId && (
-              <StepStory
-                draftId={draftId}
-                firstName={firstName}
-                initialAnswers={draft?.answers ?? {}}
-                onContinue={() => go("ready")}
-                onBack={() => go("cover")}
               />
             )}
 
@@ -223,7 +199,7 @@ export function V3Flow({
                 draftId={draftId}
                 firstName={firstName}
                 age={draft?.age ?? null}
-                onBack={() => go("story")}
+                onBack={() => go("kid")}
               />
             )}
 

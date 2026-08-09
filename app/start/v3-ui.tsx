@@ -20,12 +20,16 @@ import type { V3Step } from "@/app/lib/v3-signup/flow-rules";
 /* ------------------------------------------------------------ step order */
 
 /**
- * The flow's five URL steps, in walking order. Lives HERE (not in V3Flow) so
+ * The flow's three URL steps, in walking order. Lives HERE (not in V3Flow) so
  * step screens like StepParent can size their progress kickers off the real
  * step count without importing V3Flow — which imports them back (a cycle whose
  * TDZ would bite any module-scope reader of this array).
+ *
+ * fpv03 U3: "cover" and "story" retired from signup (founder decision
+ * 2026-08-08; cover generation returns in U6, outside signup). The mock's
+ * "Step N of 3" kickers are now literally this array's length.
  */
-export const STEP_ORDER: readonly V3Step[] = ["parent", "kid", "cover", "story", "ready"];
+export const STEP_ORDER: readonly V3Step[] = ["parent", "kid", "ready"];
 
 /* ------------------------------------------------------------ logo lockup */
 

@@ -13,12 +13,12 @@ import { shouldRedirectToDashboard } from "../start-redirect-rules";
  * dashboard's own `?step=` re-entry links are never bounced back.
  */
 
+// fpv03 U3: coverSettled/storyStarted left V3FlowFacts with the cover/story
+// steps' retirement from signup.
 const facts = (over: Partial<V3FlowFacts> = {}): V3FlowFacts => ({
   parentVerified: true,
   hasDraft: false,
   kidNamed: false,
-  coverSettled: false,
-  storyStarted: false,
   childCreated: false,
   ...over,
 });
@@ -76,7 +76,7 @@ describe("shouldRedirectToDashboard", () => {
       shouldRedirectToDashboard({
         parentVerified: true,
         rawStep: null,
-        facts: facts({ hasDraft: true, kidNamed: true, storyStarted: true }),
+        facts: facts({ hasDraft: true, kidNamed: true }),
         existingKids: [DRAFT],
       })
     ).toBe(false);
@@ -86,7 +86,9 @@ describe("shouldRedirectToDashboard", () => {
     // V3_ADD_KID_HREF is /start?step=kid: a completed parent following it must
     // reach the kid step, not bounce straight back to the dashboard.
     expect(V3_ADD_KID_HREF).toBe("/start?step=kid");
-    for (const step of ["parent", "kid", "cover", "story", "ready"]) {
+    // fpv03 U3 retarget: "cover"/"story" left this list when they left
+    // V3_STEPS — they now parse to null, i.e. the BARE-VISIT branch below.
+    for (const step of ["parent", "kid", "ready"]) {
       expect(
         shouldRedirectToDashboard({
           parentVerified: true,
@@ -100,7 +102,9 @@ describe("shouldRedirectToDashboard", () => {
   });
 
   it("a garbled ?step= carries no intent — a completed parent still redirects", () => {
-    for (const raw of ["banana", "", "  ", "KID?"]) {
+    // "cover"/"story" join the garbled set (fpv03 U3): a completed parent's
+    // stale bookmark to a retired step goes to the dashboard like a bare visit.
+    for (const raw of ["banana", "", "  ", "KID?", "cover", "story"]) {
       expect(
         shouldRedirectToDashboard({
           parentVerified: true,

@@ -19,12 +19,12 @@ import {
 
 /** The v3 flow's pure navigation + guard decisions (plan Unit 3). */
 
+// fpv03 U3: coverSettled/storyStarted left V3FlowFacts with the cover/story
+// steps' retirement from signup (founder decision 2026-08-08).
 const facts = (over: Partial<V3FlowFacts> = {}): V3FlowFacts => ({
   parentVerified: false,
   hasDraft: false,
   kidNamed: false,
-  coverSettled: false,
-  storyStarted: false,
   childCreated: false,
   ...over,
 });
@@ -47,7 +47,9 @@ describe("parseV3Step", () => {
 });
 
 describe("the resolver maps every (?step=, facts) pair to exactly ONE screen", () => {
-  // The five reachable fact states, in flow order.
+  // The reachable fact states, in flow order. fpv03 U3: the "cover settled" and
+  // "story started" states left the table with their steps — a named kid now
+  // lands straight on `ready` (which provisions on arrival).
   const states: Array<{ name: string; f: V3FlowFacts; landing: V3Step; ceiling: V3Step }> = [
     { name: "cold visitor", f: facts(), landing: "parent", ceiling: "parent" },
     {
@@ -63,26 +65,8 @@ describe("the resolver maps every (?step=, facts) pair to exactly ONE screen", (
       ceiling: "kid",
     },
     {
-      name: "kid named, nothing optional done",
+      name: "kid named",
       f: facts({ parentVerified: true, hasDraft: true, kidNamed: true }),
-      landing: "cover",
-      ceiling: "ready",
-    },
-    {
-      name: "cover settled",
-      f: facts({ parentVerified: true, hasDraft: true, kidNamed: true, coverSettled: true }),
-      landing: "story",
-      ceiling: "ready",
-    },
-    {
-      name: "story started",
-      f: facts({
-        parentVerified: true,
-        hasDraft: true,
-        kidNamed: true,
-        coverSettled: true,
-        storyStarted: true,
-      }),
       landing: "ready",
       ceiling: "ready",
     },
@@ -121,9 +105,29 @@ describe("the resolver maps every (?step=, facts) pair to exactly ONE screen", (
   }
 
   it("back-navigation is always allowed", () => {
-    const f = facts({ parentVerified: true, hasDraft: true, kidNamed: true, coverSettled: true });
+    // fpv03 U3 retarget: "cover" is no longer a step, so back-navigation is
+    // pinned on the two rungs that remain below `ready`.
+    const f = facts({ parentVerified: true, hasDraft: true, kidNamed: true });
     expect(resolveV3Step("kid", f)).toBe("kid");
-    expect(resolveV3Step("cover", f)).toBe("cover");
+    expect(resolveV3Step("parent", f)).toBe("parent");
+  });
+
+  it("fpv03 U3: the RETIRED steps parse to null and fail open to the landing", () => {
+    // The user-visible contract for every old bookmark / stale tab URL: exactly
+    // the garbled-value path, never an error. A mid-flow family resumes where
+    // they are; shouldRedirectToDashboard treats these as a bare visit.
+    for (const retired of ["cover", "story", " COVER "]) {
+      expect(parseV3Step(retired), retired).toBeNull();
+      expect(resolveV3Step(retired, facts()), retired).toBe("parent");
+      expect(
+        resolveV3Step(retired, facts({ parentVerified: true })),
+        retired
+      ).toBe("kid");
+      expect(
+        resolveV3Step(retired, facts({ parentVerified: true, hasDraft: true, kidNamed: true })),
+        retired
+      ).toBe("ready");
+    }
   });
 
   it("an unverified visitor cannot type their way past step 1", () => {

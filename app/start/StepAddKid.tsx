@@ -21,8 +21,52 @@
 
 import { useState, useTransition } from "react";
 import { v3AddKidAction, v3EditKidAction } from "./actions";
-import type { ExistingKid } from "@/app/lib/v3-signup/flow-rules";
-import { V3Button, V3Field, V3Notice, V3TextButton, V3_INPUT_CLASSES } from "./v3-ui";
+import { splitKidName, type ExistingKid } from "@/app/lib/v3-signup/flow-rules";
+// The SAME pure predicates the real handle claim enforces server-side — pure
+// module, safe in a client bundle. The preview must never advertise an address
+// the backend will refuse.
+import { containsBlockedTerm, isReservedHandle } from "@/app/lib/fp/fp-public-site-rules";
+import {
+  STEP_ORDER,
+  V3Button,
+  V3Field,
+  V3Notice,
+  V3StepKicker,
+  V3TextButton,
+  V3_INPUT_CLASSES,
+} from "./v3-ui";
+
+/** The fpv03 S04 kicker: "Step 2 of 3 · Add your kid". The total derives from
+ *  STEP_ORDER (3 since U3 retired cover/story), same rule as StepParent's. */
+const KID_STEP_KICKER = {
+  current: STEP_ORDER.indexOf("kid") + 1,
+  total: STEP_ORDER.length,
+  label: "Add your kid",
+} as const;
+
+/**
+ * The read-only website preview under KID'S WEBSITE (fpv03 S04). There is no
+ * website/handle field in this flow's backend — the real handle is claimed
+ * later, inside First Profit — so this renders a PREVIEW from the kid's first
+ * name and nothing else: lowercase, letters and digits only, the same
+ * first-token split the username generator uses. Presentational only; nothing
+ * here reaches the wire.
+ *
+ * The derived slug is screened through the SAME pure predicates the real claim
+ * enforces (fpv03 U3 review, adversarial): a kid named Admin (reserved) or a
+ * name whose fold trips the blocklist must not be shown a specific address the
+ * backend will refuse. Empty when refused; the caller renders the neutral
+ * placeholder. (Mirrored by a rules-level test beside the predicates:
+ * app/lib/fp/__tests__/fp-public-sites-migration-parity.test.ts.)
+ */
+function sitePreviewSlug(fullName: string): string {
+  const slug = splitKidName(fullName)
+    .firstName.toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]/g, "");
+  if (slug.length === 0 || isReservedHandle(slug) || containsBlockedTerm(slug)) return "";
+  return slug;
+}
 
 export function StepAddKid({
   consentPolicy,
@@ -44,7 +88,16 @@ export function StepAddKid({
 }) {
   const [fullName, setFullName] = useState(initialFullName);
   const [age, setAge] = useState(initialAge);
-  const [accepted, setAccepted] = useState(draftId !== null);
+  // TWO checkboxes, ONE attestation (fpv03 S04, founder decision): the site
+  // and ToS rows are a PRESENTATIONAL SPLIT of the single version+hash
+  // attestation this step has always recorded. Both must be ticked before the
+  // one consent echo is sent; nothing about the recording model forks.
+  const [siteAccepted, setSiteAccepted] = useState(draftId !== null);
+  const [termsAccepted, setTermsAccepted] = useState(draftId !== null);
+  // The OPTIONAL photo line, DEFAULT ON. Unchecking sends `photoDeclined:
+  // true`, which stamps the per-child photo-consent tombstone at child
+  // creation (fail-safe: on/absent records nothing).
+  const [photoOk, setPhotoOk] = useState(true);
   const [policyOpen, setPolicyOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<ExistingKid | null>(null);
@@ -61,6 +114,9 @@ export function StepAddKid({
             consentVersion: consentPolicy.version,
             consentHash: consentPolicy.hash,
             ...(differentChild ? { differentChild: true as const } : {}),
+            // Only ever sent when the parent UNCHECKED the photo line; the
+            // default-on state sends nothing (absent = no tombstone).
+            ...(photoOk ? {} : { photoDeclined: true }),
           });
       switch (result.kind) {
         case "added":
@@ -79,6 +135,15 @@ export function StepAddKid({
           );
           return;
         case "consent_refused":
+          // The stale-policy path (fpv03 U3 review, learnings): the reload this
+          // notice asks for re-renders the NEW consent text, and ticks given to
+          // the OLD text must not carry across a policy-version change. Reset
+          // all three consent-adjacent states here — site/terms unticked, photo
+          // back to its default ON — so even a re-render that keeps this
+          // component mounted starts the re-attest from scratch.
+          setSiteAccepted(false);
+          setTermsAccepted(false);
+          setPhotoOk(true);
           setNotice(
             "The consent notice was updated while this page was open. Reload the page and tick the box again."
           );
@@ -92,8 +157,9 @@ export function StepAddKid({
   const onSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     if (pending) return;
-    if (!draftId && !accepted) {
-      setNotice("Please tick the consent box so we can create your kid's account.");
+    // Both rows of the split attestation are required; the photo line is not.
+    if (!draftId && (!siteAccepted || !termsAccepted)) {
+      setNotice("Please tick both consent boxes so we can create your kid's account.");
       return;
     }
     submit(false);
@@ -101,10 +167,15 @@ export function StepAddKid({
 
   return (
     <section className="mx-auto w-full max-w-xl px-5 py-10 sm:py-16">
-      <p className="v3-label text-v3-one20">Welcome from The 120</p>
+      <V3StepKicker {...KID_STEP_KICKER} />
+      <p className="v3-label mt-6 text-v3-one20">Welcome from The 120</p>
       <h1 className="mt-3 font-path-display text-4xl leading-[1.05] font-black text-v3-ink sm:text-5xl">
         Add your kid, and their story starts.
       </h1>
+      <p className="mt-4 text-base leading-relaxed text-v3-stone">
+        First Profit turns starting a real business into a guided graphic novel. It begins with
+        one page: theirs.
+      </p>
 
       <form onSubmit={onSubmit} noValidate className="mt-8 space-y-5">
         <V3Field id="v3-kid-name" label="Kid's full name">
@@ -134,17 +205,59 @@ export function StepAddKid({
           />
         </V3Field>
 
+        {/* fpv03 S04: the KID'S WEBSITE preview. READ-ONLY and derived from the
+            typed name — this flow has no handle field, and the real address is
+            claimed inside First Profit later, so nothing here reaches the wire.
+            The real domain (firstprofit.school), never the mock's placeholder. */}
+        <V3Field id="v3-kid-site" label="Kid's website">
+          <p
+            id="v3-kid-site"
+            className={`${V3_INPUT_CLASSES} cursor-default select-none font-path-mono text-base text-v3-stone`}
+          >
+            firstprofit.school/
+            {/* Neutral placeholder when the name yields no showable slug —
+                empty, reserved, or blocklisted — never a specific address the
+                claim would refuse. */}
+            <span className="text-v3-ink">{sitePreviewSlug(fullName) || "your-kid"}</span>
+          </p>
+        </V3Field>
+
         {!draftId && (
-          <div className="rounded-2xl border border-v3-ink/10 bg-white/70 p-4">
-            <label className="flex items-start gap-3">
+          <div className="space-y-3">
+            {/* The split attestation (see the state comment): two rows, one
+                recorded consent. The photo row is the separate OPTIONAL line. */}
+            <label className="flex min-h-[44px] items-start gap-3">
               <input
                 type="checkbox"
-                checked={accepted}
-                onChange={(e) => setAccepted(e.target.checked)}
-                className="mt-1 h-5 w-5 flex-none accent-v3-profit"
+                checked={siteAccepted}
+                onChange={(e) => setSiteAccepted(e.target.checked)}
+                className="mt-0.5 h-5 w-5 flex-none accent-v3-profit"
+              />
+              <span className="text-sm leading-relaxed text-v3-stone">
+                I consent to my kid having a website for their new business.
+              </span>
+            </label>
+            <label className="flex min-h-[44px] items-start gap-3">
+              <input
+                type="checkbox"
+                checked={termsAccepted}
+                onChange={(e) => setTermsAccepted(e.target.checked)}
+                className="mt-0.5 h-5 w-5 flex-none accent-v3-profit"
               />
               <span className="text-sm leading-relaxed text-v3-stone">
                 I agree to Terms of Service
+              </span>
+            </label>
+            <label className="flex min-h-[44px] items-start gap-3">
+              <input
+                type="checkbox"
+                checked={photoOk}
+                onChange={(e) => setPhotoOk(e.target.checked)}
+                className="mt-0.5 h-5 w-5 flex-none accent-v3-profit"
+              />
+              <span className="text-sm leading-relaxed text-v3-stone">
+                The 120 may use a photo of my kid, if I provide one, in their story artwork.
+                Optional. You can revoke this at any time by contacting The 120.
               </span>
             </label>
             <button

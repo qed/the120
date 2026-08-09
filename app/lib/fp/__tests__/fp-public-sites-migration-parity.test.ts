@@ -496,6 +496,35 @@ describe("fp-public-site-rules predicates", () => {
   });
 });
 
+// ── The S04 website-preview screen (fpv03 U3 review, adversarial) ──
+// app/start/StepAddKid.tsx derives a read-only preview slug from the kid's
+// first name and screens it through THESE predicates before showing a specific
+// firstprofit.school/<slug> address. This pins, at the rules level, that the
+// derivation of the two adversarial names actually trips the predicates — so
+// the preview can never advertise an address the real claim would refuse.
+describe("the S04 site-preview slug against the claim predicates", () => {
+  // The exact fold StepAddKid's sitePreviewSlug applies (first token,
+  // lowercase, NFKD, alphanumerics only), restated on plain first names.
+  const slugOf = (firstName: string) =>
+    firstName.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]/g, "");
+
+  it("a kid named 'Admin' folds to a RESERVED handle", () => {
+    expect(slugOf("Admin")).toBe("admin");
+    expect(isReservedHandle(slugOf("Admin"))).toBe(true);
+    expect(containsBlockedTerm(slugOf("Admin"))).toBe(false);
+  });
+
+  it("a blocked-term first name trips the blocklist predicate", () => {
+    expect(containsBlockedTerm(slugOf("Fuck"))).toBe(true);
+    expect(isReservedHandle(slugOf("Fuck"))).toBe(false);
+  });
+
+  it("an ordinary kid name passes both predicates (the preview still shows real slugs)", () => {
+    expect(isReservedHandle(slugOf("Remi"))).toBe(false);
+    expect(containsBlockedTerm(slugOf("Remi"))).toBe(false);
+  });
+});
+
 // ── Blocklist matcher — both directions (Unit 2 review items 1 + 9) ──
 describe("containsBlockedTerm", () => {
   it("catches separator/symbol dodges via the aggressive fold: f-u-c-k, f*u*c*k, f_u.c-k", () => {

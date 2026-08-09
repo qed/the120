@@ -205,7 +205,10 @@ function realDeps(): DashboardGateDeps {
         const [consents, kids] = await Promise.all([
           db
             .from("fp_parental_consent")
-            .select("child_id, policy_version, accepted_at, revoked_at")
+            // `evidence` rides along for the verdict's photo_declined read
+            // (fpv03 U3 review, FIX A) — the SAME shape /api/fp/cover reads,
+            // so the dashboard can never offer what the endpoint refuses.
+            .select("child_id, policy_version, accepted_at, revoked_at, evidence")
             .in("child_id", childIds as string[]),
           db
             .from("children")
@@ -226,6 +229,8 @@ function realDeps(): DashboardGateDeps {
             policyVersion: typeof r.policy_version === "string" ? r.policy_version : null,
             acceptedAt: typeof r.accepted_at === "string" ? r.accepted_at : null,
             revokedAt: typeof r.revoked_at === "string" ? r.revoked_at : null,
+            // Raw jsonb; the verdict narrows it (absent/malformed = no claim).
+            evidence: r.evidence,
           });
           byChild.set(id, list);
         }

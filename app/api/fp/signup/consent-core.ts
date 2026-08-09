@@ -79,6 +79,11 @@ export type RecordConsentInput = {
   jurisdiction: string;
   ip: string;
   ua: string;
+  /** fpv03 U3: the parent UNCHECKED the S04 photo checkbox. Recorded in the
+   *  evidence blob so provisioning can stamp the child's photo-consent
+   *  tombstone at creation time (the decline outlives the request that
+   *  carried it). Absent/false = no claim, no tombstone. */
+  photoDeclined?: boolean;
 };
 
 export type RecordConsentResult =
@@ -144,6 +149,13 @@ export async function recordConsent(
         echoed_version: input.echoedVersion,
         echoed_hash: input.echoedHash,
         verdict,
+        // fpv03 U3: present ONLY when the parent explicitly declined photo use
+        // at S04. Provisioning reads this back (by attempt id) and stamps
+        // children.photo_consent_revoked_at at child creation, so the
+        // tombstone is always AT OR AFTER this row's accepted_at and the
+        // strictly-after gate rule makes the decline win over the acceptance
+        // minted in the same signup.
+        ...(input.photoDeclined === true ? { photo_declined: true } : {}),
       },
     })
     .select("id")

@@ -1,6 +1,15 @@
 "use client";
 
 /**
+ * ⚠ DORMANT SURFACE (fpv03 U3): this component is NO LONGER MOUNTED — the
+ * story step was retired from signup (founder decision 2026-08-08; the flow is
+ * parent → kid → ready). The file is kept for DEPLOY SKEW only: an old tab
+ * holding the pre-U3 bundle can still be mid-flow on this screen, and its
+ * server surface (`v3SaveStoryAction` in app/start/actions.ts) stays live for
+ * the same reason. See the dormant-surfaces list in
+ * app/lib/v3-signup/flow-rules.ts's module header; delete this file in the
+ * eventual cleanup once the skew window has passed.
+ *
  * Step 4 — the six story questions, all OPTIONAL.
  *
  * The prototype gates its continue button on all six being answered. This port

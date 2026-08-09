@@ -1,5 +1,7 @@
 /**
  * `POST /api/fp/cover` — the v3 comic-cover generator (New User Flow v3, Unit 4).
+ * ⚠ DORMANT since fpv03 U3 (no mounted UI calls it; kept live for deploy skew —
+ * see the dormant-surfaces list in app/lib/v3-signup/flow-rules.ts).
  * A THIN wire: Origin check, rate-limit strike, deps build, then the two phases
  * of ./cover-core.ts. Every decision is in ./cover-rules.ts (pure, tested); every
  * sequencing step is in the core (deps-injected, tested by execution).

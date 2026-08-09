@@ -45,10 +45,8 @@ import {
 } from "./v3-ui";
 
 /** Both phases of this screen (form and code) are the SAME step 1, so they
- *  share one kicker. The fpv03 mock numbers a 3-step macro flow — that count
- *  applies once the signup-time cover/story steps retire (tracked for U3/U4);
- *  until then the kicker's total must agree with the header meter's
- *  "Step 2 of 5" on the very next screen, so it derives from STEP_ORDER. */
+ *  share one kicker. Derives from STEP_ORDER, which is the mock's 3-step flow
+ *  outright since fpv03 U3 retired the signup-time cover/story steps. */
 const PARENT_STEP_KICKER = {
   current: 1,
   total: STEP_ORDER.length,

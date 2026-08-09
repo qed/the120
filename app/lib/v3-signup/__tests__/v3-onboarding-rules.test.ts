@@ -58,6 +58,22 @@ describe("parseV3AddKid", () => {
     expect(parseV3AddKid(addKid({ differentChild: 1 })).ok).toBe(false);
   });
 
+  it("`photoDeclined` is an optional boolean — false/absent are harmless, non-booleans refused (fpv03 U3)", () => {
+    // Deliberately a plain boolean, not literal(true): the UI only sends it
+    // when true, but a client that sends false must be a no-op rather than a
+    // whole-add refusal (fail-safe: absent/false = no tombstone).
+    expect(parseV3AddKid(addKid({ photoDeclined: true })).ok).toBe(true);
+    expect(parseV3AddKid(addKid({ photoDeclined: false })).ok).toBe(true);
+    expect(parseV3AddKid(addKid({ photoDeclined: "true" })).ok).toBe(false);
+    expect(parseV3AddKid(addKid({ photoDeclined: 1 })).ok).toBe(false);
+  });
+
+  it("`photoDeclined` belongs to ADD only — the edit path re-uses the recorded consent", () => {
+    expect(
+      parseV3EditKid({ draftId: uuid(), fullName: "Remi Newal", age: "9", photoDeclined: true }).ok
+    ).toBe(false);
+  });
+
   it("bounds the name (1..160) and the age bytes (<= 8)", () => {
     expect(parseV3AddKid(addKid({ fullName: "" })).ok).toBe(false);
     expect(parseV3AddKid(addKid({ fullName: "   " })).ok).toBe(false);

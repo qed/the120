@@ -7,7 +7,11 @@ import {
   type Row,
   type Store,
 } from "@/app/api/fp/signup/__tests__/helpers/fake-supabase";
-import { FP_CONSENT_POLICY, currentPolicyHash } from "@/app/api/fp/signup/consent-rules";
+import {
+  FP_CONSENT_POLICY,
+  currentPolicyHash,
+  photoConsentVerdict,
+} from "@/app/api/fp/signup/consent-rules";
 import type { CreateChildInput, CreateChildResult } from "@/app/api/fp/signup/child-core";
 import { blobKey } from "@/app/lib/fp/cover-store-rules";
 import {
@@ -765,6 +769,152 @@ describe("v3ProvisionKid — decoration never fails provisioning", () => {
   });
 });
 
+/* ------------------------- the photo-consent decline tombstone (fpv03 U3) */
+
+describe("the S04 photo decline — tombstone stamped at child creation, and the tombstone WINS", () => {
+  it("photoDeclined rides the consent row's evidence blob, and provisioning stamps photo_consent_revoked_at FROM THE ROW'S OWN accepted_at (review FIX B)", async () => {
+    const { store, deps, mintedChildIds } = harness();
+    const res = await v3AddKid(deps, addKidBody({ photoDeclined: true }), ctx);
+    expect(res).toMatchObject({ kind: "added" });
+
+    // The decline is DURABLE at add-kid time (the only store this signup
+    // writes), not client state a refresh could lose.
+    expect(store.fp_parental_consent[0].evidence).toMatchObject({ photo_declined: true });
+
+    // The DB default would set accepted_at on insert; the fake store does not,
+    // so seed it — the tombstone must equal THIS value, not the server clock,
+    // which is what makes the strictly-after ordering a single-clock guarantee.
+    const ACCEPTED_AT = "2026-08-09T10:00:00.000Z";
+    store.fp_parental_consent[0].accepted_at = ACCEPTED_AT;
+
+    const draftId = (res as { draftId: string }).draftId;
+    expect((await v3ProvisionKid(deps, { draftId }, ctx)).kind).toBe("provisioned");
+
+    const child = store.children.find((c) => c.id === mintedChildIds[0]) as Row;
+    expect(child.photo_consent_revoked_at).toBe(ACCEPTED_AT);
+    expect(errors.some((e) => e.includes("no readable accepted_at"))).toBe(false);
+  });
+
+  it("a consent row with NO readable accepted_at falls back to the server clock, loudly (FIX B's logged fallback)", async () => {
+    const { store, deps, mintedChildIds } = harness();
+    const res = await v3AddKid(deps, addKidBody({ photoDeclined: true }), ctx);
+    // No accepted_at seeded — the fallback path.
+    const draftId = (res as { draftId: string }).draftId;
+    expect((await v3ProvisionKid(deps, { draftId }, ctx)).kind).toBe("provisioned");
+
+    const child = store.children.find((c) => c.id === mintedChildIds[0]) as Row;
+    expect(child.photo_consent_revoked_at).toBe(new Date(1_700_000_000_000).toISOString());
+    expect(errors.some((e) => e.includes("no readable accepted_at"))).toBe(true);
+  });
+
+  it("THE ORDERING INVARIANT: a decline in the SAME signup as the acceptance reads NOT covered", async () => {
+    // The adversarial finding this pins: the verdict rule is "acceptance
+    // strictly NEWER than tombstone at version >= anchor", and the default-ON
+    // checkbox means the decline's tombstone lands in the same signup as (and
+    // never before) the acceptance — so the tombstone must WIN. Executed
+    // through the REAL write path (v3AddKid then v3ProvisionKid over the
+    // shared store), then judged by the REAL gate rule.
+    const { store, deps, mintedChildIds } = harness();
+    const res = await v3AddKid(deps, addKidBody({ photoDeclined: true }), ctx);
+    const draftId = (res as { draftId: string }).draftId;
+    await v3ProvisionKid(deps, { draftId }, ctx);
+
+    const child = store.children.find((c) => c.id === mintedChildIds[0]) as Row;
+    const verdict = photoConsentVerdict({
+      rows: store.fp_parental_consent.map((r) => ({
+        policyVersion: r.policy_version as string,
+        acceptedAt: (r.accepted_at ?? new Date(1_700_000_000_000).toISOString()) as string,
+      })),
+      revokedAt: child.photo_consent_revoked_at as string,
+    });
+    expect(verdict.ok).toBe(false);
+    // Same-instant is the racing insert and it loses (strictly-after rule).
+    if (!verdict.ok) expect(verdict.reason).toBe("pre_tombstone");
+  });
+
+  it("accepted (checkbox left ON, field absent) stamps NO tombstone and reads covered", async () => {
+    const { store, deps, mintedChildIds } = harness();
+    const res = await v3AddKid(deps, addKidBody(), ctx);
+    const draftId = (res as { draftId: string }).draftId;
+    await v3ProvisionKid(deps, { draftId }, ctx);
+
+    expect(store.fp_parental_consent[0].evidence).not.toHaveProperty("photo_declined");
+    const child = store.children.find((c) => c.id === mintedChildIds[0]) as Row;
+    expect(child.photo_consent_revoked_at).toBeUndefined();
+
+    const verdict = photoConsentVerdict({
+      rows: [
+        {
+          policyVersion: store.fp_parental_consent[0].policy_version as string,
+          acceptedAt: new Date(1_700_000_000_000).toISOString(),
+        },
+      ],
+      revokedAt: null,
+    });
+    expect(verdict.ok).toBe(true);
+  });
+
+  it("photoDeclined: false is a harmless no-op (fail-safe: absent/false = no tombstone)", async () => {
+    const { store, deps } = harness();
+    const res = await v3AddKid(deps, addKidBody({ photoDeclined: false }), ctx);
+    expect(res).toMatchObject({ kind: "added" });
+    expect(store.fp_parental_consent[0].evidence).not.toHaveProperty("photo_declined");
+  });
+
+  it("a STRANDED tombstone write logs BOTH lines, leaves no stamp — and the gate STILL reads NOT covered (review Testing 0.85 + FIX A)", async () => {
+    // The failure FIX A exists for, executed end-to-end: the decline landed in
+    // the consent row's evidence, but the children UPDATE that stamps the
+    // tombstone fails. Pre-FIX-A the missing tombstone silently REOPENED the
+    // photo gate; now the decline rides the acceptance row into the verdict.
+    // (The harness's createChild pushes the child row directly into the store,
+    // so the fault below hits only the cover/tombstone UPDATE — same shape as
+    // the "failed cover COLUMN write" test above.)
+    const { store, deps, mintedChildIds } = harness({
+      faults: { "update:children": { kind: "error", error: { message: "tombstone boom" } } },
+    });
+    const res = await v3AddKid(deps, addKidBody({ photoDeclined: true }), ctx);
+    const draftId = (res as { draftId: string }).draftId;
+    const ACCEPTED_AT = "2026-08-09T10:00:00.000Z";
+    store.fp_parental_consent[0].accepted_at = ACCEPTED_AT;
+
+    expect((await v3ProvisionKid(deps, { draftId }, ctx)).kind).toBe("provisioned");
+
+    // Both operator handles fired, and no stamp landed.
+    expect(errors.some((e) => e.includes("cover column write failed"))).toBe(true);
+    expect(errors.some((e) => e.includes("STRANDED PHOTO DECLINE"))).toBe(true);
+    const child = store.children.find((c) => c.id === mintedChildIds[0]) as Row;
+    expect(child.photo_consent_revoked_at).toBeUndefined();
+
+    // Post-FIX-A: the verdict reads the decline off the acceptance row itself,
+    // so the stranded tombstone cannot reopen the gate.
+    const verdict = photoConsentVerdict({
+      rows: store.fp_parental_consent.map((r) => ({
+        policyVersion: r.policy_version as string,
+        acceptedAt: (r.accepted_at ?? null) as string | null,
+        evidence: r.evidence,
+      })),
+      revokedAt: null,
+    });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect(verdict.reason).toBe("declined");
+  });
+
+  it("an unreadable evidence blob stamps NOTHING and logs loudly (documented fail-safe direction)", async () => {
+    // The ONLY select against fp_parental_consent on this path is
+    // provisioning's evidence read (v3AddKid only inserts there), so the fault
+    // plan can sit on the whole run without touching the add.
+    const { store, deps, mintedChildIds } = harness({
+      faults: { "select:fp_parental_consent": { kind: "error", error: { message: "boom" } } },
+    });
+    const res = await v3AddKid(deps, addKidBody({ photoDeclined: true }), ctx);
+    const draftId = (res as { draftId: string }).draftId;
+    expect((await v3ProvisionKid(deps, { draftId }, ctx)).kind).toBe("provisioned");
+    const child = store.children.find((c) => c.id === mintedChildIds[0]) as Row;
+    expect(child.photo_consent_revoked_at).toBeUndefined();
+    expect(errors.some((e) => e.includes("PHOTO DECLINE UNREADABLE"))).toBe(true);
+  });
+});
+
 describe("v3ProvisionKid — a consumption-stamp failure never fails a successful mint", () => {
   it("returns `provisioned` and logs the STRANDED DRAFT line", async () => {
     // The stamp is the LAST write, and the child is already real when it runs.
@@ -874,12 +1024,12 @@ describe("loadV3OnboardingState", () => {
     expect(state).toEqual({
       draft: null,
       existingKids: [],
+      // fpv03 U3: coverSettled/storyStarted left V3FlowFacts with the
+      // cover/story steps' retirement from signup.
       facts: {
         parentVerified: false,
         hasDraft: false,
         kidNamed: false,
-        coverSettled: false,
-        storyStarted: false,
         childCreated: false,
       },
     });

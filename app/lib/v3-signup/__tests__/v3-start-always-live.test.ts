@@ -68,12 +68,12 @@ vi.mock("@/app/lib/v3-signup/v3-signup-core", () => ({
 const EMPTY_STATE = {
   draft: null,
   existingKids: [],
+  // fpv03 U3: coverSettled/storyStarted left V3FlowFacts with the cover/story
+  // steps' retirement from signup.
   facts: {
     parentVerified: true,
     hasDraft: false,
     kidNamed: false,
-    coverSettled: false,
-    storyStarted: false,
     childCreated: false,
   },
 };

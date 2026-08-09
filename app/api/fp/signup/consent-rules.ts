@@ -52,6 +52,7 @@ export const FP_PARENTAL_CONSENT_VERSIONS: readonly string[] = [
   "2026-08-03.1",
   "2026-08-05.1",
   "2026-08-07.1",
+  "2026-08-08.1",
 ];
 
 /**
@@ -64,12 +65,41 @@ export const FP_PARENTAL_CONSENT_VERSIONS: readonly string[] = [
  * the final copy. No em dashes (repo style).
  */
 export const FP_CONSENT_POLICY = {
-  // 2026-08-07.1 (Enrollment reframe): rewrites the notice around The 120 and
-  // its applications rather than First Profit alone. NOTE: this text no longer
-  // carries 2026-08-05.1's photo / third-party-AI-cover disclosure; per the
-  // 2026-08-07 batch decision the photo anchor below is deliberately left
-  // as-is, so consents at this version still open the photo gate.
-  version: "2026-08-07.1",
+  // 2026-08-08.1 (PUBLIC SITE disclosure): adds the public-disclosure sentence
+  // the real-public-site launch gate requires. Publishing a child's first name
+  // as a public web address is a SEPARATE purpose from storing it to run the
+  // account, so it gets its own sentence and its own anchor
+  // (FP_SITE_CONSENT_MIN_VERSION below) rather than riding inside the
+  // "information we store" parenthetical, which reads as an internal use.
+  //
+  // Every factual claim in the added text is verified against the renderer, and
+  // must be RE-VERIFIED if either side changes:
+  //   - noindex on every page state ......... first-profit api/_lib/renderSite.ts
+  //   - published columns are handle/headline/one_liner/products (+ first_name
+  //     for the default headline); no last name, age, or photo .. site-core.ts
+  //   - the one-liner reaches the public as the og:description, so link
+  //     previews are disclosed explicitly ... renderSite.ts (ogDescription)
+  //   - parent take-offline control ......... app/dashboard/KidSite.tsx
+  //
+  // fpv03 U3 (founder, 2026-08-08): this SAME unshipped version also RESTORES
+  // the photo disclosure the 2026-08-07.1 rewrite dropped, because the S04
+  // add-kid screen now captures a photo choice (default ON, decline records the
+  // per-child tombstone from migration 20260914120000). The earlier batch
+  // decision to leave the photo anchor at 2026-08-05.1 is SUPERSEDED:
+  // FP_PHOTO_CONSENT_MIN_VERSION below now points HERE, at the version whose
+  // text carries the photo sentence. Verified claims in the photo sentence:
+  //   - the photo is optional and feeds the story/hero artwork ... the cover
+  //     generator consumes it (app/api/fp/cover); COVER_AI_LIVE stays the
+  //     collection gate and the endpoint refuses a photo body while it is off
+  //   - decline at signup ................. StepAddKid's default-ON checkbox;
+  //     unchecking stamps children.photo_consent_revoked_at at child creation
+  //   - revoke later by contacting The 120 . the same withdrawal channel the
+  //     existing withdraw-consent sentence names; the revocation sweep + the
+  //     tombstone (20260914120000) are what enforce it
+  //   - deletion on revocation ............ the source photo blob is already
+  //     deleted after generation (fp_onboarding_drafts.photo_blob_key is
+  //     nulled, 20260912120000), and family erasure removes the artwork
+  version: "2026-08-08.1",
   text:
     "I confirm I am the parent or legal guardian of the child named in this " +
     "signup, and I am at least 18 years old. I consent to The 120 creating an " +
@@ -78,6 +108,21 @@ export const FP_CONSENT_POLICY = {
     "needed to run this account (my child's first name, last name, age, and " +
     "information added inside the app, which are used only to improve The 120 " +
     "and may be kept for up to twelve months after account deletion). I " +
+    "separately consent to The 120 publishing a public web page for my child " +
+    "on the firstprofit.school domain, where my child's first name becomes " +
+    "part of the web address (for example firstprofit.school/ethan), and " +
+    "where my child's first name and what my child writes about their " +
+    "business, including their headline and product ideas, are visible to " +
+    "anyone who has the link, including in previews shown when the link is " +
+    "shared. I understand that these pages ask search engines not to list " +
+    "them, that my child's last name, age, photograph, and contact details " +
+    "are never published, and that I can take my child's page offline at any " +
+    "time from my family dashboard. I separately consent to The 120 collecting " +
+    "a photo of my child, if I choose to provide one, and using it to create " +
+    "the story and hero artwork in my child's graphic novel. I understand that " +
+    "providing a photo is optional, that I can decline this during signup or " +
+    "revoke it at any time by contacting The 120, and that when I revoke it " +
+    "the photo and the artwork created from it are deleted. I " +
     "understand that I can review or delete my child's account by contacting " +
     "The120, that I can withdraw consent at any time by contacting The 120, " +
     "and that my consent is recorded with the version of this notice shown " +
@@ -113,13 +158,45 @@ export const FP_CONSENT_MIN_VERSION = "2026-08-01.1";
  * image service, and storing the generated cover. A SEPARATE anchor from
  * FP_CONSENT_MIN_VERSION on purpose (see that constant's warning): this one
  * gates a decorative, retryable feature, so pointing it at the version whose
- * text actually discloses the AI processing is both safe and correct. A pre-v3
- * family (beta cohort, v2 applicants) consented under 2026-08-01.1 / 2026-08-03.1,
- * which say nothing about photos or AI; they keep minting children fine and
- * simply have no cover until the dashboard captures a fresh consent at this
- * version.
+ * text actually discloses the AI processing is both safe and correct.
+ *
+ * fpv03 U3 (founder, 2026-08-08): MOVED from 2026-08-05.1 to 2026-08-08.1. The
+ * 2026-08-07.1 rewrite dropped the photo sentence while this anchor stayed
+ * below it, which meant a consent whose text said nothing about photos could
+ * still open the photo gate (the regression the guard test in
+ * __tests__/consent-rules.test.ts now pins). 2026-08-08.1 restores the photo
+ * disclosure, and the anchor now points at it: only a consent whose rendered
+ * text actually carried the photo sentence opens the gate. Every family who
+ * consented at 2026-08-01.1 through 2026-08-07.1 keeps minting children fine
+ * and simply has no photo/cover feature until a fresh consent is captured at
+ * this version.
+ *
+ * ⚠ Keep this pointed at a version whose TEXT carries the photo disclosure —
+ * the guard test fails the build otherwise.
  */
-export const FP_PHOTO_CONSENT_MIN_VERSION = "2026-08-05.1";
+export const FP_PHOTO_CONSENT_MIN_VERSION = "2026-08-08.1";
+
+/**
+ * The minimum consent-policy version required for the PUBLIC SITE specifically:
+ * claiming a handle, publishing, and therefore the existence of a page at
+ * firstprofit.school/<handle>. A THIRD anchor, for the same reason the photo
+ * anchor is the second one (see FP_CONSENT_MIN_VERSION's warning): refusing to
+ * provision a page is a harmless no-op the learner's room states honestly,
+ * while advancing the MINT anchor deletes correctly-created children.
+ *
+ * This anchor is what makes auto-provisioning PARENT-GATED. A family whose
+ * active consent predates 2026-08-08.1 (every family enrolled before this
+ * deploy) keeps playing with no public page; their child's Your Site card says
+ * consent is needed, and the page provisions itself the moment the parent
+ * consents at this version from the family dashboard. Publishing a child's
+ * first name to the open internet is not something an older consent can be
+ * read to have covered, so this anchor must never point below the version whose
+ * text actually discloses it.
+ *
+ * ⚠ Keep this pointed at the version whose TEXT carries the public-site
+ * disclosure. Lowering it would publish children whose parents were never told.
+ */
+export const FP_SITE_CONSENT_MIN_VERSION = "2026-08-08.1";
 
 /** The consent methods this build accepts. Card-in-transaction is deferred to a
  *  later phase; today's method is email verification plus an explicit
@@ -238,8 +315,8 @@ export function fpProvisioningConsentVerdict(
 
 /**
  * One fp_parental_consent row as the photo gate needs to see it. Deliberately
- * the three columns and nothing else: the gate is a pure EXISTS decision and
- * must not tempt a caller into reading the whole evidence record for it.
+ * these four columns and nothing else: the gate must not tempt a caller into
+ * reading the whole legal record for it.
  * `acceptedAt` / `revokedAt` accept an ISO string, a Date, or epoch ms, since
  * PostgREST hands back strings and the tests hand in Dates.
  */
@@ -248,6 +325,15 @@ export type PhotoConsentRow = {
   acceptedAt: string | Date | number | null | undefined;
   /** The row's OWN revocation stamp (an individually revoked consent). */
   revokedAt?: string | Date | number | null;
+  /**
+   * The row's `evidence` jsonb, RAW (fpv03 U3 review, FIX A). The S04 decline
+   * signal travels WITH the acceptance row (`photo_declined: true`, written
+   * atomically by consent-core at consent time), and the verdict below reads
+   * it so a decline can never be lost to a stranded tombstone UPDATE or to
+   * clock skew between the acceptance and the tombstone. Absent/malformed
+   * reads as "no decline claimed".
+   */
+  evidence?: unknown;
 };
 
 export type PhotoConsentVerdict =
@@ -264,7 +350,13 @@ export type PhotoConsentVerdict =
       //                 anchor but was never PUBLISHED in this namespace, so it
       //                 cannot be evidence of anything a parent actually read.
       //                 Mirrors fpProvisioningConsentVerdict's "consent_unknown".
-      reason: "no_consent" | "all_revoked" | "pre_tombstone" | "stale" | "unknown_version";
+      // declined      - the LATEST qualifying acceptance carries the S04
+      //                 photo_declined evidence flag: the parent said yes to
+      //                 the account and NO to the photo, in the same breath.
+      //                 The tombstone may or may not exist (a stranded UPDATE
+      //                 cannot reopen this gate); a later clean re-consent row
+      //                 reopens it by being newer.
+      reason: "no_consent" | "all_revoked" | "pre_tombstone" | "stale" | "unknown_version" | "declined";
       detail: string;
     };
 
@@ -277,14 +369,30 @@ const toMs = (v: string | Date | number | null | undefined): number | null => {
 /**
  * The photo/cover gate: may this child's photo be uploaded and processed?
  *
- * PLURAL BY CONSTRUCTION, an EXISTS check and never a single-row read. A child
- * legitimately has MANY active consent rows: uniqueness is per SIGNUP ATTEMPT
- * (the partial unique index in 20260830120000 keys on signup_attempt_id), the
+ * PLURAL BY CONSTRUCTION, never a single-row read. A child legitimately has
+ * MANY active consent rows: uniqueness is per SIGNUP ATTEMPT (the partial
+ * unique index in 20260830120000 keys on signup_attempt_id), the
  * add-another-kid loop mints a fresh attempt and a fresh consent per kid, and
  * the legacy-family capture path writes ATTEMPT-LESS rows that escape that
  * partial index entirely. Reading "the" consent row would therefore be a coin
- * flip between a stale one and a current one. The rule is: ANY row that
- * survives all three filters opens the gate.
+ * flip between a stale one and a current one. The rule (fpv03 U3 review,
+ * FIX A): the three filters below select the QUALIFYING rows, and then the
+ * LATEST acceptance among them decides — covered iff that row's evidence does
+ * NOT carry `photo_declined: true`.
+ *
+ * ── WHY THE LATEST ROW DECIDES, NOT "ANY ROW" (the stranded-decline hole) ──
+ * The S04 decline is written atomically INTO the acceptance row's evidence by
+ * consent-core; the per-child tombstone is a SEPARATE, later UPDATE at child
+ * creation. Under the old ANY-row rule the tombstone was the only thing that
+ * made a declined acceptance lose, so a stranded tombstone write (the
+ * `STRANDED PHOTO DECLINE` log in v3-onboarding-core) or clock skew between
+ * the two stamps silently REOPENED a gate the parent explicitly closed.
+ * Reading the decline off the acceptance row itself means one row, one clock,
+ * no ordering to get wrong: a declined latest row refuses (`declined`) with or
+ * without the tombstone, and a later clean re-consent row reopens the gate by
+ * being newer — exactly the semantics a deliberate re-consent deserves. On a
+ * same-instant tie between a declined and a clean acceptance, the decline
+ * wins (fail closed, the same direction as the strictly-after tombstone rule).
  *
  * The three filters, in order:
  *   1. the row's OWN revoked_at    - an individually revoked consent is ignored.
@@ -358,11 +466,11 @@ export function photoConsentVerdict(input: {
   const reachesAnchor = (v: string): boolean =>
     v.length > 0 && policyVersionAtLeast(v, FP_PHOTO_CONSENT_MIN_VERSION);
 
-  const qualifying = afterTombstone.find((r) => {
+  const qualifying = afterTombstone.filter((r) => {
     const v = versionsOf(r);
     return reachesAnchor(v) && isPublishedConsentVersion(v);
   });
-  if (!qualifying) {
+  if (qualifying.length === 0) {
     // Distinguish the two refusals deliberately. A row that ORDERS past the
     // anchor on a version we never published is not "stale" (there is nothing
     // older to re-consent from) - it is a claim we cannot place at all, and
@@ -385,7 +493,32 @@ export function photoConsentVerdict(input: {
       detail: `no active consent reaches the photo anchor (${FP_PHOTO_CONSENT_MIN_VERSION})`,
     };
   }
-  return { ok: true, policyVersion: String(qualifying.policyVersion).trim() };
+
+  // The LATEST acceptance among the qualifying rows decides (see the header).
+  // An unparseable accepted_at orders OLDEST (it can never outrank a placed
+  // row); when every qualifying row is unplaceable they tie, and a tie is
+  // decided by the fail-closed rule below.
+  const rowDeclinesPhoto = (r: PhotoConsentRow): boolean => {
+    const ev = r.evidence;
+    return (
+      !!ev && typeof ev === "object" && (ev as Record<string, unknown>).photo_declined === true
+    );
+  };
+  const acceptedMsOf = (r: PhotoConsentRow): number =>
+    toMs(r.acceptedAt) ?? Number.NEGATIVE_INFINITY;
+  const latestMs = Math.max(...qualifying.map(acceptedMsOf));
+  const latest = qualifying.filter((r) => acceptedMsOf(r) === latestMs);
+  // Same-instant tie: if ANY of the newest acceptances carries the decline,
+  // the decline wins — the same direction as the strictly-after tombstone rule.
+  if (latest.some(rowDeclinesPhoto)) {
+    return {
+      ok: false,
+      reason: "declined",
+      detail:
+        "the latest qualifying acceptance carries photo_declined — the parent consented to the account and declined photo use in the same signup",
+    };
+  }
+  return { ok: true, policyVersion: versionsOf(latest[0]) };
 }
 
 /* --------------------------------------------------- accept-payload validation */

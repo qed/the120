@@ -232,8 +232,6 @@ export async function loadV3OnboardingState(
       parentVerified: input.parentVerified,
       hasDraft: false,
       kidNamed: false,
-      coverSettled: false,
-      storyStarted: false,
       childCreated: false,
     },
   };
@@ -287,9 +285,8 @@ export async function loadV3OnboardingState(
       parentVerified: true,
       hasDraft: draft !== null,
       kidNamed: draft !== null && draft.firstName.trim().length > 0 && draft.age !== null,
-      coverSettled: draft !== null && draft.coverStatus !== "none",
-      storyStarted:
-        draft !== null && Object.values(draft.answers).some((a) => a.trim().length > 0),
+      // coverSettled/storyStarted retired with the cover/story steps (fpv03
+      // U3); the draft still carries the columns, but no flow fact reads them.
       childCreated: draft !== null && draft.childId !== null,
     },
   };
@@ -505,6 +502,11 @@ export async function v3AddKid(
     jurisdiction: V3_CONSENT_JURISDICTION,
     ip: ctx.ip,
     ua: ctx.ua,
+    // fpv03 U3: the S04 photo checkbox, unchecked. Rides in the consent row's
+    // evidence blob (the only durable store this signup already writes) so
+    // v3ProvisionKid can stamp the child's photo-consent tombstone at
+    // creation. FAIL-SAFE: absent/false records nothing.
+    photoDeclined: input.photoDeclined === true,
   });
   if (!consent.ok) {
     console.error(`[fp/v3-onboarding] recordConsent refused: ${consent.reason} (attempt ${attemptId})`);
@@ -853,14 +855,89 @@ export async function v3ProvisionKid(
     draftKidAge: draft.age,
     draftAnswers: draft.answers,
   });
+
+  // ── the PHOTO-CONSENT DECLINE tombstone (fpv03 U3) ──
+  // The S04 add-kid checkbox is DEFAULT ON; unchecking it rode into the consent
+  // row's evidence blob at v3AddKid time (`photo_declined: true`). It is
+  // honored HERE, at child creation, by stamping the per-child tombstone from
+  // migration 20260914120000 — FROM THE CONSENT ROW'S OWN accepted_at (fpv03 U3
+  // review, FIX B), not from this server's clock. That makes the ORDERING
+  // invariant a single-clock guarantee: tombstone == accepted_at, equal stamps
+  // lose to the tombstone under photoConsentVerdict's strict
+  // `acceptedMs > tombstoneMs` rule, so the decline wins over the acceptance
+  // minted in the same signup no matter how skewed two wall clocks are. A later
+  // deliberate re-consent writes a newer row and re-opens the gate by design.
+  // (`nowIso` survives only as the logged fallback for a row whose accepted_at
+  // is somehow unreadable.) FAIL-SAFE: an unreadable evidence blob stamps
+  // nothing (the documented absent/false = no tombstone rule) — but it is
+  // logged loudly, because the failure direction is a photo gate a parent asked
+  // to close. And since FIX A the tombstone is defense-in-depth anyway: the
+  // verdict reads the decline off the acceptance row itself, so even a stamp
+  // that never lands cannot reopen the gate.
+  let photoDeclined = false;
+  let declineAcceptedAt: string | null = null;
+  if (draft.attemptId) {
+    const consentRows = await deps.db
+      .from("fp_parental_consent")
+      .select("evidence, accepted_at")
+      .eq("signup_attempt_id", draft.attemptId);
+    if (consentRows.error) {
+      console.error(
+        `[fp/v3-onboarding] PHOTO DECLINE UNREADABLE for child ${childId} (attempt ${draft.attemptId}): ${consentRows.error.message} — no tombstone stamped; verify children.photo_consent_revoked_at by hand`
+      );
+    } else {
+      for (const r of (consentRows.data as Array<{ evidence?: unknown; accepted_at?: unknown }> | null) ?? []) {
+        const ev = r.evidence;
+        const declined =
+          !!ev &&
+          typeof ev === "object" &&
+          (ev as Record<string, unknown>).photo_declined === true;
+        if (!declined) continue;
+        photoDeclined = true;
+        if (typeof r.accepted_at === "string" && r.accepted_at.length > 0) {
+          declineAcceptedAt = r.accepted_at;
+        }
+      }
+      if (photoDeclined && declineAcceptedAt === null) {
+        console.error(
+          `[fp/v3-onboarding] photo-decline consent row for child ${childId} (attempt ${draft.attemptId}) has no readable accepted_at — stamping the tombstone from the server clock instead (two-clock ordering, the case FIX B exists to avoid)`
+        );
+      }
+    }
+  } else {
+    // Unreachable today: the `!draft.attemptId` refusal above already returned
+    // `no_draft`. Kept as an ELSE-LOG rather than dropped (fpv03 U3 review,
+    // Kieran): if that early refusal is ever loosened, a draft with no attempt
+    // would otherwise sail past this read and silently swallow a decline.
+    console.error(
+      `[fp/v3-onboarding] PHOTO DECLINE UNREADABLE for child ${childId}: draft ${draft.id} carries no attempt id — no consent row to read, no tombstone stamped; verify children.photo_consent_revoked_at by hand`
+    );
+  }
+
   const coverWrite = await deps.db
     .from("children")
-    .update({ ...coverFields, ...redraw })
+    .update({
+      ...coverFields,
+      ...redraw,
+      // One UPDATE, one failure mode — same statement as the carries, but the
+      // tombstone is NOT decoration; its failure is logged by name below. The
+      // stamp is the consent row's OWN accepted_at (FIX B, single-clock
+      // ordering); the server clock is only the logged fallback.
+      ...(photoDeclined ? { photo_consent_revoked_at: declineAcceptedAt ?? nowIso(deps) } : {}),
+    })
     .eq("id", childId);
   if (coverWrite.error) {
     // DECORATION NEVER FAILS PROVISIONING (plan: System-Wide Impact). Logged
     // and moved past; the child is minted and playable.
     console.error(`[fp/v3-onboarding] cover column write failed for child ${childId}: ${coverWrite.error.message}`);
+    if (photoDeclined) {
+      // The one non-decorative field in that statement. The child is playable,
+      // but a parental instruction did not land — this line is the operator's
+      // handle for stamping it by hand.
+      console.error(
+        `[fp/v3-onboarding] STRANDED PHOTO DECLINE for child ${childId}: parent declined photo use at signup but photo_consent_revoked_at was not stamped — needs manual photo_consent_revoked_at`
+      );
+    }
   }
 
   // ── consumption, LAST ──

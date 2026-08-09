@@ -24,17 +24,33 @@
  *     goes. It is the first step whose work is not done, so a family returning
  *     to a bare `/start` resumes where they actually are.
  *
- * They differ because the cover and story steps are OPTIONAL and SKIPPABLE. A
- * family may legitimately stand on `ready` with no cover and no answers, so
- * neither may act as a gate — but a family who has not seen the cover yet should
- * still LAND there. Consequence, stated rather than discovered: skipping an
- * optional step is remembered by the URL (`?step=`, which survives refresh and
- * Back exactly as in MiniAppShell) and NOT by the draft row, so a family who
- * skips the cover and then opens the flow fresh in a new tab lands on the cover
- * again. That is a re-offer of something optional, never lost work.
+ * With the cover and story steps RETIRED from signup (fpv03 U3, founder
+ * decision 2026-08-08 — the flow is parent → kid → ready, and cover generation
+ * returns elsewhere in U6), every remaining step is load-bearing, so today the
+ * two functions coincide. Both are kept: the distinction is the designed seam
+ * an optional step slots back into, and callers depend on each by name.
+ *
+ * ── WHAT `?step=cover` AND `?step=story` MEAN NOW ──
+ * They are NOT steps. `parseV3Step` answers null for them, exactly as for any
+ * unknown value, so a stale bookmark or an old tab's URL FAILS OPEN TO THE
+ * LANDING (a mid-flow family resumes where they are), and
+ * `shouldRedirectToDashboard` treats them as a bare visit (a completed parent
+ * goes to the dashboard). Deliberately NOT a special-cased remap: the graceful
+ * null path already puts every family somewhere correct.
  *
  * Everything else FAILS OPEN TO THE LANDING — the same rule the v2 flow uses —
  * so a garbled URL puts a family where they are instead of on an error.
+ *
+ * ── DORMANT SURFACES (fpv03 U3) — the consolidated list ──
+ * Retiring the cover/story steps left these alive but unreachable from any
+ * mounted UI. Kept for DEPLOY SKEW (an old tab holding the pre-U3 bundle can
+ * still be mid-flow on those screens); every entry points back here, and the
+ * eventual cleanup deletes them together:
+ *   - app/start/StepCover.tsx          — unmounted client screen (step 3)
+ *   - app/start/StepStory.tsx          — unmounted client screen (step 4)
+ *   - v3SaveStoryAction                — app/start/actions.ts, StepStory's action
+ *   - POST /api/fp/cover               — app/api/fp/cover/route.ts, StepCover's endpoint
+ *   - COVER_AI_LIVE                    — the cover endpoint's vendor gate env flag
  */
 
 /* ------------------------------------------------------------ destinations */
@@ -54,16 +70,17 @@ export const FIRST_PROFIT_SIGN_IN_URL = "https://firstprofit.school/";
 /* ---------------------------------------------------------------- the steps */
 
 /**
- * The five screens, in order. The names are the `?step=` values, so they are a
+ * The three screens, in order. The names are the `?step=` values, so they are a
  * user-visible contract: renaming one breaks every bookmark and every link the
  * launch email will carry.
  *   parent — name / email / password / consent + the inline 6-digit code
  *   kid    — the kid's name and age (+ the per-kid consent re-affirmation)
- *   cover  — the comic cover (Unit 4's generator; template until then)
- *   story  — the six OPTIONAL story questions
  *   ready  — credentials + the handoff to First Profit
+ * "cover" and "story" were steps until fpv03 U3 retired them from signup
+ * (founder decision 2026-08-08). Their names now parse to null — see the
+ * module header for exactly what an old `?step=cover` URL does.
  */
-export const V3_STEPS = ["parent", "kid", "cover", "story", "ready"] as const;
+export const V3_STEPS = ["parent", "kid", "ready"] as const;
 export type V3Step = (typeof V3_STEPS)[number];
 
 export const isV3Step = (v: unknown): v is V3Step =>
@@ -89,19 +106,17 @@ export type V3FlowFacts = {
   hasDraft: boolean;
   /** The draft carries a usable kid name AND age. */
   kidNamed: boolean;
-  /** A cover decision is PERSISTED on the draft (`cover_status !== 'none'`).
-   *  Written by Unit 4's generator; a SKIP does not persist, by design. */
-  coverSettled: boolean;
-  /** At least one story answer is persisted on the draft. */
-  storyStarted: boolean;
   /** A child was provisioned from this draft (the draft is `consumed`). */
   childCreated: boolean;
+  // `coverSettled` and `storyStarted` were facts here until fpv03 U3 retired
+  // the cover/story steps from signup; the draft still CARRIES cover/answers
+  // columns (V3DraftView), but no flow decision reads them anymore.
 };
 
 /**
  * The AUTHORITY line: the furthest step a URL may address. Only the load-bearing
- * gates raise it — the optional cover and story steps never do (see the module
- * header). `childCreated` is terminal: a family whose child exists is pinned to
+ * gates raise it (see the module header). `childCreated` is terminal: a family
+ * whose child exists is pinned to
  * `ready`, so no URL can walk them back toward a second mint.
  */
 export function furthestReachableV3Step(facts: V3FlowFacts): V3Step {
@@ -114,13 +129,14 @@ export function furthestReachableV3Step(facts: V3FlowFacts): V3Step {
 /**
  * The LANDING: the first step whose work is not done, for a URL that carries no
  * `?step=`. Read strictly top-down — each rung requires everything below it.
+ * With the optional cover/story rungs retired (fpv03 U3) this currently equals
+ * the ceiling; kept as its own function because it is the seam an optional
+ * step slots back into (see the module header).
  */
 export function firstIncompleteV3Step(facts: V3FlowFacts): V3Step {
   if (facts.childCreated) return "ready";
   if (!facts.parentVerified) return "parent";
   if (!facts.hasDraft || !facts.kidNamed) return "kid";
-  if (!facts.coverSettled) return "cover";
-  if (!facts.storyStarted) return "story";
   return "ready";
 }
 

@@ -1,897 +1,333 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import Image from "next/image";
-import { FIRST_PROFIT_SIGN_IN_URL } from "@/app/lib/v3-signup/flow-rules";
-import { DEPOSIT_REFUND_DEADLINE_LABEL, SEATS_REMAINING, SEATS_TOTAL, groups } from "@/app/lib/site";
-import { skinForGrade } from "@/app/lib/funnel/miniapp-rules";
-import {
-  type Child,
-  PATH_TASK_TOTAL,
-  canReserveSeatForChild,
-  cardVerdict,
-  childName,
-  completeness,
-  hasPaidDeposit,
-  pathBarWidthPct,
-  reserveRefusalMessage,
-  statusMeta,
-  sumVerifiedTaskCounts,
-} from "./data";
-import { REFUND_POLICY } from "@/app/lib/funnel/deposit-rules";
-import { useDashboard } from "./store";
-import { DashHeader, Meter } from "./ui";
-import SignIn from "./SignIn";
-import KidCredentials, { type ConsentPolicyBundle } from "./KidCredentials";
-import KidSite from "./KidSite";
-import type { ParentSiteRow } from "@/app/lib/fp/fp-public-site-rules";
-import { V3_ADD_KID_HREF, type RemapContext } from "@/app/lib/v3-signup/remap-rules";
-
 /**
- * The two-register seam (reconnect U11, R12): which whole-dashboard skeleton
- * renders. `application` is today's screen-3 dashboard, byte-for-byte.
- * `path` is the screen-16 skeleton (Path top bar, tp/hq-token hero, Path
- * child cards) — flipped server-side by `dashboardRegister` once ANY child
- * has EVER completed arrival, sticky forever. The registers NEVER mix on
- * one screen: in path mode the application DashHeader/hero/seats box do not
- * render, and in application mode nothing Path-register renders.
+ * THE PARENT DASHBOARD — fpv03 S05 apps view (Unit U4).
+ *
+ * A complete rebuild. This screen replaces the old admissions/CRM dashboard for
+ * 100% of families (founder decision: one cohort, no admissions split, and no
+ * payment anywhere in the parent experience while we test — "free while we
+ * test"). It is a LAUNCHER: per kid, the three apps an enrollment carries.
+ *
+ * ── WHAT LEFT WITH THE REBUILD (payment removal) ──
+ * Every deposit / seats-remaining / refund-deadline / reserve / checkout /
+ * path-completeness / register / Path-progress surface that used to live here is
+ * gone from the UI. The server endpoints behind them (/api/checkout, the
+ * checkout route's consent enforcement, cardVerdict, canReserveSeatForChild)
+ * stay exported and reachable as separately-addressable endpoints; nothing here
+ * references them. Signup provisions a First Profit account with no deposit gate
+ * (app/start/StepAccountReady.tsx → v3ProvisionAction), so a family completes
+ * for free and lands here.
+ *
+ * ── THE PER-KID "LOGIN" HANDOFF ──
+ * The First Profit "Login" button mints a one-time, child-bound handoff code for
+ * THAT child and opens firstprofit.school/auth/enter#<code> in a NEW TAB. It
+ * reuses the shipped mint path (`v3MintHandoffAction`, ownership enforced in the
+ * WHERE clause server-side) and the shipped new-tab discipline from the
+ * account-ready screen: open the blank tab SYNCHRONOUSLY inside the click
+ * handler, before any await, or a popup blocker eats it. `fallback` and `minted`
+ * both carry a destination and navigate alike; a blocked tab surfaces a visible
+ * manual link rather than a silent dead end.
+ *
+ * The credential-reset, take-page-offline, and photo-consent controls do NOT
+ * live here — they live on the Account Details page (app/dashboard/account),
+ * which the header menu points at. A handle-less "Login info" affordance surfaces
+ * the child's username plus the "Email my parent a code" recovery path.
+ *
+ * Mobile-first: base classes are the ~390px phone; `lg:` layers the two-column
+ * label/card rows on. No em dashes in parent-facing copy.
  */
-export type DashboardRegister = "application" | "path";
 
-/** Phase colour per skin, exactly the handoff's home-scene rule (screen 16):
- *  Trail children carry SELL, HQ children carry BUILD. Complete literals —
- *  the Tailwind scanner rule, same as SKIN_ROOT_CLASSES. */
-const PHASE_AVATAR_CLASSES = {
-  trail: "bg-phase-sell",
-  hq: "bg-phase-build",
-} as const;
-const PHASE_BAR_CLASSES = {
-  trail: "bg-phase-sell",
-  hq: "bg-phase-build",
-} as const;
-const PHASE_STATUS_CLASSES = {
-  trail: "text-phase-sell-ink",
-  hq: "text-phase-build-ink",
-} as const;
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { v3MintHandoffAction } from "@/app/start/actions";
+import { useDashboard } from "./store";
+import { AppHeader } from "./ui";
+import SignIn from "./SignIn";
+import type { Child } from "./data";
 
-/** The child's Path skin for card colouring — HQ for an unset grade (the
- *  adult-adjacent default `skinForGrade` uses for out-of-range grades). */
-const cardSkin = (grade: number | ""): "trail" | "hq" =>
-  typeof grade === "number" ? skinForGrade(grade) : "hq";
+/** The account menu's destinations. Both open Account Details, but as DISTINCT
+ *  section anchors (matching id anchors live on the AccountDetails page) so the
+ *  menu is not two byte-identical links. */
+const ACCOUNT_MENU = [
+  { label: "Account Details", href: "/dashboard/account#account" },
+  { label: "My Kids", href: "/dashboard/account#kids" },
+];
 
-export default function DashboardApp({
-  seatsRemaining = SEATS_REMAINING,
-  register = "application",
-  verifiedTaskCounts = null,
-  photoConsentChildIds = null,
-  consentPolicy,
-  remapCtx,
-  fpSites = null,
+const FP_BLURB =
+  "Start a real business through 5 phases, 25 steps and 125 sub-steps. Every win builds a panel of your own custom graphic novel.";
+const GAUNTLET_BLURB =
+  "Cover grades 3-12 math facts (including Calculus), making them effortless so you can focus your mental energy on complex problem solving, the underlying basic calculations.";
+const MATH_ACADEMY_BLURB =
+  "Math Academy teaches math 2X-4X faster by adaptively diagnosing exactly what students know, filling knowledge gaps and building mastery in math from 4th grade to university.";
+
+/** The First Profit bars mark (already shipped for the path PWA / signup). */
+function FpMark() {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src="/path-logo.svg" alt="" aria-hidden className="h-10 w-10 flex-none" />
+  );
+}
+
+/** The styled Gauntlet wordmark — no bundled asset exists, so it is text, the
+ *  same treatment the signup "Includes:" tile uses. */
+function GauntletWordmark() {
+  return (
+    <span className="text-xl font-black leading-none tracking-[0.02em]">
+      <span className="text-[#2f6fd0]">THE</span>{" "}
+      <span className="text-[#e8762c]">GAUNTLET</span>
+    </span>
+  );
+}
+
+/** The disabled "Coming soon" pill — a control that LOOKS dead, never tappable. */
+function ComingSoon() {
+  return (
+    <span className="inline-flex min-h-[44px] flex-none items-center justify-center rounded-full bg-v3-ink/10 px-6 py-3 font-path-display text-base font-semibold text-v3-ink/40">
+      Coming soon
+    </span>
+  );
+}
+
+/** One app row: left label (its own column from `lg` up), then the card. */
+function AppRow({
+  label,
+  children,
 }: {
-  seatsRemaining?: number;
-  register?: DashboardRegister;
-  /** Each child's First Profit PUBLIC PAGE and its state (R21/R22), loaded
-   *  server-side and scoped to this parent. A child with no claimed handle is
-   *  simply absent. `null` = the read failed or there was no session, and the
-   *  take-offline control then renders for nobody — offering the wrong
-   *  affordance is worse than offering none until the next load. Optional so
-   *  tests that mount this component without a server keep compiling. */
-  fpSites?: ParentSiteRow[] | null;
-  /** Child ids whose photo/cover consent gate is OPEN (v3 Unit 8); null = the
-   *  server read failed, and the panel then offers neither affordance. */
-  photoConsentChildIds?: string[] | null;
-  /** The v2→v3 remap's contextual override facts for this family (v3 Unit 8
-   *  review, FIX 1), derived server-side by the dashboard gate and handed to
-   *  EVERY card so a CTA's destination is the same one the gate would have
-   *  redirected to. Optional so the tests that mount this component without a
-   *  server keep compiling; absent means "no override". */
-  remapCtx?: RemapContext;
-  /** The rendered consent policy + its hash, computed server-side. Optional so
-   *  the many tests that mount this component without it keep compiling; the
-   *  panel simply does not render without one. */
-  consentPolicy?: ConsentPolicyBundle;
-  /** Child id → REAL verified fp task count, loaded server-side by the gate
-   *  (dashboard-gate-core) fresh on each page load. Absent key = no fp
-   *  profile yet = a true 0; null = counts read failed OR application
-   *  register — both render the 0 floor (the dashboard always renders). */
-  verifiedTaskCounts?: Record<string, number> | null;
+  label: string;
+  children: React.ReactNode;
 }) {
-  const {
-    ready,
-    session,
-    parent,
-    children,
-    deposits,
-    composedChildIds,
-    projectNames,
-    refreshDeposits,
-    signOut,
-  } = useDashboard();
-  // Returning from Stripe Checkout: the banner derives from the URL ONCE at
-  // mount (lazy initializer — no setState-in-effect, the React Compiler
-  // rule); the effect below handles only the side effects.
-  const [depositBanner] = useState<"success" | "cancelled" | null>(() => {
-    if (typeof window === "undefined") return null;
-    const result = new URLSearchParams(window.location.search).get("deposit");
-    return result === "success" || result === "cancelled" ? result : null;
-  });
-  const [reservingId, setReservingId] = useState<string | null>(null);
-  const [checkoutError, setCheckoutError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!depositBanner) return;
-    window.history.replaceState(null, "", "/dashboard");
-    if (depositBanner === "success") {
-      refreshDeposits();
-      // The webhook can lag the redirect by a moment — refresh once more.
-      const t = setTimeout(refreshDeposits, 4000);
-      return () => clearTimeout(t);
-    }
-  }, [depositBanner, refreshDeposits]);
-
-  const reserveSeat = async (childId: string) => {
-    setReservingId(childId);
-    try {
-      const res = await fetch("/api/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // The version this bundle will PRESENT at checkout (the policy
-        // renders on the Stripe-hosted page, P0 2026-07-30), echoed so the
-        // server can refuse a stale tab: without it, a checkout opened
-        // against old text would be stamped with whatever version is live
-        // at POST time — a false consent record (U1 review, adversarial).
-        // NO accepted-boolean in this body (a test pins its absence):
-        // nothing here renders the policy, so the client has no acceptance
-        // to claim — the acceptance happens on Stripe's page and Stripe
-        // records it.
-        body: JSON.stringify({ childId, policyVersion: REFUND_POLICY.version }),
-      });
-      const body = await res.json();
-      if (res.status === 409 && body.stalePolicy) {
-        setCheckoutError(
-          "The policy text was updated since this page loaded. Please refresh and review the current version."
-        );
-        setReservingId(null);
-        return;
-      }
-      if (body.redirect) {
-        // F7: zero seats routes to the waitlist — a dead-end error string
-        // at the sold-out moment strands exactly the family most worth
-        // converting to the waitlist (both reviewers).
-        window.location.href = body.redirect;
-        return;
-      }
-      if (!res.ok || !body.url) throw new Error(body.error ?? "Could not start checkout");
-      window.location.href = body.url;
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Could not start checkout — try again.";
-      // Stale-tab degradation (reconnect U3): a funnel card's Reserve CTA
-      // only renders when the state it read allowed it, so the server gate's
-      // refusal means the state moved — say "refresh", never a dead retry.
-      // The mapping is pure (data.ts) so it is tested without mounting this.
-      const child = children.find((x) => x.id === childId);
-      setCheckoutError(
-        reserveRefusalMessage({
-          serverError: message,
-          applicantState: child?.applicantState ?? null,
-        })
-      );
-      setReservingId(null);
-    }
-  };
-
-  // Always the FULL per-child deposit list: a refund-then-repay child has
-  // multiple rows, and a single find() can grab the refunded one while a
-  // paid one exists (the gate + paid banner would then disagree with the API).
-  const depositsFor = (childId: string) => deposits.filter((d) => d.childId === childId);
-
-  // The outlined pill twin's classes — ONE literal, shared by the reserve
-  // block and the R1a standalone render so the pair can never drift apart.
-  const reviewPillClass =
-    "inline-flex h-10 items-center justify-center rounded-full border border-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-blue transition-colors hover:bg-blue/5";
-
-  // The filled blue pill — the primary application CTA (2026-07-30: the red
-  // mono "Open application" links are retired; every card carries only the
-  // blue pair, Continue application / Review application). ONE literal shared
-  // by the Reserve button and every Continue-application pill.
-  const bluePillClass =
-    "inline-flex h-10 items-center justify-center rounded-full bg-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark";
-
-  // The reserve entry (unified-flow R1) — two pills of ONE button family:
-  // filled Reserve leading, outlined "Review application" twin beside it.
-  // ONE block shared by the legacy card and the funnel `offered`/re-reserve
-  // cards. The refund policy renders at checkout, not here (2026-07-30).
-  // The pair wraps to stacked on narrow cards; both disable while a
-  // checkout is opening so a double-navigation can't race the redirect —
-  // an anchor has no real `disabled`, so the twin needs ALL THREE guards:
-  // tabIndex -1 (keyboard focus), preventDefault (a still-focused Enter),
-  // pointer-events-none (mouse/touch). aria-disabled alone is advisory.
-  // `review` is the verdict's computed link (data.ts stays the ONE source
-  // of label/href); the legacy card, whose verdict carries none, falls
-  // back to the same mini-app walk.
-  const renderReserveCta = (c: Child) => {
-    const reserving = reservingId === c.id;
-    // v3 Unit 9: the outlined "Review application" TWIN IS GONE. It opened the
-    // v2 read-only application walkthrough, which now lives in
-    // `archive/new-user-v2/` — see the retired `secondaryReviewLink` note in
-    // app/dashboard/data.ts. What is left is the filled Reserve pill in the
-    // bottom-right, the same right-justified spot every other card's single
-    // button holds (item 45).
-    return (
-      <>
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          <button
-            onClick={() => reserveSeat(c.id)}
-            disabled={reserving}
-            className={`${bluePillClass} disabled:cursor-not-allowed disabled:opacity-60`}
-          >
-            {reserving ? "Opening checkout…" : "Reserve seat · $250"}
-          </button>
-        </div>
-        <p className="mt-2 text-right font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
-          Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}
-        </p>
-      </>
-    );
-  };
-
-  // Direct reserve (2026-08-02): the SECONDARY reserve action on
-  // pre-submission cards — outlined twin below the primary application CTA,
-  // same reserveSeat path (dispute-evidence posture never forks), same
-  // double-click guard as the primary reserve button.
-  const renderSecondaryReserve = (c: Child, label: string) => {
-    const reserving = reservingId === c.id;
-    return (
-      <div className="mt-3 flex flex-col items-end">
-        <button
-          onClick={() => reserveSeat(c.id)}
-          disabled={reserving}
-          className={`${reviewPillClass} disabled:cursor-not-allowed disabled:opacity-60`}
-        >
-          {reserving ? "Opening checkout…" : label}
-        </button>
-        <p className="mt-2 text-right font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
-          Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}
-        </p>
+  return (
+    <div className="grid gap-3 lg:grid-cols-[13rem_1fr] lg:items-center lg:gap-8">
+      <h3 className="font-path-display text-xl font-black leading-tight text-v3-ink lg:text-2xl">
+        {label}
+      </h3>
+      <div className="rounded-3xl border border-v3-ink/10 bg-white p-5 shadow-[0_2px_0_0_rgb(27_24_21_/_0.06)] sm:p-6">
+        {children}
       </div>
-    );
-  };
+    </div>
+  );
+}
 
-  // Auth gate: everything below assumes a signed-in parent. Signed out
-  // always renders the application-register SignIn (the server computed the
-  // register from no session as "application" too — they agree).
+export default function DashboardApp() {
+  const { ready, session, children } = useDashboard();
+
+  // Per-child login state: which child's tab is opening, and any popup-blocked
+  // manual link / error to surface beside that child's card.
+  const [loggingIn, setLoggingIn] = useState<string | null>(null);
+  const [manualUrl, setManualUrl] = useState<{ id: string; url: string } | null>(null);
+  const [loginError, setLoginError] = useState<{ id: string; message: string } | null>(null);
+  const [infoOpen, setInfoOpen] = useState<string | null>(null);
+
+  // Cleared on unmount. Read before every setState and every navigation the
+  // detached mint performs — the same guard StepAccountReady.tsx ships (Unit 3
+  // review, FIX 5): the mint keeps resolving after this screen is gone, and a
+  // setState on an unmounted tree (or a navigate of a tab the parent already
+  // left) is the bug that guard exists to prevent.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  // Auth gate: signed out always shows the SignIn swap (client-side), exactly as
+  // before — the server gate computed "render" for a session-less request too.
   if (ready && !session) return <SignIn />;
 
-  // v3 Unit 9: `flowHref` IS GONE. It built the v2 literal `/start/child/<id>`
-  // — the merged application walk — for the legacy card's three entry pills
-  // ("Continue application", "Start new flow", "Review application") and for
-  // the reserve block's Review twin. That flow is archived
-  // (`archive/new-user-v2/child/[childId]`), the URL now redirects to this very
-  // dashboard, and the remap table's answer for the `legacy` cell is
-  // `dashboard`. So the pills are removed rather than repointed: a button that
-  // reloads the page you are already on is not an entry point. A legacy card
-  // now shows its status, its meter, and its deposit block — every affordance
-  // it has that still leads somewhere.
-  // v3 Unit 8: ADD A CHILD re-enters the V3 KID FLOW, not v2's add-child page.
-  // The literal lives in the remap module (`V3_ADD_KID_HREF`) with every other
-  // v3 destination, so Unit 9's `app/start/v3` → `app/start` move was one edit
-  // there rather than a hunt through render files. The source-text pin in
-  // app/lib/__tests__/funnel-dashboard-cards.test.ts asserts THIS line and the
-  // constant's value together.
-  const ADD_CHILD_HREF = V3_ADD_KID_HREF;
+  const login = (childId: string) => {
+    if (loggingIn) return;
+    // ⚠ SYNCHRONOUS OPEN, BEFORE ANY AWAIT (the shipped account-ready rule): a
+    // window.open after an await has lost the user-gesture context and every
+    // popup blocker eats it.
+    // ⚠ NO `noopener` IN THE FEATURE STRING: window.open returns NULL whenever
+    // noopener is requested, which would null the handle this mint keeps and
+    // force EVERY family onto the manual-link path (the shipped documented bug).
+    // The destination is first-party, so win.opener is nulled directly instead.
+    const win = window.open("", "_blank");
+    try {
+      if (win) win.opener = null;
+    } catch {
+      // First-party destination either way; nothing to do.
+    }
+    setLoggingIn(childId);
+    setManualUrl(null);
+    setLoginError(null);
+    void (async () => {
+      const result = await v3MintHandoffAction({ childId });
+      // ⚠ THE UNMOUNT GUARD (ported from StepAccountReady, review FIX 5). If this
+      // screen is gone the parent has chosen somewhere else to be; the only
+      // thing left to do is not leave a blank popup behind, and never setState.
+      if (!mounted.current) {
+        win?.close();
+        return;
+      }
+      if (result.kind === "failed") {
+        win?.close();
+        setLoggingIn(null);
+        setLoginError({
+          id: childId,
+          message: "We could not open First Profit just now. Try again.",
+        });
+        return;
+      }
+      // `minted` and `fallback` both carry a working destination.
+      if (win) {
+        win.location.href = result.destination;
+        setLoggingIn(null);
+        return;
+      }
+      // The popup blocker won: surface the link rather than a silent dead end.
+      // Made observable (per the noopener learning): a silent fallback once hid
+      // that EVERY family was taking this path.
+      console.warn("[dashboard] new tab blocked; surfacing the manual handoff link");
+      setManualUrl({ id: childId, url: result.destination });
+      setLoggingIn(null);
+    })();
+  };
 
-  // null = the consent read failed; `.includes` on a real array is the only
-  // "open" answer, and the panel treats null as "offer nothing".
-  const consentFor = (id: string): boolean | null =>
-    photoConsentChildIds === null ? null : photoConsentChildIds.includes(id);
-  // The per-child parent panels, in ONE helper so every card carries the same
-  // set: the credentials/permissions disclosure, then the public-page control
-  // for a child who has claimed a handle. A child with no site gets no strip.
-  const credentialsPanel = (c: Child) => {
-    const site = fpSites?.find((s) => s.childId === c.id) ?? null;
+  const firstProfitCard = (c: Child) => {
+    const opening = loggingIn === c.id;
+    // The SAME null signal the Login-info panel shows below ("Not set up yet"):
+    // a kid with no FP account has no handoff to mint. Rendering an enabled
+    // Login for them burns a real single-use code and lands on a not_child error.
+    const notSetUp = c.fpUsername == null;
+    const info = infoOpen === c.id;
+    const manual = manualUrl?.id === c.id ? manualUrl.url : null;
+    const error = loginError?.id === c.id ? loginError.message : null;
     return (
-      <>
-        {consentPolicy ? (
-          <KidCredentials child={c} photoConsentOpen={consentFor(c.id)} policy={consentPolicy} />
-        ) : null}
-        {site ? <KidSite site={site} /> : null}
-      </>
+      <div>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 gap-4">
+            <FpMark />
+            <div className="min-w-0">
+              <p className="font-path-display text-xl font-black leading-none text-v3-ink">
+                First Profit
+              </p>
+              <p className="mt-2 text-sm leading-relaxed text-v3-stone">{FP_BLURB}</p>
+            </div>
+          </div>
+          <div className="flex flex-none flex-col items-stretch gap-2 sm:items-end">
+            <button
+              type="button"
+              onClick={() => login(c.id)}
+              disabled={opening || notSetUp}
+              title={notSetUp ? "This kid does not have a First Profit account yet." : undefined}
+              className="inline-flex min-h-[44px] items-center justify-center rounded-full bg-v3-profit px-8 py-3 font-path-display text-base font-semibold text-white shadow-[0_4px_0_0_#0f4227] transition hover:-translate-y-0.5 hover:bg-v3-profit-dark active:translate-y-0 disabled:cursor-not-allowed disabled:bg-v3-ink/15 disabled:text-v3-ink/40 disabled:shadow-none disabled:hover:translate-y-0"
+            >
+              {notSetUp ? "Not set up yet" : opening ? "Opening..." : "Login"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setInfoOpen(info ? null : c.id)}
+              aria-expanded={info}
+              className="v3-label inline-flex min-h-[44px] items-center justify-center text-v3-stone underline underline-offset-4 transition-colors hover:text-v3-ink"
+            >
+              Login info
+            </button>
+          </div>
+        </div>
+
+        {info && (
+          <div className="mt-4 rounded-2xl border border-v3-ink/10 bg-v3-cream/60 p-4">
+            <p className="v3-label text-v3-stone">Username</p>
+            {/* break-all: an email-shaped handle must wrap inside a 390px card
+                rather than push the page sideways. */}
+            <p className="mt-1 break-all font-path-mono text-sm text-v3-ink">
+              {c.fpUsername ?? "Not set up yet"}
+            </p>
+            <p className="mt-3 text-sm leading-relaxed text-v3-stone">
+              Your kid signs in with this username. Forgot the password? On the login page they
+              can also use &ldquo;Email my parent a code&rdquo; and we will send you a one-time
+              code.
+            </p>
+          </div>
+        )}
+
+        {manual && (
+          <p className="mt-3 text-sm leading-relaxed text-v3-stone">
+            Your browser blocked the new tab.{" "}
+            <a
+              href={manual}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-v3-profit underline underline-offset-4"
+            >
+              Open First Profit
+            </a>
+          </p>
+        )}
+        {error && (
+          <p className="mt-3 text-sm leading-relaxed font-medium text-v3-one20" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
     );
   };
 
-  const isPath = register === "path";
+  const kidSection = (c: Child) => (
+    <section key={c.id} className="mt-10 first:mt-0">
+      <h2 className="font-path-display text-4xl font-black leading-none tracking-tight text-v3-ink sm:text-5xl">
+        {(c.firstName || "Your kid")}&rsquo;s Dashboard
+      </h2>
+      <div className="mt-6 space-y-6">
+        <AppRow label="Build a real Business">{firstProfitCard(c)}</AppRow>
 
-  /* ── the Path-register home (screen 16) — reconnect U11 ──
-     The SAME dashboard skeleton re-skinned by First Profit: Path top bar,
-     tp-token hero + verified stat box, "Your children" + ghost + ADD A
-     CHILD, Path child cards. NOTHING below the cards (no Gauntlet, no
-     footer line). The application register's DashHeader/hero/seats box
-     never render here — registers never mix on one screen. */
-  const renderPathHome = () => (
-    <main className="mx-auto w-full max-w-5xl px-6 py-6">
-      {/* Path top bar (screen 16): ink logo tile + First Profit / THE 120,
-          parent name · VERIFIER. SIGN OUT kept from the arrival screen's
-          corner treatment so path mode never traps a session. */}
-      <div className="flex items-center justify-between gap-3 rounded-xl border border-hq-border bg-white px-4 py-2.5">
-        <span className="flex items-center gap-2.5">
-          <span className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-hq-ink">
-            <Image src="/path-logo.svg" alt="" width={16} height={15} unoptimized />
-          </span>
-          <span className="flex flex-col gap-0.5">
-            <span className="font-path-display text-sm font-semibold leading-none text-hq-ink">
-              First Profit
-            </span>
-            <span className="font-path-mono text-[0.5rem] uppercase leading-none tracking-[0.2em] text-hq-ink-muted">
-              The 120
-            </span>
-          </span>
-        </span>
-        <span className="flex min-w-0 items-center gap-3 font-path-mono text-[0.65rem] uppercase tracking-[0.1em] text-hq-ink-soft">
-          <span className="truncate">
-            {parent ? `${parent.firstName} ${parent.lastName}` : ""}{" "}
-            <span className="text-hq-ink-muted">· Verifier</span>
-          </span>
-          <Link
-            href="/"
-            onClick={signOut}
-            className="whitespace-nowrap text-hq-ink-muted transition-colors hover:text-hq-ink"
-          >
-            Sign out
-          </Link>
-        </span>
+        <AppRow label="Fast Math">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <GauntletWordmark />
+              <p className="mt-3 text-sm leading-relaxed text-v3-stone">{GAUNTLET_BLURB}</p>
+            </div>
+            <ComingSoon />
+          </div>
+        </AppRow>
+
+        <AppRow label="Math">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex min-w-0 gap-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/math-academy-long-logo.jpg"
+                alt="Math Academy"
+                className="h-10 w-auto flex-none"
+              />
+              <p className="text-sm leading-relaxed text-v3-stone">{MATH_ACADEMY_BLURB}</p>
+            </div>
+            <ComingSoon />
+          </div>
+        </AppRow>
       </div>
-
-      {/* Banners: checkout state is functional, register-neutral content. */}
-      {depositBanner === "success" && (
-        <div className="mt-4 rounded-2xl border border-hq-border bg-white p-5 text-sm leading-6 text-hq-ink-soft">
-          <p className="font-semibold text-hq-ink">✓ Seat deposit received.</p>
-          <p className="mt-1">
-            Your $250 CAD deposit is in. Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}. A
-            Stripe receipt is on its way to your email.
-          </p>
-        </div>
-      )}
-      {depositBanner === "cancelled" && (
-        <div className="mt-4 rounded-2xl border border-hq-border bg-hq-sunken p-5 text-sm leading-6 text-hq-ink-soft">
-          Checkout was cancelled. No charge was made. You can reserve the seat any time.
-        </div>
-      )}
-      {checkoutError && (
-        <div className="mt-4 rounded-2xl border border-red bg-red/5 p-5 text-sm leading-6 text-red">
-          {checkoutError}
-        </div>
-      )}
-
-      {/* Hero (screen 16): welcome + the family verified-count stat box —
-          the REAL sum of the children's verified fp tasks, loaded server-side
-          by the gate on each page load (freshness = per page load; no client
-          poll). A failed counts read arrives as null and renders the 0 floor
-          — the dashboard always renders. */}
-      <div className="mt-4 flex flex-col gap-6 rounded-2xl border border-hq-border bg-white p-7 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <p className="font-path-mono text-[0.65rem] uppercase tracking-[0.14em] text-phase-sell-ink">
-            Parent dashboard
-          </p>
-          <h1 className="mt-2 font-path-display text-3xl font-semibold tracking-tight text-hq-ink">
-            {parent ? `Welcome, ${parent.firstName}.` : "Welcome."}
-          </h1>
-          <p className="mt-2 max-w-md text-sm leading-6 text-hq-ink-soft">
-            You hold the reviewer keys now. Every child&rsquo;s rung at a glance; verify real work
-            against the Done-when line, warmly.
-          </p>
-          {/* TRIAL MESSAGING (R13), DELIBERATELY TERMS-NEUTRAL. It names no
-              length ("30 days", "for now"), makes no promise about beta, and
-              commits to nothing but notice. Every version that reads better
-              than this one does so by implying a term we have not decided —
-              and a parent who plans around an implied term and is wrong has
-              been misled by us, not by their own reading. */}
-          <p className="mt-3 max-w-md font-path-mono text-[0.6rem] uppercase leading-5 tracking-[0.1em] text-hq-ink-muted">
-            Your family is on a free trial. We will email you before anything changes.
-          </p>
-        </div>
-        <div className="flex-none rounded-xl bg-hq-sunken px-6 py-4 text-center">
-          <p className="font-path-mono text-3xl font-semibold leading-none text-verified">
-            {sumVerifiedTaskCounts(
-              verifiedTaskCounts,
-              children.map((x) => x.id)
-            )}
-          </p>
-          <p className="mt-2 font-path-mono text-[0.55rem] uppercase tracking-[0.12em] text-hq-ink-soft">
-            Tasks verified · all children
-          </p>
-        </div>
-      </div>
-
-      {/* Your children */}
-      <div className="mt-7 flex items-center justify-between gap-3">
-        <h2 className="font-path-display text-lg font-semibold text-hq-ink">Your children</h2>
-        <Link
-          href={ADD_CHILD_HREF}
-          className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-full border border-hq-border-strong bg-white px-4 font-path-mono text-[0.65rem] uppercase tracking-[0.1em] text-hq-ink hover:bg-hq-sunken"
-        >
-          + Add a child
-        </Link>
-      </div>
-
-      {children.length === 0 ? (
-        <Link
-          href={ADD_CHILD_HREF}
-          className="mt-4 flex w-full flex-col items-center rounded-2xl border border-dashed border-hq-border-strong bg-white py-16 text-center transition-colors hover:border-hq-ink"
-        >
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-hq-sunken text-2xl text-hq-ink">
-            +
-          </span>
-          <span className="mt-4 font-path-display text-lg font-semibold text-hq-ink">
-            Add your first child
-          </span>
-          <span className="mt-1 font-path-mono text-[0.65rem] uppercase tracking-[0.1em] text-hq-ink-muted">
-            Ages 8–17 · one application each
-          </span>
-        </Link>
-      ) : (
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          {children.map((c) => {
-            const skin = cardSkin(c.grade);
-            const group = groups.find((g) => g.slug === c.groupSlug)?.name ?? "";
-            const verdict = cardVerdict(
-              c,
-              depositsFor(c.id),
-              composedChildIds.has(c.id),
-              projectNames.get(c.id) ?? null,
-              remapCtx
-            );
-            const arrived = c.arrivedAt != null;
-            const header = (
-              <div className="flex items-center gap-3">
-                <span
-                  className={`flex h-10 w-10 flex-none items-center justify-center rounded-full text-[15px] font-bold text-white ${PHASE_AVATAR_CLASSES[skin]}`}
-                >
-                  {(c.firstName[0] || "?").toUpperCase()}
-                </span>
-                <div className="min-w-0">
-                  <p className="truncate text-[15.5px] font-bold text-hq-ink">
-                    {childName(c)}{" "}
-                    {group && (
-                      <span className="text-[12.5px] font-medium text-hq-ink-soft">({group})</span>
-                    )}
-                  </p>
-                  <p
-                    className={`mt-0.5 truncate font-path-mono text-[0.55rem] uppercase tracking-[0.12em] ${
-                      arrived ? PHASE_STATUS_CLASSES[skin] : "text-hq-ink-muted"
-                    }`}
-                  >
-                    {arrived
-                      ? `${c.grade === "" ? "Grade" : `Grade ${c.grade}`} · ${skin === "trail" ? "Trail" : "HQ"}`
-                      : verdict.kind === "funnel"
-                        ? verdict.statusLine
-                        : statusMeta(c.status).label}
-                  </p>
-                </div>
-              </div>
-            );
-            if (arrived) {
-              // POST-arrival: THE PATH progress bar with the child's REAL
-              // verified count (see the hero note: per-page-load freshness;
-              // absent/null → the honest 0 floor), rung chip, KEEP BUILDING
-              // → /fp. The total is the fp manifest's canonical task count.
-              const verified = verifiedTaskCounts?.[c.id] ?? 0;
-              return (
-                <div key={c.id} className="rounded-2xl border border-hq-border bg-white p-5">
-                  {header}
-                  <div className="mt-4 flex items-center justify-between gap-2 font-path-mono text-[0.55rem] uppercase tracking-[0.12em] text-hq-ink-soft">
-                    <span>The Path</span>
-                    <span>
-                      {verified} / {PATH_TASK_TOTAL} verified
-                    </span>
-                  </div>
-                  <div className="mt-1.5 h-[3px] rounded-full bg-hq-sunken">
-                    <div
-                      className={`h-full rounded-full ${PHASE_BAR_CLASSES[skin]}`}
-                      style={{ width: `${pathBarWidthPct(verified, PATH_TASK_TOTAL)}%` }}
-                    />
-                  </div>
-                  <div className="my-4 border-t border-hq-border" />
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="truncate rounded-full bg-verified/10 px-3 py-1 text-[11px] font-semibold text-verified">
-                      {/* The screen-16 demo abbreviates ("Sept 30"); the
-                          deadline-sweep rule says every surface derives the
-                          date from the ONE constant — so the full label. */}
-                      {c.applicantState === "enrolled"
-                        ? "Enrolled"
-                        : `Deposited · working to ${DEPOSIT_REFUND_DEADLINE_LABEL}`}
-                    </span>
-                    <Link
-                      href={FIRST_PROFIT_SIGN_IN_URL}
-                      className="inline-flex h-10 flex-none items-center justify-center rounded-lg bg-hq-ink px-4 font-path-mono text-[0.65rem] uppercase tracking-[0.1em] text-white transition-opacity hover:opacity-90"
-                    >
-                      Keep building
-                    </Link>
-                  </div>
-                  {credentialsPanel(c)}
-                </div>
-              );
-            }
-            // PRE-arrival sibling: SAME screen-16 card chrome, carrying the
-            // funnel status line (in the header above) + CTA content from
-            // cardVerdict — the origin doc's settled design decision. The
-            // reserve block is the ONE shared renderReserveCta (dispute-
-            // evidence posture never forks).
-            const cta = verdict.kind === "funnel" ? verdict.primaryCta : undefined;
-            const pathPill =
-              "inline-flex h-10 items-center justify-center rounded-lg bg-hq-ink px-4 font-path-mono text-[0.65rem] uppercase tracking-[0.1em] text-white transition-opacity hover:opacity-90";
-            return (
-              <div key={c.id} className="rounded-2xl border border-hq-border bg-white p-5">
-                {header}
-                <div className="mt-4 border-t border-hq-border pt-4">
-                  {verdict.kind === "funnel" && verdict.note && (
-                    <p className="mb-3 font-path-mono text-[0.55rem] uppercase tracking-[0.1em] text-hq-ink-muted">
-                      {verdict.note}
-                    </p>
-                  )}
-                  {cta?.kind === "reserve" ? (
-                    renderReserveCta(c)
-                  ) : (
-                    <div className="flex items-center justify-end gap-3">
-                      {cta?.kind === "keep_building" ? (
-                        // THE FP CELL (v3 Unit 8): this kid has a First Profit
-                        // account, so the destination is First Profit itself.
-                        // An external origin, hence a plain anchor and no Link.
-                        <a href={cta.href} className={pathPill}>
-                          {cta.label}
-                        </a>
-                      ) : cta?.kind === "start" ||
-                      cta?.kind === "compose" ||
-                      cta?.kind === "continue_dossier" ? (
-                        // All three link into the merged flow (R5) — the
-                        // server landing rule picks the step per child.
-                        <a href={cta.href} className={pathPill}>
-                          {cta.label}
-                        </a>
-                      ) : cta?.kind === "reserved" ? (
-                        cta.href ? (
-                          <a
-                            href={cta.href}
-                            className={`${pathPill} !bg-crm-green`}
-                          >
-                            {cta.label}
-                          </a>
-                        ) : (
-                          <span className={`${pathPill} !bg-crm-green`}>{cta.label}</span>
-                        )
-                      ) : null}
-                    </div>
-                  )}
-                  {/* Direct reserve (2026-08-02): the secondary reserve twin
-                      on pre-submission cards (path register parity). */}
-                  {verdict.kind === "funnel" &&
-                    verdict.secondaryReserveCta &&
-                    cta?.kind !== "reserve" &&
-                    renderSecondaryReserve(c, verdict.secondaryReserveCta.label)}
-                </div>
-                {credentialsPanel(c)}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {/* Screen 16: nothing below the cards. */}
-    </main>
+    </section>
   );
 
   return (
-    <div
-      className={
-        isPath ? "min-h-screen bg-hq-canvas font-path-body text-hq-ink" : "min-h-screen bg-paper"
-      }
-    >
-      {/* The application register's ONE top bar (U9: the embedded editor and
-          its nav card are retired — the flow at /start/child/<id> mounts its
-          own ProgressNavCard). In PATH mode DashHeader never renders
-          (registers never mix); the Path top bar lives inside
-          renderPathHome. */}
-      {!isPath && <DashHeader />}
+    <div className="v3-grain min-h-screen bg-v3-cream text-v3-ink">
+      <AppHeader items={ACCOUNT_MENU} />
 
-      {!ready ? (
-        <div className="mx-auto max-w-5xl px-6 py-20 font-mono text-xs uppercase tracking-[0.14em] text-muted">
-          Loading your dashboard…
-        </div>
-      ) : isPath ? (
-        renderPathHome()
-      ) : (
-        <main className="mx-auto w-full max-w-5xl px-6 py-10">
-          {depositBanner === "success" && (
-            <div className="mb-6 rounded-2xl border border-line bg-white p-5">
-              <p className="font-display font-bold text-ink">✓ Seat deposit received.</p>
-              <p className="mt-1 text-sm leading-6 text-ink-soft">
-                Your $250 CAD deposit is in — the seat is held while the application goes through
-                review. Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}. A Stripe receipt is on its way
-                to your email.
-              </p>
-            </div>
-          )}
-          {depositBanner === "cancelled" && (
-            <div className="mb-6 rounded-2xl border border-line bg-paper-2 p-5 text-sm leading-6 text-ink-soft">
-              Checkout was cancelled — no charge was made. You can reserve the seat any time.
-            </div>
-          )}
-          {checkoutError && (
-            <div className="mb-6 rounded-2xl border border-red bg-red/5 p-5 text-sm leading-6 text-red">
-              {checkoutError}
-            </div>
-          )}
-
-          {/* Greeting + seat context */}
-          <div className="flex flex-col gap-6 rounded-3xl border border-line bg-white p-8 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="eyebrow">Parent dashboard</p>
-              <h1 className="mt-2 font-display text-3xl font-bold tracking-tight text-ink">
-                {parent ? `Welcome, ${parent.firstName}.` : "Welcome."}
-              </h1>
-              <p className="mt-2 max-w-md text-sm leading-6 text-ink-soft">
-                Add each child, build their application, and submit it for review. A strong application is
-                your child&rsquo;s candidacy for one of the 120 seats.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-line bg-paper-2 p-5 text-center">
-              <p className="font-display text-4xl font-bold tracking-tight text-red">
-                {seatsRemaining}
-              </p>
-              <p className="font-mono text-[0.65rem] uppercase tracking-[0.12em] text-ink-soft">
-                of {SEATS_TOTAL} seats remain
-              </p>
-            </div>
-          </div>
-
-          {/* Children */}
-          <div className="mt-8 flex items-center justify-between">
-            <h2 className="font-display text-xl font-bold tracking-tight text-ink">
-              Your children
-            </h2>
-            {/* U10 fidelity (audit item 3d): the pill is red only while the
-                grid is empty; once ≥1 child exists it goes secondary
-                (white with a red outline) per the handoff addchild spec. */}
+      <main className="mx-auto w-full max-w-5xl px-5 py-8 sm:px-6 sm:py-12">
+        {!ready ? (
+          <p className="v3-label text-v3-stone">Loading your dashboard...</p>
+        ) : children.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-v3-ink/20 bg-white p-10 text-center">
+            <h1 className="font-path-display text-3xl font-black text-v3-ink">
+              Welcome{"."}
+            </h1>
+            <p className="mt-3 text-base leading-relaxed text-v3-stone">
+              Add your first kid to get started.
+            </p>
             <Link
-              href={ADD_CHILD_HREF}
-              className={`inline-flex h-11 items-center justify-center rounded-full px-5 font-mono text-xs uppercase tracking-[0.12em] ${
-                children.length > 0
-                  ? "border border-red bg-white text-red hover:bg-red/5"
-                  : "bg-red text-white hover:bg-red-dark"
-              }`}
+              href="/start?step=kid"
+              className="mt-6 inline-flex min-h-[44px] items-center justify-center rounded-full bg-v3-profit px-8 py-3 font-path-display text-base font-semibold text-white shadow-[0_4px_0_0_#0f4227] transition hover:-translate-y-0.5 hover:bg-v3-profit-dark"
             >
-              + Add a child
+              Add a kid
             </Link>
           </div>
-
-          {children.length === 0 ? (
-            <Link
-              href={ADD_CHILD_HREF}
-              className="mt-4 flex w-full flex-col items-center rounded-2xl border border-dashed border-line-strong bg-white py-16 text-center transition-colors hover:border-red"
-            >
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-red/10 text-2xl text-red">
-                +
-              </span>
-              <span className="mt-4 font-display text-lg font-semibold text-ink">
-                Add your first child
-              </span>
-              <span className="mt-1 font-mono text-xs uppercase tracking-[0.1em] text-muted">
-                Ages 8–17 · one application each
-              </span>
-            </Link>
-          ) : (
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              {children.map((c) => {
-                const pct = completeness(c);
-                const childDeposits = depositsFor(c.id);
-                const paid = hasPaidDeposit(childDeposits);
-                const pendingLegacy = childDeposits.some((d) => d.status === "pending");
-                // Direct reserve (2026-08-02): the same predicate the checkout
-                // route enforces — any un-deposited, non-waitlisted child.
-                const canReserve = canReserveSeatForChild({
-                  status: c.status,
-                  applicantState: c.applicantState,
-                  deposits: childDeposits,
-                });
-                // Reconnect U3: funnel children (non-NULL applicant_state)
-                // render the state-aware card; NULL children fall through to
-                // the legacy card below, byte-for-byte as before.
-                const verdict = cardVerdict(
-                  c,
-                  childDeposits,
-                  composedChildIds.has(c.id),
-                  projectNames.get(c.id) ?? null,
-                  remapCtx
-                );
-                if (verdict.kind === "funnel") {
-                  const statusTone =
-                    verdict.tone === "green" ? "text-crm-green" : "text-red";
-                  const header = (
-                    <div className="flex items-center gap-4">
-                      <div className="flex h-12 w-12 flex-none items-center justify-center overflow-hidden rounded-full border border-line-strong bg-paper-2 text-muted">
-                        {c.photo ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={c.photo} alt="" className="h-full w-full object-cover" />
-                        ) : (
-                          <span className="font-display">
-                            {(c.firstName[0] || "?").toUpperCase()}
-                          </span>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="truncate font-display text-lg font-bold text-ink">
-                          {childName(c)}
-                        </p>
-                        <p className="font-mono text-[0.65rem] uppercase tracking-[0.1em] text-muted">
-                          {c.grade === "" ? "Grade" : `Grade ${c.grade}`} ·{" "}
-                          <span className={statusTone}>{verdict.statusLine}</span>
-                        </p>
-                      </div>
-                    </div>
-                  );
-                  const pillClass =
-                    "inline-flex h-10 items-center justify-center rounded-full px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white";
-                  const cta = verdict.primaryCta;
-                  return (
-                    <div
-                      key={c.id}
-                      className="rounded-2xl border border-line bg-white p-6 text-left transition-shadow hover:shadow-[0_20px_50px_-35px_rgba(19,20,22,0.4)]"
-                    >
-                      {/* 2026-07-30: the red "Open application →" card link
-                          is retired — the blue CTA pill below is the ONE
-                          entry into the merged flow. */}
-                      <div className="w-full text-left">
-                        {header}
-                        <Meter value={pct} className="mt-5" />
-                      </div>
-
-                      <div className="mt-4 border-t border-line pt-4">
-                        {verdict.note && (
-                          <p className="mb-3 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
-                            {verdict.note}
-                          </p>
-                        )}
-                        {cta?.kind === "reserve" ? (
-                          renderReserveCta(c)
-                        ) : (
-                          // Item 45 (2026-07-30): the band note is gone —
-                          // ONE right-justified button, same position on
-                          // every card.
-                          <div className="flex items-end justify-end gap-4">
-                            {cta?.kind === "keep_building" ? (
-                              // The FP cell (v3 Unit 8). An FP child puts the
-                              // WHOLE family in the path register, so this arm
-                              // is defensive rather than reachable — but a CTA
-                              // kind that silently renders nothing is how a
-                              // card loses its only action.
-                              <a
-                                href={cta.href}
-                                className={`${pillClass} bg-crm-green transition-opacity hover:opacity-90`}
-                              >
-                                {cta.label}
-                              </a>
-                            ) : cta?.kind === "start" ||
-                            cta?.kind === "compose" ||
-                            cta?.kind === "continue_dossier" ? (
-                              // All three link into the merged flow (R5) —
-                              // the landing rule picks the step per child.
-                              <a
-                                href={cta.href}
-                                className={`${pillClass} bg-blue transition-colors hover:bg-blue-dark`}
-                              >
-                                {cta.label}
-                              </a>
-                            ) : cta?.kind === "reserved" ? (
-                              cta.href ? (
-                                <a
-                                  href={cta.href}
-                                  className={`${pillClass} bg-crm-green transition-opacity hover:opacity-90`}
-                                >
-                                  {cta.label}
-                                </a>
-                              ) : (
-                                <span className={`${pillClass} bg-crm-green`}>{cta.label}</span>
-                              )
-                            ) : null}
-                          </div>
-                        )}
-                        {/* Direct reserve (2026-08-02): the secondary reserve
-                            twin on pre-submission cards. */}
-                        {verdict.secondaryReserveCta &&
-                          cta?.kind !== "reserve" &&
-                          renderSecondaryReserve(c, verdict.secondaryReserveCta.label)}
-                        {credentialsPanel(c)}
-                      </div>
-                    </div>
-                  );
-                }
-                return (
-                  <div
-                    key={c.id}
-                    className="rounded-2xl border border-line bg-white p-6 text-left transition-shadow hover:shadow-[0_20px_50px_-35px_rgba(19,20,22,0.4)]"
-                  >
-                    {/* v3 Unit 9: the legacy card's three application pills
-                        (Continue application / Start new flow / Review
-                        application) are RETIRED with the flow they entered —
-                        see the `flowHref` note above. Status, meter and the
-                        deposit block remain. */}
-                    <div className="w-full text-left">
-                      <div className="flex items-center gap-4">
-                        <div className="flex h-12 w-12 flex-none items-center justify-center overflow-hidden rounded-full border border-line-strong bg-paper-2 text-muted">
-                          {c.photo ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={c.photo} alt="" className="h-full w-full object-cover" />
-                          ) : (
-                            <span className="font-display">
-                              {(c.firstName[0] || "?").toUpperCase()}
-                            </span>
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate font-display text-lg font-bold text-ink">
-                            {childName(c)}
-                          </p>
-                          <p className="font-mono text-[0.65rem] uppercase tracking-[0.1em] text-muted">
-                            {c.grade === "" ? "Grade —" : `Grade ${c.grade}`} ·{" "}
-                            <span className={c.status === "draft" ? "text-muted" : "text-red"}>
-                              {statusMeta(c.status).label}
-                            </span>
-                          </p>
-                        </div>
-                      </div>
-                      <Meter value={pct} className="mt-5" />
-                    </div>
-
-                    {/* Seat deposit CTA: paid always wins; since direct
-                        reserve (2026-08-02) the deposit is open to every
-                        un-deposited, non-waitlisted child — no approval
-                        step precedes payment. */}
-                    <div className="mt-4 border-t border-line pt-4">
-                      {paid ? (
-                        <p className="font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink">
-                          ✓ Seat reserved · $250 deposit paid
-                        </p>
-                      ) : pendingLegacy ? (
-                        <p className="font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink">
-                          Payment processing — bank debits can take a few days. No further
-                          action needed.
-                        </p>
-                      ) : canReserve ? (
-                        c.status === "draft" ? (
-                          // A draft child has nothing to "review" yet — the
-                          // top of the card already carries Continue
-                          // application to the same href, so the reserve
-                          // block renders the button-only twin (no review
-                          // link) rather than a misleading duplicate pair.
-                          renderSecondaryReserve(c, "Reserve seat · $250")
-                        ) : (
-                          renderReserveCta(c)
-                        )
-                      ) : (
-                        // Direct reserve (2026-08-02): the gate refuses only
-                        // waitlisted children now — the old "under review" and
-                        // "submit first" branches promised an approval step
-                        // that no longer precedes payment. W7 still holds:
-                        // never "Under Review" for a waitlisted family.
-                        <>
-                          <p className="font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink">
-                            On the waitlist
-                          </p>
-                          <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
-                            Seats open when plans change. We contact you first.
-                          </p>
-                        </>
-                      )}
-                      {credentialsPanel(c)}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-        </main>
-      )}
+        ) : (
+          children.map(kidSection)
+        )}
+      </main>
     </div>
   );
 }

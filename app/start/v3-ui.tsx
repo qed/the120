@@ -54,6 +54,27 @@ export function FPLogoLockup({ variant = "header" }: { variant?: "header" | "til
   );
 }
 
+/**
+ * The "120 → First Profit" lockup block: the 120 chip, the connecting arrow, and
+ * the shared FPLogoLockup. ONE definition, rendered by both the signup brand
+ * header (V3BrandHeader below) and the parent-dashboard header (app/dashboard/ui
+ * AppHeader), so the two can never drift. Returns a fragment — the caller owns
+ * the flex row that positions it.
+ */
+export function V3BrandLockup() {
+  return (
+    <>
+      <span className="flex h-7 w-7 flex-none items-center justify-center rounded bg-v3-one20 font-path-mono text-[11px] font-bold text-white">
+        120
+      </span>
+      <span aria-hidden className="flex-none text-v3-ink/25">
+        →
+      </span>
+      <FPLogoLockup variant="header" />
+    </>
+  );
+}
+
 /* ------------------------------------------------------------ brand header */
 
 export function V3BrandHeader({
@@ -80,14 +101,9 @@ export function V3BrandHeader({
             that the arrow now points at the shared FPLogoLockup instead of a
             forked bars-and-wordmark copy, and the pair is visible at every
             width — at 390px the row still clears the step meter/end slot
-            because the lockup carries no fixed widths. */}
-        <span className="flex h-7 w-7 flex-none items-center justify-center rounded bg-v3-one20 font-path-mono text-[11px] font-bold text-white">
-          120
-        </span>
-        <span aria-hidden className="flex-none text-v3-ink/25">
-          →
-        </span>
-        <FPLogoLockup variant="header" />
+            because the lockup carries no fixed widths. fpv03 U4: the block is
+            the shared V3BrandLockup so the dashboard header cannot drift. */}
+        <V3BrandLockup />
 
         <div className="ml-auto flex min-w-0 items-center gap-2 sm:gap-3">
           {end ?? (

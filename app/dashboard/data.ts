@@ -160,6 +160,17 @@ export function canReserveSeatForChild(opts: {
 
 /* ───────────────── state-aware child cards (reconnect U3, R1/R10) ───────────────── */
 
+/**
+ * ⚠ DORMANT AS OF fpv03 U4. `cardVerdict`, `reserveRefusalMessage`, `bandNote`
+ * (and their exclusive types — `CardVerdict`, `FunnelCardCta`) are consumed by
+ * NO live UI and NO route: the S05 apps launcher rebuild dropped every funnel
+ * card, and `/api/checkout` + the CRM use `canReserveSeat*`/`hasPaidDeposit`,
+ * not these. They are RETAINED, not deleted, per the founder's
+ * keep-payment-for-future decision, and stay pure-tested in
+ * funnel-dashboard-cards.test.ts so a future re-mount finds them working. Do
+ * not wire them to a surface without revisiting that decision.
+ */
+
 /** Stale-tab degradation (reconnect U3): a funnel card only ever shows the
  *  Reserve CTA when the state it RENDERED allowed it, so a server refusal
  *  means the state moved under the tab. A refresh instruction, never the

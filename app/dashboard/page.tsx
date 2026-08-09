@@ -3,30 +3,29 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 import DashboardProvider from "./store";
 import DashboardApp from "./DashboardApp";
-import { getSeatsRemaining } from "@/app/lib/seats";
 import {
   dashboardGateVerdict,
-  dashboardRegister,
 } from "@/app/lib/funnel/session-rules";
 import { loadDashboardGateFactsCore } from "@/app/lib/funnel/dashboard-gate-core";
-import {
-  currentPolicyHash,
-  FP_CONSENT_POLICY,
-} from "@/app/api/fp/signup/consent-rules";
-import { loadParentSitesForRequest } from "@/app/lib/fp/fp-site-parent-core";
 
 export const metadata: Metadata = {
   title: "Your dashboard — The 120",
-  description: "Build your child's application and submit it for review.",
+  description: "Your kids' First Profit apps, all in one place.",
 };
 
 /**
  * The server-side facts behind the dashboard gate (reconnect U2). The split
  * shape from the memoized-auth-gate learning: `cache()` a NON-throwing
  * loader, keep `redirect()` in the page — zero-arg, so the memo key is the
- * request itself, and nothing writes `children`/`projects` in request scope.
- * The loading itself (RLS-scoped reads, fail-open branches, row mapping)
- * lives in `dashboard-gate-core.ts` behind an injectable seam.
+ * request itself.
+ *
+ * fpv03 U4: the dashboard is the S05 apps LAUNCHER now. Payment is gone from the
+ * parent experience, so this page no longer loads seats, the Path register, the
+ * verified-task counts, the family's public sites, or the consent policy — the
+ * apps view reads only the family roster from the client store, and the parent
+ * controls (password reset, take-page-offline, photo consent) moved to the
+ * Account Details page (app/dashboard/account). The gate + redirect stay: they
+ * are the auth/session wiring, unchanged.
  */
 const loadDashboardGateFacts = cache(() => loadDashboardGateFactsCore());
 
@@ -42,40 +41,9 @@ export default async function DashboardPage({
   // a caught one reports failure on success, which this repo has shipped once.
   if (verdict.action === "redirect") redirect(verdict.route);
 
-  // The register flip (U11, R12 later tier): sticky per family — any child
-  // with `arrived_at` puts the WHOLE dashboard in the Path register. Signed
-  // out / read-failed shapes carry `children: null` → application register.
-  const register = dashboardRegister(facts.children);
-
-  const seatsRemaining = await getSeatsRemaining();
-  // The children's PUBLIC PAGES (R21/R22): loaded server-side, scoped entirely
-  // by the session's parent id — the loader takes no child id at all. `null`
-  // means "we could not load them", and the dashboard then offers no
-  // take-offline control this page load rather than guessing a state (the same
-  // honest degrade as `photoConsentChildIds`).
-  const fpSites = await loadParentSitesForRequest();
   return (
     <DashboardProvider>
-      <DashboardApp
-        seatsRemaining={seatsRemaining}
-        fpSites={fpSites}
-        register={register}
-        verifiedTaskCounts={facts.verifiedTaskCounts}
-        photoConsentChildIds={facts.photoConsentChildIds}
-        // The SAME override facts the gate above just used, so a card's CTA and
-        // the gate's redirect can never name two different destinations for one
-        // child (v3 Unit 8 review, FIX 1).
-        remapCtx={facts.remapCtx}
-        // The consent bundle travels as a PROP because `consent-rules` imports
-        // node:crypto and the panel that renders it is a client component. The
-        // text and the hash are computed together here, so what the browser
-        // displays and what it echoes can never be two different strings.
-        consentPolicy={{
-          version: FP_CONSENT_POLICY.version,
-          hash: currentPolicyHash(),
-          text: FP_CONSENT_POLICY.text,
-        }}
-      />
+      <DashboardApp />
     </DashboardProvider>
   );
 }

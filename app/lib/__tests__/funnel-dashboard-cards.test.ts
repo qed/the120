@@ -608,74 +608,37 @@ describe("bandNote — the handoff's BANDMETA, from grade alone", () => {
   });
 });
 
-describe("wiring — the dashboard actually consumes the verdict", () => {
-  it("DashboardApp branches on cardVerdict and maps refusals through reserveRefusalMessage", () => {
-    // Source scan (node env cannot mount the client): a fully-tested verdict
-    // consumed by nothing reads as load-bearing while being a no-op — the
-    // U13 finding, applied to this unit's own wiring.
+describe("wiring — the verdict is a pure module, no longer consumed by the apps view", () => {
+  // fpv03 U4 (deliberate update): the dashboard is the S05 apps LAUNCHER now and
+  // payment left the parent experience, so DashboardApp NO LONGER consumes
+  // cardVerdict / reserveRefusalMessage / the reserve block at all. The verdict
+  // and its helpers stay in data.ts (still exported, still pure-tested above),
+  // but they are RETAINED-DORMANT: no live UI and no route consumes them any
+  // more — grep confirms `/api/checkout` and the CRM use canReserveSeat* /
+  // hasPaidDeposit, NOT cardVerdict / reserveRefusalMessage / bandNote. They
+  // are kept per the founder's keep-payment-for-future decision. The negative
+  // pins below are the "retired" proof for a component four render sites once
+  // shared.
+  it("DashboardApp renders no funnel card, no reserve CTA, no editor view", () => {
     const src = read("app/dashboard/DashboardApp.tsx");
-    expect(src).toContain("cardVerdict(");
-    expect(src).toContain("reserveRefusalMessage(");
-    // Item 45 (2026-07-30): the band note left the cards — one
-    // right-justified button, same position on every card.
-    expect(src).not.toContain("bandNote(");
-  });
-
-  it("the v3 Unit 8 branches are actually wired (review FIX 5b)", () => {
-    // Source scan, and named as one: this repo's vitest is node-env with no
-    // DOM, so DashboardApp — a hook-and-context client component — cannot be
-    // mounted. What CAN be pinned is that each new branch is consumed, in both
-    // registers, and that the null-consent rule is the component's rule too.
-    const src = read("app/dashboard/DashboardApp.tsx");
-    // The credentials panel renders in BOTH registers and on every card...
-    expect(src.match(/credentialsPanel\(c\)/g)?.length).toBeGreaterThanOrEqual(2);
-    // ...and it is gated on the policy bundle: no server-computed policy, no
-    // panel, because the echo would have nothing to bind to.
-    expect(src).toContain("consentPolicy ? (");
-    // The failed-consent-read rule, at the component boundary: `null` short
-    // -circuits BEFORE `.includes`, so a read failure can never read as "closed".
-    expect(src).toContain("photoConsentChildIds === null ? null : photoConsentChildIds.includes(id)");
-    // The FP cell's CTA is an external origin — a plain anchor, never next/Link.
-    expect(src).toMatch(/cta\?\.kind === "keep_building"/);
-  });
-
-  it("U9: the embedded editor views are unreachable — every entry point is a link into the flow", () => {
-    const src = read("app/dashboard/DashboardApp.tsx");
-    // The view state machine and its consumers are gone…
-    expect(src).not.toContain("setView");
-    expect(src).not.toContain("openEditor");
-    expect(src).not.toContain("DossierEditor");
-    expect(src).not.toContain("DossierPreview");
-    // v3 Unit 9: `flowHref` — the one builder of the v2 literal
-    // `/start/child/<id>` — is GONE, along with the legacy card's three
-    // application pills and the reserve block's Review twin. The flow it
-    // entered lives in `archive/new-user-v2/`; the URL now redirects to this
-    // dashboard, so a pill pointing at it would reload the page it sits on.
-    // Asserted as an ABSENCE over the whole file, which is what "retired" has
-    // to mean for a literal that four render sites used to share.
-    // Comment-stripped, because the retirement is explained in the very file
-    // it is asserted over.
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    expect(code).not.toContain("cardVerdict");
+    expect(code).not.toContain("reserveRefusalMessage");
+    expect(code).not.toContain("bandNote(");
+    expect(code).not.toContain("renderReserveCta");
+    expect(code).not.toContain("setView");
+    expect(code).not.toContain("DossierEditor");
     expect(code).not.toContain("flowHref");
     expect(code).not.toContain("/start/child/");
-    // v3 Unit 8 review (FIX 1): the CARD's CTA no longer builds a v2 literal at
-    // all — `cardVerdict` reads `childNextRoute`, the one remap table, and the
-    // page hands it the same `remapCtx` the gate used. Pinned as source text
-    // because a card that silently re-grew its own literal is exactly the
-    // divergence this fix closed.
+  });
+
+  it("the verdict's CTA destination still comes from the ONE remap table (data.ts unchanged)", () => {
+    // The anti-drift pin survives the UI rebuild: a card that silently re-grew
+    // its own v2 literal is exactly the divergence FIX 1 closed, and data.ts is
+    // still where the destination is computed even though no live UI mounts it.
     const data = read("app/dashboard/data.ts");
     expect(data).toContain("const ctaHref = childNextRoute(next, remapCtx)");
-    expect(src).toContain("remapCtx");
-    // ADD A CHILD routes into the V3 KID FLOW (v3 Unit 8) — v2's
-    // /start/children add-only page is retired with the rest of the funnel.
-    // TWO assertions, because the value moved into the remap module: the render
-    // reads the shared constant, AND the constant is the URL we mean. Pinning
-    // only the identifier would let the destination change silently; pinning
-    // only the value would let the render stop using it.
-    expect(src).toContain("const ADD_CHILD_HREF = V3_ADD_KID_HREF");
-    expect(src).not.toContain('"/start/children"');
     expect(V3_ADD_KID_HREF).toBe("/start?step=kid");
-    expect(src).not.toContain("addChild(");
   });
 
   it("the store reads applicant_state through parseApplicantState (fail-closed)", () => {

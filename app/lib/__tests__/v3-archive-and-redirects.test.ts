@@ -108,10 +108,14 @@ describe("v3 owns /start (R15)", () => {
     // Comment-stripped: three modules mention `app/start/v3` in prose,
     // explaining the move that this test exists to confirm happened.
     const offenders = live.filter((f) =>
-      read(f)
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/(^|[^:])\/\/.*$/gm, "$1")
-        .includes("start/v3")
+      // Match the retired ROUTE `start/v3`, not the shared `start/v3-ui`
+      // primitives module (fpv03 U4 imports FPLogoLockup from it) — the
+      // negative lookahead keeps the sweep about the route it exists to catch.
+      /start\/v3(?!-ui)/.test(
+        read(f)
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .replace(/(^|[^:])\/\/.*$/gm, "$1")
+      )
     );
     expect(offenders).toEqual([]);
   });
@@ -134,10 +138,15 @@ describe("the retired v2 deep routes still resolve (R17)", () => {
 
   it("does NOT retire /start/arrival: Stripe's success_url points at a LIVE page", () => {
     // The pairing that makes this a real guarantee rather than a preference:
-    // deposit-core still builds the URL, checkout is still reachable from the
-    // dashboard, so the page it names must be a page — not a redirect stub.
+    // deposit-core still builds the URL and Stripe's success_url points at it,
+    // so the page it names must be a page — not a redirect stub. fpv03 U4
+    // removed the dashboard's checkout entry (payment left the parent
+    // experience), but /api/checkout stays a live, separately-addressable
+    // endpoint and its success_url still lands here.
     expect(read("app/lib/funnel/deposit-core.ts")).toContain("/start/arrival");
-    expect(read("app/dashboard/DashboardApp.tsx")).toContain("/api/checkout");
+    // /api/checkout stays a live endpoint that builds its session through
+    // deposit-core, so the success_url still resolves here.
+    expect(read("app/api/checkout/route.ts")).toContain("createCheckoutSessionWithConsent");
     expect(RETIRED_V2_ROUTE_FILES).not.toContain("start/arrival/page.tsx");
 
     const page = read("app/start/arrival/page.tsx");

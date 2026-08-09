@@ -99,12 +99,14 @@ describe("no surface retypes the deadline", () => {
     expect(WELCOME_HTML).toContain(`refundable until ${DEPOSIT_REFUND_DEADLINE_LABEL}`);
   });
 
-  it("the dashboard deposit banner reads the constant rather than a literal", () => {
-    // A source scan, not a render assertion: `environment: "node"` has no DOM,
-    // and DashboardApp is a client component with no pure function to call.
-    const src = readSource("app/dashboard/DashboardApp.tsx");
-    expect(src).toContain("DEPOSIT_REFUND_DEADLINE_LABEL");
-    expect(stripComments(src)).not.toContain("September 30, 2026");
+  it("the dashboard carries NO deposit surface at all (fpv03 U4 payment removal)", () => {
+    // fpv03 U4 removed payment from the parent experience, so the dashboard's
+    // deposit banner is gone rather than merely reading the constant. The
+    // deadline label now lives only where money still does (nurture email,
+    // welcome template, checkout route) — asserted elsewhere.
+    const src = stripComments(readSource("app/dashboard/DashboardApp.tsx"));
+    expect(src).not.toContain("DEPOSIT_REFUND_DEADLINE_LABEL");
+    expect(src).not.toContain("September 30, 2026");
   });
 
   it("leaves no other spelling of the deadline in app/ — including abbreviations", () => {

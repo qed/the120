@@ -131,9 +131,12 @@ describe("R51a — the policy record", () => {
     expect(ui).not.toContain("policyAccepted");
     const route = read("app/api/checkout/route.ts");
     expect(route).not.toContain("policyAccepted");
-    // The version echo survives — it binds the record to what the client's
-    // bundle will present at checkout.
-    expect(ui).toContain("REFUND_POLICY.version");
+    // fpv03 U4: the dashboard no longer initiates checkout at all (payment left
+    // the parent experience), so the client-side version echo lives ONLY at the
+    // /api/checkout endpoint now. The route still binds the acceptance record to
+    // the presented text via REFUND_POLICY.version.
+    expect(ui).not.toContain("REFUND_POLICY.version");
+    expect(route).toContain("REFUND_POLICY.version");
   });
 
   it("every factual claim in the policy is registered for Peter and present in the text", () => {
@@ -172,13 +175,12 @@ describe("R51a — the policy record", () => {
     expect(policyVersionAtLeast("garbage", "2026-07-28.2")).toBe(false);
   });
 
-  it("the client echoes the rendered version and the server refuses a stale one (wiring scan)", () => {
-    // A stale tab must not be recorded as accepting text it never showed:
-    // the UI sends the version its bundle rendered, the route 409s on
-    // mismatch. Pre-echo bundles send nothing and are refused the same way.
-    const ui = read("app/dashboard/DashboardApp.tsx");
-    expect(ui).toContain("policyVersion: REFUND_POLICY.version");
-    expect(ui).toContain("stalePolicy");
+  it("the server refuses a stale policy version (wiring scan)", () => {
+    // A stale tab must not be recorded as accepting text it never showed: the
+    // caller sends the version its bundle rendered, the route 409s on mismatch.
+    // fpv03 U4: the dashboard no longer POSTs checkout, so the stale-version
+    // defense is asserted at the endpoint that still enforces it. The route's
+    // guard is unchanged.
     const route = read("app/api/checkout/route.ts");
     expect(route).toContain("policyVersion !== REFUND_POLICY.version");
     expect(route).toContain("stalePolicy: true");

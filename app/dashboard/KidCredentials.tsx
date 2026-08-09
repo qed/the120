@@ -62,12 +62,18 @@ export default function KidCredentials({
   /** null = the consent read failed this page load; offer neither affordance. */
   photoConsentOpen,
   policy,
+  /** TEST-ONLY seam. This repo's vitest renders with `renderToStaticMarkup`,
+   *  which captures only the FIRST render and cannot click — so a render test of
+   *  the EXPANDED panel needs the disclosure to start open. Production never
+   *  passes it (default false = collapsed, the shipped behaviour). */
+  initialOpen = false,
 }: {
   child: Child;
   photoConsentOpen: boolean | null;
   policy: ConsentPolicyBundle;
+  initialOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initialOpen);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);

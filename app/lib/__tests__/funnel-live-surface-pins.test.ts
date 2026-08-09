@@ -100,23 +100,26 @@ describe("the marketing landing hero (fidelity batch B1 drift 9 / B3 drift 16)",
   });
 });
 
-describe("the dashboard's own chrome (fidelity batch A drift 8 / B1 X1 / B3 drift 16)", () => {
+describe("the dashboard's own chrome (fpv03 U4 apps launcher)", () => {
   const app = stripComments(read("app/dashboard/DashboardApp.tsx"));
 
-  it("+ ADD A CHILD goes secondary once ≥1 child exists", () => {
-    expect(app).toMatch(
-      /children\.length > 0\s*\?\s*"border border-red bg-white text-red hover:bg-red\/5"\s*:\s*"bg-red text-white hover:bg-red-dark"/
-    );
-  });
-
-  it("renders ONE top bar per register — the retired editor view's second bar never returns", () => {
-    expect(app).toMatch(/\{!isPath && <DashHeader \/>\}/);
+  // fpv03 U4: the admissions dashboard's chrome (the red add-a-child pill, the
+  // dual-register top bars, the two-column card grid) retired with the payment
+  // experience. What remains is the S05 apps launcher: the shared AppHeader and
+  // per-kid app rows.
+  it("mounts the ONE shared AppHeader, no register-gated DashHeader", () => {
+    expect(app).toContain("AppHeader");
+    expect(app).not.toContain("DashHeader");
     expect(app).not.toContain("DossierEditor");
-    expect(app).not.toContain('view === "editor"');
   });
 
-  it("keeps its wide container and two-column cards grid", () => {
+  it("keeps its wide container", () => {
     expect(app).toContain("max-w-5xl");
-    expect(app).toContain("sm:grid-cols-2");
+  });
+
+  it("renders the three app rows", () => {
+    expect(app).toContain("First Profit");
+    expect(app).toContain("GAUNTLET");
+    expect(app).toContain("Math Academy");
   });
 });

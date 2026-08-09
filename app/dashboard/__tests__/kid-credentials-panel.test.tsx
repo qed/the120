@@ -111,6 +111,33 @@ describe("KidCredentials — first render", () => {
   });
 });
 
+/* ─────── a kid with no First Profit account (fpUsername null) — v3 U4 ─────── */
+
+describe("KidCredentials — the unprovisioned kid (fpUsername null)", () => {
+  // `initialOpen` is the test-only seam: renderToStaticMarkup captures only the
+  // first render and cannot click, so the expanded body is only assertable when
+  // the disclosure starts open. Production never passes it.
+  it("shows 'Not set up yet' and SUPPRESSES the reset-password form when expanded", () => {
+    const out = html(
+      <KidCredentials child={kid({ fpUsername: null })} photoConsentOpen={false} policy={POLICY} initialOpen />
+    );
+    expect(out).toContain('aria-expanded="true"'); // the panel really is expanded
+    expect(out).toContain("Not set up yet");
+    // No password to reset for an account that does not exist.
+    expect(out).not.toContain("Set a new password");
+    expect(out).not.toContain('id="kid-pw-kid-1"');
+  });
+
+  it("a kid WITH an fpUsername gets the reset form (and the username) when expanded", () => {
+    const out = html(
+      <KidCredentials child={kid({ fpUsername: "remi.newal" })} photoConsentOpen={false} policy={POLICY} initialOpen />
+    );
+    expect(out).toContain("Set a new password");
+    expect(out).toContain("remi.newal");
+    expect(out).not.toContain("Not set up yet");
+  });
+});
+
 describe("SetPasswordForm — first render", () => {
   it("renders one password field, a submit, and no error", () => {
     const out = html(<SetPasswordForm next="/start?step=kid" />);

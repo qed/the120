@@ -206,9 +206,12 @@ describe("every retired URL still resolves", () => {
     const notice = read("app/lib/fp/parent-email/rules.ts");
     expect(notice).toContain("take the page offline any time from your family dashboard");
 
-    // The mechanism the sentence names: the dashboard mounts the control, and
-    // the control drives the parent-scoped core through its Server Action.
-    expect(read("app/dashboard/DashboardApp.tsx")).toContain("KidSite");
+    // The mechanism the sentence names: the parent dashboard mounts the
+    // control, and the control drives the parent-scoped core through its Server
+    // Action. fpv03 U4 relocated it from the apps launcher to the Account
+    // Details page (still under /dashboard, still what FP_PARENT_TARGET resolves
+    // to — the header menu links to it), so the promise stays reachable.
+    expect(read("app/dashboard/AccountDetails.tsx")).toContain("KidSite");
     const panel = read("app/dashboard/KidSite.tsx");
     expect(panel).toContain("setFpSitePublishedAction");
     expect(panel).toContain("Take the page offline");

@@ -1,179 +1,97 @@
 "use client";
 
+/**
+ * The parent-dashboard chrome, rebuilt for the fpv03 S05 look (Unit U4).
+ *
+ * ONE shared header for both the apps dashboard and the Account Details page:
+ * the 120 → First Profit lockup on the left (the same `FPLogoLockup` the signup
+ * flow's brand header uses, so the two lockups can never drift), and an account
+ * menu on the right whose items the caller supplies. Warm paper, Fraunces
+ * headings, mono kickers — the v3 tokens from app/globals.css.
+ *
+ * Mobile-first: base classes are the ~390px phone; `sm:` layers the wider row
+ * on. Every control clears the 44px tap-target floor. No em dashes anywhere in
+ * parent-facing copy (the copy rule).
+ */
+
+import { useState } from "react";
 import Link from "next/link";
-import Wordmark from "@/app/components/Wordmark";
-import { STATUS_FLOW, statusIndex, type SeatStatus } from "./data";
+import { V3BrandLockup } from "@/app/start/v3-ui";
 import { useDashboard } from "./store";
 
-/* ---------- completeness meter ---------- */
+export type AccountMenuItem = { label: string; href: string };
 
-export function Meter({ value, className = "" }: { value: number; className?: string }) {
+/** The sticky top bar: 120 → First Profit lockup + an account menu. `items`
+ *  are the links the menu offers (the apps dashboard points them at Account
+ *  Details / My Kids; the Account page points back at the dashboard). Sign out
+ *  is always appended, and drives the store's own sign-out. */
+export function AppHeader({ items }: { items: AccountMenuItem[] }) {
+  const { parent, signOut } = useDashboard();
+  const [open, setOpen] = useState(false);
+  const label = (parent?.firstName || "Account").toUpperCase();
+
   return (
-    <div className={className}>
-      <div className="flex items-center justify-between font-mono text-[0.7rem] uppercase tracking-[0.12em] text-muted">
-        <span>Application</span>
-        <span className={value === 100 ? "text-red" : "text-ink-soft"}>{value}% complete</span>
-      </div>
-      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line-strong">
-        <div
-          className="h-full rounded-full bg-red transition-[width] duration-500"
-          style={{ width: `${value}%` }}
-        />
-      </div>
-    </div>
-  );
-}
+    <header className="sticky top-0 z-30 w-full border-b border-v3-ink/10 bg-white/95 backdrop-blur">
+      <div className="mx-auto flex max-w-5xl items-center gap-2.5 px-4 py-3 sm:px-6 sm:py-3.5">
+        {/* The 120 → First Profit lockup — the shared V3BrandLockup, so this
+            header and the signup brand header cannot drift (fpv03 U4). */}
+        <V3BrandLockup />
 
-/* ---------- seat status stepper ---------- */
-
-export function StatusStepper({ status }: { status: SeatStatus }) {
-  const current = statusIndex(status);
-  return (
-    <ol className="flex flex-wrap gap-x-2 gap-y-3">
-      {STATUS_FLOW.map((s, i) => {
-        const done = i < current;
-        const active = i === current;
-        return (
-          <li key={s.id} className="flex items-center gap-2">
-            <span
-              className={`flex h-6 w-6 flex-none items-center justify-center rounded-full font-mono text-[0.65rem] ${
-                active
-                  ? "bg-red text-white"
-                  : done
-                    ? "bg-blue text-white"
-                    : "bg-line text-muted"
-              }`}
-            >
-              {done ? "✓" : i + 1}
-            </span>
-            <span
-              className={`font-mono text-[0.65rem] uppercase tracking-[0.1em] ${
-                active ? "text-ink" : "text-muted"
-              }`}
-            >
-              {s.label}
-            </span>
-            {i < STATUS_FLOW.length - 1 && <span className="text-line-strong">·</span>}
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-/* ---------- dashboard header ---------- */
-
-export function DashHeader() {
-  const { parent, session, signOut } = useDashboard();
-  // Same JWT-only signal the /crm proxy uses; parents never see this link
-  // (and the CRM's requireStaff() + RLS remain the real gate regardless).
-  const isStaff = session?.user.app_metadata?.role === "admin";
-  return (
-    // The home <Nav>'s exact floating-card geometry (2026-07-30): sticky
-    // 18px from the top, 20px side margins, 14px radius, 22/11 padding,
-    // 64px min row height — logo far left, actions far right, same places
-    // as the home page. Change Nav.tsx and ProgressNavCard together.
-    <header className="sticky top-[18px] z-40 mx-5 mt-[18px]">
-      <div className="flex min-h-16 items-center justify-between rounded-[14px] bg-white px-[22px] py-[11px] shadow-[0_4px_18px_rgba(19,20,22,0.14)]">
-        <Link href="/" aria-label="The 120 home">
-          <Wordmark />
-        </Link>
-        <div className="flex items-center gap-4">
-          {isStaff && (
-            <Link
-              href="/crm"
-              className="font-mono text-xs uppercase tracking-[0.12em] text-blue transition-colors hover:text-red"
-            >
-              Staff CRM →
-            </Link>
-          )}
-          {parent && (
-            <span className="hidden font-mono text-xs uppercase tracking-[0.1em] text-ink-soft sm:inline">
-              {parent.firstName} {parent.lastName}
-            </span>
-          )}
-          <Link
-            href="/"
-            onClick={signOut}
-            className="font-mono text-xs uppercase tracking-[0.12em] text-muted transition-colors hover:text-red"
+        <div className="relative ml-auto">
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            className="inline-flex min-h-[44px] items-center gap-1.5 font-path-mono text-xs font-bold uppercase tracking-[0.12em] text-v3-profit transition-colors hover:text-v3-profit-dark"
           >
-            Sign out
-          </Link>
+            <span className="max-w-[9rem] truncate">{label}</span>
+            <span aria-hidden className="text-[0.7em]">
+              &#9662;
+            </span>
+          </button>
+
+          {open && (
+            <>
+              {/* Click-away scrim: a phone has no reliable outside-blur, so a
+                  transparent full-screen button closes the menu on any tap. */}
+              <button
+                aria-hidden
+                tabIndex={-1}
+                onClick={() => setOpen(false)}
+                className="fixed inset-0 z-10 cursor-default"
+              />
+              <div
+                role="menu"
+                className="absolute right-0 z-20 mt-1 w-56 overflow-hidden rounded-2xl border border-v3-ink/10 bg-white py-1 shadow-[0_12px_32px_-12px_rgba(27,24,21,0.28)]"
+              >
+                {items.map((it) => (
+                  <Link
+                    key={`${it.href}-${it.label}`}
+                    role="menuitem"
+                    href={it.href}
+                    onClick={() => setOpen(false)}
+                    className="flex min-h-[44px] items-center px-4 py-2.5 text-sm text-v3-ink transition-colors hover:bg-v3-cream"
+                  >
+                    {it.label}
+                  </Link>
+                ))}
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpen(false);
+                    signOut();
+                  }}
+                  className="flex min-h-[44px] w-full items-center px-4 py-2.5 text-left text-sm text-v3-stone transition-colors hover:bg-v3-cream"
+                >
+                  Sign out
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </header>
-  );
-}
-
-/* ---------- form primitives ---------- */
-
-export function Label({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="mb-1.5 block font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink-soft">
-      {children}
-    </span>
-  );
-}
-
-export const inputCls =
-  "h-11 w-full rounded-xl border border-line-strong bg-white px-3.5 text-sm text-ink outline-none transition-colors placeholder:text-muted focus:border-red";
-
-export function TextField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-  maxLength,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  type?: string;
-  maxLength?: number;
-}) {
-  return (
-    <label className="block">
-      <Label>{label}</Label>
-      <input
-        type={type}
-        value={value}
-        maxLength={maxLength}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className={inputCls}
-      />
-    </label>
-  );
-}
-
-export function TextArea({
-  label,
-  value,
-  onChange,
-  placeholder,
-  rows = 4,
-  maxLength,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  rows?: number;
-  maxLength?: number;
-}) {
-  return (
-    <label className="block">
-      <Label>{label}</Label>
-      <textarea
-        value={value}
-        rows={rows}
-        maxLength={maxLength}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full resize-y rounded-xl border border-line-strong bg-white px-3.5 py-3 text-sm leading-6 text-ink outline-none transition-colors placeholder:text-muted focus:border-red"
-      />
-    </label>
   );
 }

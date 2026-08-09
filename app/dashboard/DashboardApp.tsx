@@ -28,10 +28,14 @@
  * both carry a destination and navigate alike; a blocked tab surfaces a visible
  * manual link rather than a silent dead end.
  *
- * The credential-reset, take-page-offline, and photo-consent controls do NOT
- * live here — they live on the Account Details page (app/dashboard/account),
- * which the header menu points at. A handle-less "Login info" affordance surfaces
- * the child's username plus the "Email my parent a code" recovery path.
+ * fpv03 U4 (merge): the credential-reset, take-page-offline, and photo-consent
+ * controls now live on THIS page too — the two-page split (apps launcher +
+ * separate Account Details route) collapsed into one parent dashboard. The
+ * apps launcher is the top zone ("My Kids"); the per-kid management controls are
+ * composed in below via <AccountDetails/> (the `#account` section the header
+ * menu's "Account Details" item scrolls to). A handle-less "Login info"
+ * affordance surfaces the child's username plus the "Email my parent a code"
+ * recovery path.
  *
  * Mobile-first: base classes are the ~390px phone; `lg:` layers the two-column
  * label/card rows on. No em dashes in parent-facing copy.
@@ -43,14 +47,19 @@ import { v3MintHandoffAction } from "@/app/start/actions";
 import { useDashboard } from "./store";
 import { AppHeader } from "./ui";
 import SignIn from "./SignIn";
+import AccountDetails from "./AccountDetails";
+import type { ConsentPolicyBundle } from "./KidCredentials";
+import type { ParentSiteRow } from "@/app/lib/fp/fp-public-site-rules";
 import type { Child } from "./data";
 
-/** The account menu's destinations. Both open Account Details, but as DISTINCT
- *  section anchors (matching id anchors live on the AccountDetails page) so the
- *  menu is not two byte-identical links. */
+/** The account menu's destinations, identical on every page now that there is
+ *  ONE parent dashboard. "My Kids" is the apps launcher at the top; "Account
+ *  Details" anchor-scrolls to the management section (#account) composed in
+ *  below. No "Dashboard" item — this IS the dashboard. Sign out is appended by
+ *  AppHeader. */
 const ACCOUNT_MENU = [
-  { label: "Account Details", href: "/dashboard/account#account" },
-  { label: "My Kids", href: "/dashboard/account#kids" },
+  { label: "My Kids", href: "/dashboard" },
+  { label: "Account Details", href: "/dashboard#account" },
 ];
 
 const FP_BLURB =
@@ -108,7 +117,20 @@ function AppRow({
   );
 }
 
-export default function DashboardApp() {
+export default function DashboardApp({
+  consentPolicy,
+  photoConsentChildIds = null,
+  fpSites = null,
+}: {
+  /** The consent policy + hash, computed server-side and threaded down for the
+   *  merged-in management controls (KidCredentials). Absent = the consent
+   *  affordance does not render. */
+  consentPolicy?: ConsentPolicyBundle;
+  /** Child ids whose photo-consent gate is OPEN; null = the read failed. */
+  photoConsentChildIds?: string[] | null;
+  /** Each child's public page + state, parent-scoped; null = the read failed. */
+  fpSites?: ParentSiteRow[] | null;
+}) {
   const { ready, session, children } = useDashboard();
 
   // Per-child login state: which child's tab is opening, and any popup-blocked
@@ -325,8 +347,38 @@ export default function DashboardApp() {
             </Link>
           </div>
         ) : (
-          children.map(kidSection)
+          <>
+            {children.map(kidSection)}
+
+            {/* Add-a-kid affordance, always reachable now that this is the one
+                parent home (not only the empty-family state). */}
+            <div className="mt-10 rounded-3xl border border-dashed border-v3-ink/20 bg-white/60 p-6 text-center">
+              <p className="text-base leading-relaxed text-v3-stone">
+                Have another kid to set up?
+              </p>
+              <Link
+                href="/start?step=kid"
+                className="mt-4 inline-flex min-h-[44px] items-center justify-center rounded-full bg-v3-profit px-8 py-3 font-path-display text-base font-semibold text-white shadow-[0_4px_0_0_#0f4227] transition hover:-translate-y-0.5 hover:bg-v3-profit-dark"
+              >
+                Add a kid
+              </Link>
+            </div>
+          </>
         )}
+
+        {/* The per-kid management controls (password reset, take-page-offline,
+            photo consent), composed in as the #account section the header menu's
+            "Account Details" item scrolls to. Mounted UNCONDITIONALLY for a
+            signed-in parent — below the apps launcher in BOTH the zero-kid and
+            has-kids states — so the #account anchor always exists and the menu
+            link always resolves. AccountDetails owns its own !ready / zero-kid
+            copy; the signed-out swap to SignIn above still gates it. Reused
+            verbatim with its shipped props. */}
+        <AccountDetails
+          consentPolicy={consentPolicy}
+          photoConsentChildIds={photoConsentChildIds}
+          fpSites={fpSites}
+        />
       </main>
     </div>
   );

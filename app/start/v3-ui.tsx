@@ -14,6 +14,7 @@
  */
 
 import { motion, useReducedMotion } from "motion/react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import type { V3Step } from "@/app/lib/v3-signup/flow-rules";
 
@@ -58,11 +59,17 @@ export function FPLogoLockup({ variant = "header" }: { variant?: "header" | "til
  * The "120 → First Profit" lockup block: the 120 chip, the connecting arrow, and
  * the shared FPLogoLockup. ONE definition, rendered by both the signup brand
  * header (V3BrandHeader below) and the parent-dashboard header (app/dashboard/ui
- * AppHeader), so the two can never drift. Returns a fragment — the caller owns
- * the flex row that positions it.
+ * AppHeader), so the two can never drift.
+ *
+ * `href` is OPTIONAL and off by default: without it the lockup is a plain
+ * fragment and the caller owns the flex row that positions it (the signup
+ * header's behaviour, unchanged — the /start lockup does NOT navigate). With it,
+ * the lockup becomes a single Link to that destination (the parent dashboard
+ * passes "/dashboard"); the Link re-applies the same `flex items-center gap-2.5`
+ * the caller's row used, so the appearance is identical either way.
  */
-export function V3BrandLockup() {
-  return (
+export function V3BrandLockup({ href }: { href?: string }) {
+  const inner = (
     <>
       <span className="flex h-7 w-7 flex-none items-center justify-center rounded bg-v3-one20 font-path-mono text-[11px] font-bold text-white">
         120
@@ -72,6 +79,16 @@ export function V3BrandLockup() {
       </span>
       <FPLogoLockup variant="header" />
     </>
+  );
+  if (!href) return inner;
+  return (
+    <Link
+      href={href}
+      aria-label="First Profit dashboard"
+      className="flex items-center gap-2.5 rounded transition-opacity hover:opacity-80"
+    >
+      {inner}
+    </Link>
   );
 }
 

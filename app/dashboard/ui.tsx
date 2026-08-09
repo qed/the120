@@ -3,11 +3,11 @@
 /**
  * The parent-dashboard chrome, rebuilt for the fpv03 S05 look (Unit U4).
  *
- * ONE shared header for both the apps dashboard and the Account Details page:
- * the 120 → First Profit lockup on the left (the same `FPLogoLockup` the signup
- * flow's brand header uses, so the two lockups can never drift), and an account
- * menu on the right whose items the caller supplies. Warm paper, Fraunces
- * headings, mono kickers — the v3 tokens from app/globals.css.
+ * The ONE shared header for the merged parent dashboard: the 120 → First Profit
+ * lockup on the left (the same `FPLogoLockup` the signup flow's brand header
+ * uses, so the two lockups can never drift; here it links home to /dashboard),
+ * and an account menu on the right whose items the caller supplies. Warm paper,
+ * Fraunces headings, mono kickers — the v3 tokens from app/globals.css.
  *
  * Mobile-first: base classes are the ~390px phone; `sm:` layers the wider row
  * on. Every control clears the 44px tap-target floor. No em dashes anywhere in
@@ -22,9 +22,9 @@ import { useDashboard } from "./store";
 export type AccountMenuItem = { label: string; href: string };
 
 /** The sticky top bar: 120 → First Profit lockup + an account menu. `items`
- *  are the links the menu offers (the apps dashboard points them at Account
- *  Details / My Kids; the Account page points back at the dashboard). Sign out
- *  is always appended, and drives the store's own sign-out. */
+ *  are the links the menu offers (the merged dashboard passes "My Kids" →
+ *  /dashboard and "Account Details" → /dashboard#account). Sign out is always
+ *  appended, and drives the store's own sign-out. */
 export function AppHeader({ items }: { items: AccountMenuItem[] }) {
   const { parent, signOut } = useDashboard();
   const [open, setOpen] = useState(false);
@@ -34,8 +34,10 @@ export function AppHeader({ items }: { items: AccountMenuItem[] }) {
     <header className="sticky top-0 z-30 w-full border-b border-v3-ink/10 bg-white/95 backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center gap-2.5 px-4 py-3 sm:px-6 sm:py-3.5">
         {/* The 120 → First Profit lockup — the shared V3BrandLockup, so this
-            header and the signup brand header cannot drift (fpv03 U4). */}
-        <V3BrandLockup />
+            header and the signup brand header cannot drift (fpv03 U4). On the
+            dashboard it links home to /dashboard (the /start header passes no
+            href, so its lockup does not navigate). */}
+        <V3BrandLockup href="/dashboard" />
 
         <div className="relative ml-auto">
           <button

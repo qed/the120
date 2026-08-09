@@ -1,34 +1,25 @@
-import type { Metadata } from "next";
-import { redirect } from "next/navigation";
+import { permanentRedirect, redirect } from "next/navigation";
 import { cache } from "react";
-import DashboardProvider from "../store";
-import AccountDetails from "../AccountDetails";
 import { dashboardGateVerdict } from "@/app/lib/funnel/session-rules";
 import { loadDashboardGateFactsCore } from "@/app/lib/funnel/dashboard-gate-core";
-import {
-  currentPolicyHash,
-  FP_CONSENT_POLICY,
-} from "@/app/api/fp/signup/consent-rules";
-import { loadParentSitesForRequest } from "@/app/lib/fp/fp-site-parent-core";
-
-export const metadata: Metadata = {
-  title: "Account details — The 120",
-  description: "Manage each kid's login, public page, and photo permission.",
-};
 
 /**
- * ACCOUNT DETAILS / MY KIDS (fpv03 U4). The per-kid parent controls the clean
- * S05 apps dashboard omits: password reset, take-page-offline, photo consent.
+ * ACCOUNT DETAILS — RETIRED ROUTE (fpv03 U4 merge).
  *
- * It loads the SAME server-side facts the old dashboard did for those controls —
- * the consent policy bundle (text + hash, computed together so what the browser
- * shows and what it echoes cannot diverge), the open photo-consent child ids,
- * and the family's public sites (parent-scoped). The gate + redirect are the
- * shared auth/session wiring, unchanged from the dashboard page.
+ * The parent dashboard is one page now: `/dashboard` carries BOTH the apps
+ * launcher and the per-kid management controls (password reset, take-page-
+ * offline, photo consent) that used to live here, reachable via the header
+ * menu's "Account Details" item (which anchor-scrolls to `/dashboard#account`).
+ *
+ * This route no longer renders a second surface. It runs the SAME auth/session
+ * gate the dashboard page does — so a session-less or unqualified request is
+ * bounced exactly as before, never leaking a redirect target to a stranger —
+ * and then PERMANENTLY redirects to `/dashboard` so any stale bookmark or mailed
+ * link lands on the merged page (308, cacheable: the split is gone for good).
  */
 const loadDashboardGateFacts = cache(() => loadDashboardGateFactsCore());
 
-export default async function AccountDetailsPage({
+export default async function AccountRedirectPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -36,21 +27,10 @@ export default async function AccountDetailsPage({
   const params = await searchParams;
   const facts = await loadDashboardGateFacts();
   const verdict = dashboardGateVerdict({ ...facts, stay: params.stay !== undefined });
+  // Both redirect() and permanentRedirect() throw their NEXT_REDIRECT by design
+  // and must stay OUTSIDE any try — a caught one reports failure on success.
   if (verdict.action === "redirect") redirect(verdict.route);
 
-  const fpSites = await loadParentSitesForRequest();
-
-  return (
-    <DashboardProvider>
-      <AccountDetails
-        fpSites={fpSites}
-        photoConsentChildIds={facts.photoConsentChildIds}
-        consentPolicy={{
-          version: FP_CONSENT_POLICY.version,
-          hash: currentPolicyHash(),
-          text: FP_CONSENT_POLICY.text,
-        }}
-      />
-    </DashboardProvider>
-  );
+  // The gate passed: this is a qualified parent. Send them to the merged page.
+  permanentRedirect("/dashboard");
 }

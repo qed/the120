@@ -235,13 +235,15 @@ describe("DashboardApp — the S05 apps launcher (payment removed)", () => {
   const app = read("app/dashboard/DashboardApp.tsx");
   const code = app.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
-  // fpv03 U4 (deliberate rebuild): DashboardApp used to be the dual-register
-  // (application | path) admissions dashboard. It is now the S05 apps view — a
-  // per-kid launcher for the three apps an enrollment carries. The Path
-  // register, the seats box, the deposit banners, the reserve/checkout block
-  // and the Path progress bars are all GONE from the parent UI (founder: free
-  // while we test). The pure register/bar rules and the server gate below are
-  // untouched; only the component that consumed them changed.
+  // fpv03 U4 (deliberate rebuild + merge): DashboardApp used to be the
+  // dual-register (application | path) admissions dashboard. It is now the ONE
+  // parent dashboard — the S05 apps view (a per-kid launcher for the three apps
+  // an enrollment carries) at the top, with the per-kid management controls
+  // composed in below via <AccountDetails/> (the U4 merge collapsed the old
+  // second Account Details route into this page). The Path register, the seats
+  // box, the deposit banners, the reserve/checkout block and the Path progress
+  // bars are all GONE from the parent UI (founder: free while we test). The pure
+  // register/bar rules and the server gate below are untouched.
 
   it("has no register swap left — no path/application skins, no DashHeader", () => {
     expect(code).not.toContain("isPath");
@@ -278,17 +280,28 @@ describe("DashboardApp — the S05 apps launcher (payment removed)", () => {
     expect(code).not.toContain("—");
   });
 
-  it("the parent controls are NOT on the apps view — they moved to Account Details", () => {
-    // The launcher is a clean apps grid; password reset / take-offline / photo
-    // consent live on app/dashboard/account (asserted in fp-ui-retirement).
-    expect(code).not.toContain("KidCredentials");
-    expect(code).not.toContain("KidSite");
-    // The header menu points at the Account Details page. fpv03 U4 review (fix
-    // #4): the two items are now DISTINCT section anchors (#account / #kids)
-    // rather than two byte-identical links, so this pins the base route both
-    // still target.
-    expect(app).toContain('href: "/dashboard/account#account"');
-    expect(app).toContain('href: "/dashboard/account#kids"');
+  it("the parent controls are composed into THIS page via AccountDetails (U4 merge)", () => {
+    // fpv03 U4 (deliberate update): the two-page split collapsed into one parent
+    // dashboard. The apps launcher no longer inlines the leaf controls itself —
+    // password reset / take-offline / photo consent still live in KidCredentials
+    // + KidSite, now mounted here THROUGH the composed <AccountDetails/> section
+    // (which the header menu's "Account Details" item scrolls to). So the
+    // launcher mounts AccountDetails rather than the leaf controls directly.
+    expect(app).toContain("import AccountDetails");
+    expect(app).toContain("<AccountDetails");
+    // The leaf controls are not hand-inlined in the launcher; AccountDetails
+    // owns them (KidSite is asserted in fp-ui-retirement + apps-launcher-pins).
+    expect(code).not.toContain("<KidCredentials");
+    expect(code).not.toContain("<KidSite");
+    // The header menu is now identical everywhere: "My Kids" → the top of this
+    // page, "Account Details" → the #account section composed in below. No
+    // "Dashboard" item (this IS the dashboard).
+    expect(app).toContain('href: "/dashboard"');
+    expect(app).toContain('href: "/dashboard#account"');
+    expect(app).toContain('label: "My Kids"');
+    expect(app).toContain('label: "Account Details"');
+    expect(app).not.toContain('label: "Dashboard"');
+    expect(app).not.toContain("/dashboard/account");
   });
 });
 

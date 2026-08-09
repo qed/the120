@@ -10,9 +10,10 @@ import { describe, expect, it } from "vitest";
  * funnel-dashboard-cards / funnel-live-surface-pins use).
  *
  * Covers three review gaps:
- *  - the NEW Account Details route (app/dashboard/account/page.tsx) had zero
- *    coverage: it runs the same gate + redirect the dashboard page does and
- *    threads three server-computed facts into AccountDetails;
+ *  - the RETIRED Account Details route (app/dashboard/account/page.tsx): after
+ *    the U4 MERGE it is no longer a second surface — it runs the same gate the
+ *    dashboard page does and then PERMANENTLY redirects to /dashboard (the
+ *    merged page). It renders nothing;
  *  - per-kid Login is bound to the row's OWN id (a refactor that hoists or loses
  *    it would burn the wrong child's handoff code);
  *  - both roster surfaces render `children.map` with a stable key.
@@ -24,30 +25,33 @@ const read = (rel: string) => readFileSync(path.resolve(ROOT, rel), "utf8");
 const stripComments = (src: string) =>
   src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
-/* ─────────────────── the Account Details route gate ─────────────────── */
+/* ─────────────── the retired Account Details route (U4 merge) ─────────────── */
 
-describe("app/dashboard/account/page.tsx — the gate the new route inherited", () => {
+describe("app/dashboard/account/page.tsx — the retired route redirects to /dashboard", () => {
+  // fpv03 U4 (deliberate update): the two-page dashboard collapsed into one.
+  // This route stopped rendering AccountDetails; it now runs the shared gate and
+  // PERMANENTLY redirects to /dashboard so stale bookmarks land on the merged
+  // page. The management controls moved onto /dashboard itself (asserted in
+  // funnel-dashboard-register + fp-ui-retirement).
   const page = stripComments(read("app/dashboard/account/page.tsx"));
 
-  it("loads the gate facts through the cache() wrapper and computes the verdict", () => {
-    // Same split-shape the dashboard page uses (memoized non-throwing loader,
-    // redirect kept in the page).
+  it("still runs the gate before redirecting (cache() wrapper + verdict + redirect)", () => {
+    // The auth/session wiring is unchanged: a session-less/unqualified request
+    // is bounced by the gate exactly as before, never leaking /dashboard.
     expect(page).toMatch(/cache\(\(\) => loadDashboardGateFactsCore\(\)\)/);
     expect(page).toContain("dashboardGateVerdict(");
-  });
-
-  it("redirects on the redirect verdict (the auth/session wiring, unchanged)", () => {
     expect(page).toMatch(/if \(verdict\.action === "redirect"\) redirect\(verdict\.route\)/);
   });
 
-  it("threads the three server-computed facts into AccountDetails", () => {
-    // The whole reason this route loads server-side facts: AccountDetails is a
-    // client component and cannot compute the policy hash (node:crypto) or read
-    // the parent-scoped sites/consent itself.
-    expect(page).toMatch(/fpSites=\{fpSites\}/);
-    expect(page).toMatch(/photoConsentChildIds=\{facts\.photoConsentChildIds\}/);
-    expect(page).toContain("consentPolicy={");
-    expect(page).toContain("currentPolicyHash()");
+  it("permanently redirects a qualified parent to the merged /dashboard", () => {
+    expect(page).toMatch(/permanentRedirect\("\/dashboard"\)/);
+  });
+
+  it("no longer renders AccountDetails or loads its facts (the split is gone)", () => {
+    expect(page).not.toContain("AccountDetails");
+    expect(page).not.toContain("fpSites=");
+    expect(page).not.toContain("consentPolicy={");
+    expect(page).not.toContain("return (");
   });
 });
 
@@ -97,5 +101,92 @@ describe("both roster surfaces render children.map with a stable key", () => {
     const details = stripComments(read("app/dashboard/AccountDetails.tsx"));
     expect(details).toContain("children.map(");
     expect(details).toMatch(/key=\{c\.id\}/);
+  });
+});
+
+/* ─────────────── U4 dashboard-merge correction (single point of gating,
+   unconditional #account mount, gate-before-data-load) ─────────────── */
+
+describe("DashboardApp — one point of auth gating, AccountDetails mounted unconditionally", () => {
+  const app = stripComments(read("app/dashboard/DashboardApp.tsx"));
+
+  it("the signed-out gate (return <SignIn) textually PRECEDES the <AccountDetails mount", () => {
+    // The parent owns the single auth gate; AccountDetails is only ever reached
+    // once the signed-out swap has been ruled out. A refactor that mounts the
+    // section above the gate (leaking it to a session-less request) reddens.
+    const gate = app.indexOf("if (ready && !session) return <SignIn");
+    const mount = app.indexOf("<AccountDetails");
+    expect(gate).toBeGreaterThan(-1);
+    expect(mount).toBeGreaterThan(gate);
+  });
+
+  it("AccountDetails is mounted regardless of children.length — the #account anchor always exists (zero-kid reachability, fix #1)", () => {
+    // The bug: the section was nested inside the has-kids fragment, so a zero-kid
+    // family's "Account Details" menu link (/dashboard#account) was a dead
+    // affordance and AccountDetails' own "No kids yet..." copy was unreachable.
+    // The fix hoists the single mount OUT of the fragment to a sibling after the
+    // ternary, so its indexOf now follows the fragment close (</>) — before the
+    // fix it preceded it (nested inside the has-kids branch).
+    const fragEnd = app.indexOf("</>");
+    const mount = app.indexOf("<AccountDetails");
+    expect(fragEnd).toBeGreaterThan(-1);
+    expect(mount).toBeGreaterThan(fragEnd);
+    // Exactly one mount — not one per branch.
+    expect(app.match(/<AccountDetails/g)).toHaveLength(1);
+  });
+});
+
+describe("AccountDetails — no second gate (single point of gating)", () => {
+  const details = stripComments(read("app/dashboard/AccountDetails.tsx"));
+
+  it("does not import SignIn or read session — the parent is the only gate", () => {
+    // AccountDetails is a plain composed section now; if it grew its own SignIn
+    // swap or session read the app would have two gates that could disagree.
+    expect(details).not.toContain("SignIn");
+    expect(details).not.toMatch(/\bsession\b/);
+  });
+});
+
+describe("app/dashboard/page.tsx — gate runs before the kid-data load, and threads the merged props", () => {
+  const page = stripComments(read("app/dashboard/page.tsx"));
+
+  it("loadParentSitesForRequest() runs AFTER the redirect gate line (no kid data for a bounced session)", () => {
+    const gate = page.indexOf('if (verdict.action === "redirect")');
+    const load = page.indexOf("loadParentSitesForRequest()");
+    expect(gate).toBeGreaterThan(-1);
+    expect(load).toBeGreaterThan(gate);
+  });
+
+  it("passes fpSites, photoConsentChildIds, and consentPolicy to <DashboardApp", () => {
+    expect(page).toContain("fpSites={fpSites}");
+    expect(page).toContain("photoConsentChildIds={facts.photoConsentChildIds}");
+    expect(page).toContain("consentPolicy={{");
+  });
+});
+
+describe("app/dashboard/account/page.tsx — gate precedes the redirect (no open-redirect bypass)", () => {
+  const acct = stripComments(read("app/dashboard/account/page.tsx"));
+
+  it("the redirect gate line PRECEDES permanentRedirect(\"/dashboard\")", () => {
+    // A reorder that ran permanentRedirect before the gate would bounce even a
+    // session-less/unqualified request straight to /dashboard — an open-redirect
+    // bypass of the shared auth gate. Ordering pins the gate-first contract.
+    const gate = acct.indexOf('if (verdict.action === "redirect")');
+    const perm = acct.indexOf('permanentRedirect("/dashboard")');
+    expect(gate).toBeGreaterThan(-1);
+    expect(perm).toBeGreaterThan(gate);
+  });
+});
+
+describe("V3BrandLockup — navigating on the dashboard, inert on /start", () => {
+  it("the dashboard header links the lockup home (href=\"/dashboard\")", () => {
+    const ui = read("app/dashboard/ui.tsx");
+    expect(ui).toContain('<V3BrandLockup href="/dashboard"');
+  });
+
+  it("the /start brand header passes NO href — the shared lockup does not navigate there", () => {
+    const startUi = read("app/start/v3-ui.tsx");
+    expect(startUi).toContain("<V3BrandLockup />");
+    expect(startUi).not.toContain("<V3BrandLockup href");
   });
 });

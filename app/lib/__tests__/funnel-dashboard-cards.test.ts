@@ -619,8 +619,14 @@ describe("wiring — the verdict is a pure module, no longer consumed by the app
   // are kept per the founder's keep-payment-for-future decision. The negative
   // pins below are the "retired" proof for a component four render sites once
   // shared.
-  it("DashboardApp renders no funnel card, no reserve CTA, no editor view", () => {
-    const src = read("app/dashboard/DashboardApp.tsx");
+  it("the parent dashboard surfaces render no funnel card, no reserve CTA, no editor view", () => {
+    // The parent-dashboard restructure split the launcher into three client
+    // surfaces; the negative pins sweep all three so a funnel card cannot creep
+    // back onto any of them.
+    const src =
+      read("app/dashboard/ParentDashboard.tsx") +
+      read("app/dashboard/kids/[id]/KidPortal.tsx") +
+      read("app/dashboard/FirstProfitCard.tsx");
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
     expect(code).not.toContain("cardVerdict");
     expect(code).not.toContain("reserveRefusalMessage");

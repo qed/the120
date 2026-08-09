@@ -104,7 +104,11 @@ describe("no surface retypes the deadline", () => {
     // deposit banner is gone rather than merely reading the constant. The
     // deadline label now lives only where money still does (nurture email,
     // welcome template, checkout route) — asserted elsewhere.
-    const src = stripComments(readSource("app/dashboard/DashboardApp.tsx"));
+    const src = stripComments(
+      readSource("app/dashboard/ParentDashboard.tsx") +
+        readSource("app/dashboard/kids/[id]/KidPortal.tsx") +
+        readSource("app/dashboard/FirstProfitCard.tsx")
+    );
     expect(src).not.toContain("DEPOSIT_REFUND_DEADLINE_LABEL");
     expect(src).not.toContain("September 30, 2026");
   });

@@ -127,7 +127,13 @@ describe("R51a — the policy record", () => {
     // now happens ON the Stripe-hosted page (consent_collection, pinned
     // structurally below), so the boolean must not exist at all: any
     // reappearance of `policyAccepted` is a claim the client cannot make.
-    const ui = read("app/dashboard/DashboardApp.tsx");
+    // The parent-dashboard restructure split the one launcher into three client
+    // surfaces (the parent list, the per-kid portal, the FP card); the pin
+    // sweeps all three, so no client surface can fabricate an acceptance.
+    const ui =
+      read("app/dashboard/ParentDashboard.tsx") +
+      read("app/dashboard/kids/[id]/KidPortal.tsx") +
+      read("app/dashboard/FirstProfitCard.tsx");
     expect(ui).not.toContain("policyAccepted");
     const route = read("app/api/checkout/route.ts");
     expect(route).not.toContain("policyAccepted");

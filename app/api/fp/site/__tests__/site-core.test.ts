@@ -83,7 +83,7 @@ function makeDeps(
       sent.push(input);
       return { ok: true };
     },
-    manageUrl: "https://the120.school/dashboard",
+    manageUrl: (childId: string) => `https://the120.school/dashboard/kids/${childId}`,
   };
   return { deps, sent };
 }

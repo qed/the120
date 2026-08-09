@@ -21,10 +21,21 @@ import { useDashboard } from "./store";
 
 export type AccountMenuItem = { label: string; href: string };
 
+/**
+ * THE account menu, defined ONCE. Both dashboard surfaces (the kid list and the
+ * per-kid portal) render the same single "My Kids" item, so it lives here beside
+ * the AppHeader that consumes it rather than as a copy in each page. Two
+ * independent literals of one menu is exactly the shape that drifts silently the
+ * day someone adds an item to one surface and not the other. Sign out is
+ * appended by AppHeader itself and is not listed here.
+ */
+export const ACCOUNT_MENU: AccountMenuItem[] = [{ label: "My Kids", href: "/dashboard" }];
+
 /** The sticky top bar: 120 → First Profit lockup + an account menu. `items`
- *  are the links the menu offers (the merged dashboard passes "My Kids" →
- *  /dashboard and "Account Details" → /dashboard#account). Sign out is always
- *  appended, and drives the store's own sign-out. */
+ *  are the links the menu offers (the parent dashboard and the per-kid portal
+ *  both pass a single "My Kids" → /dashboard item now; the per-kid controls
+ *  moved onto the per-kid page, so there is no top-level "Account Details"
+ *  item). Sign out is always appended, and drives the store's own sign-out. */
 export function AppHeader({ items }: { items: AccountMenuItem[] }) {
   const { parent, signOut } = useDashboard();
   const [open, setOpen] = useState(false);

@@ -1,17 +1,9 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cache } from "react";
-import DashboardProvider from "./store";
-import DashboardApp from "./DashboardApp";
-import {
-  dashboardGateVerdict,
-} from "@/app/lib/funnel/session-rules";
+import ParentDashboard from "./ParentDashboard";
+import { dashboardGateVerdict } from "@/app/lib/funnel/session-rules";
 import { loadDashboardGateFactsCore } from "@/app/lib/funnel/dashboard-gate-core";
-import {
-  currentPolicyHash,
-  FP_CONSENT_POLICY,
-} from "@/app/api/fp/signup/consent-rules";
-import { loadParentSitesForRequest } from "@/app/lib/fp/fp-site-parent-core";
 
 export const metadata: Metadata = {
   title: "Your dashboard — The 120",
@@ -19,22 +11,18 @@ export const metadata: Metadata = {
 };
 
 /**
- * The server-side facts behind the dashboard gate (reconnect U2). The split
- * shape from the memoized-auth-gate learning: `cache()` a NON-throwing
- * loader, keep `redirect()` in the page — zero-arg, so the memo key is the
- * request itself.
+ * THE PARENT DASHBOARD (/dashboard) — the server half.
  *
- * fpv03 U4 (merge): the parent dashboard is ONE page now — the S05 apps
- * LAUNCHER and the per-kid management controls (password reset, take-page-
- * offline, photo consent) that used to live on the separate Account Details
- * route (app/dashboard/account, now a permanent redirect back here). Payment is
- * still gone from the parent experience, so this page loads no seats, no Path
- * register and no verified-task counts. It DOES load the facts the merged-in
- * controls need — the consent policy bundle (text + hash computed together on
- * the server so what the browser shows and what it echoes cannot diverge), the
- * open photo-consent child ids, and the family's public sites (parent-scoped) —
- * exactly the trio the account page used to load. The gate + redirect stay: they
- * are the auth/session wiring, unchanged, and still run before any kid data.
+ * The parent-dashboard restructure made this a clean landing that LISTS the
+ * kids (app/dashboard/ParentDashboard.tsx); each kid opens their own portal at
+ * /dashboard/kids/<childId>, where the apps launcher AND the per-kid management
+ * controls now live. So this page loads NO per-kid facts any more — no fpSites,
+ * no consent policy, no photo-consent ids. Those move to the per-kid page.tsx,
+ * which is where the controls that need them render.
+ *
+ * The gate + redirect stay: they are the auth/session wiring, unchanged. The
+ * split from the memoized-auth-gate learning holds — `cache()` a NON-throwing
+ * loader, keep `redirect()` in the page, OUTSIDE any try.
  */
 const loadDashboardGateFacts = cache(() => loadDashboardGateFactsCore());
 
@@ -50,22 +38,7 @@ export default async function DashboardPage({
   // a caught one reports failure on success, which this repo has shipped once.
   if (verdict.action === "redirect") redirect(verdict.route);
 
-  // The parent-scoped public sites for the take-offline control (the SAME read
-  // the account page did, now that the control is on this page). Runs AFTER the
-  // gate, so no kid data loads for a session that will be bounced.
-  const fpSites = await loadParentSitesForRequest();
-
-  return (
-    <DashboardProvider>
-      <DashboardApp
-        fpSites={fpSites}
-        photoConsentChildIds={facts.photoConsentChildIds}
-        consentPolicy={{
-          version: FP_CONSENT_POLICY.version,
-          hash: currentPolicyHash(),
-          text: FP_CONSENT_POLICY.text,
-        }}
-      />
-    </DashboardProvider>
-  );
+  // DashboardProvider is mounted once by app/dashboard/layout.tsx, so hopping
+  // to a kid's portal and back does not remount the store or refetch the family.
+  return <ParentDashboard />;
 }

@@ -60,6 +60,21 @@ export const FP_APP_URL: string = FIRST_PROFIT_SIGN_IN_URL;
 export const FP_PARENT_TARGET: string = v3RemapRoute({ screen: "dashboard" }) ?? "/dashboard";
 
 /**
+ * Where ONE child's controls live: the per-kid portal under the parent target.
+ *
+ * The parent-dashboard restructure split `/dashboard` into a kid LIST and a
+ * per-kid portal, and the take-offline control went with the portal. A mail
+ * about ONE child must therefore link to THAT child's page, not the list — the
+ * R21 site-live notice is a transactional safety notice whose whole value is
+ * how fast a parent can reach the control, and "find the right card among N"
+ * is not fast. Built from FP_PARENT_TARGET rather than a second literal so the
+ * two move together if the dashboard ever moves again.
+ */
+export function fpParentKidTarget(childId: string): string {
+  return `${FP_PARENT_TARGET}/kids/${childId}`;
+}
+
+/**
  * Where the retired `/first-profit` ad landing goes: the front door the ads
  * were selling. Named here rather than typed in the page so the whole retired
  * surface reads from one table.

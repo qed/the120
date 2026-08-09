@@ -100,13 +100,17 @@ describe("the marketing landing hero (fidelity batch B1 drift 9 / B3 drift 16)",
   });
 });
 
-describe("the dashboard's own chrome (fpv03 U4 apps launcher)", () => {
-  const app = stripComments(read("app/dashboard/DashboardApp.tsx"));
+describe("the dashboard's own chrome (per-kid apps launcher)", () => {
+  // The parent-dashboard restructure moved the apps launcher onto the per-kid
+  // portal; the FP card is its own component now. The chrome pins read the
+  // portal plus that card together, which is the launcher surface a parent sees.
+  const app = stripComments(
+    read("app/dashboard/kids/[id]/KidPortal.tsx") + read("app/dashboard/FirstProfitCard.tsx")
+  );
 
-  // fpv03 U4: the admissions dashboard's chrome (the red add-a-child pill, the
-  // dual-register top bars, the two-column card grid) retired with the payment
-  // experience. What remains is the S05 apps launcher: the shared AppHeader and
-  // per-kid app rows.
+  // The admissions dashboard's chrome (the red add-a-child pill, the dual-register
+  // top bars, the two-column card grid) retired with the payment experience. What
+  // remains is the apps launcher: the shared AppHeader and per-kid app rows.
   it("mounts the ONE shared AppHeader, no register-gated DashHeader", () => {
     expect(app).toContain("AppHeader");
     expect(app).not.toContain("DashHeader");

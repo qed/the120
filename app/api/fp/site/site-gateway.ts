@@ -54,7 +54,7 @@ import {
 } from "./site-rules";
 import { resolveFpChild, type SiteCoreDeps } from "./site-core";
 import { sendEmail } from "@/app/lib/email";
-import { FP_PARENT_TARGET } from "@/app/lib/fp/retired-ui-routes";
+import { fpParentKidTarget } from "@/app/lib/fp/retired-ui-routes";
 import { SITE_URL } from "@/app/lib/site";
 import type { SiteContent, SiteProduct } from "@/app/lib/fp/fp-public-site-rules";
 
@@ -96,10 +96,11 @@ export function buildSiteCoreDeps(admin: SupabaseClient): SiteCoreDeps {
     },
     sendMail: (input) => sendEmail(input),
     // Was `/fp/family` — the First Profit parent page, retired in v3 plan
-    // Unit 10. The dashboard is where a parent's kids live now; the mail that
-    // renders this no longer claims the page itself can take a site offline
-    // (see the banner on `buildFpSiteLiveNotice`).
-    manageUrl: `${SITE_URL}${FP_PARENT_TARGET}`,
+    // Unit 10. The dashboard is where a parent's kids live now. Since the
+    // parent-dashboard restructure `/dashboard` is only the kid LIST, so this
+    // resolves per child to that child's own portal, which is the page that
+    // actually mounts the take-offline control the R21 mail promises.
+    manageUrl: (childId: string) => `${SITE_URL}${fpParentKidTarget(childId)}`,
   };
 }
 

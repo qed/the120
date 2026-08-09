@@ -73,8 +73,13 @@ export type SiteCoreDeps = {
     html: string;
     text: string;
   }) => Promise<{ ok: boolean }>;
-  /** Where the parent manages the page (the family dashboard URL). */
-  manageUrl: string;
+  /**
+   * Where the parent manages ONE child's page. Takes the child id because the
+   * control lives on that child's own portal (`/dashboard/kids/<id>`) since the
+   * parent-dashboard restructure — a link to the bare kid list would make the
+   * R21 safety notice a hunt instead of a click.
+   */
+  manageUrl: (childId: string) => string;
 };
 
 /* ------------------------------------------------------------- child gate */
@@ -567,7 +572,7 @@ async function notifyParent(
       childFirstName: input.childFirstName,
       handle: input.handle,
       headline: input.headline,
-      manageUrl: deps.manageUrl,
+      manageUrl: deps.manageUrl(input.childId),
     });
     const sent = await deps.sendMail({ to: email, ...rendered });
     if (!sent.ok) return attention("send failed");

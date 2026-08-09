@@ -126,7 +126,7 @@ describe("R18 — no 'Book a call' on the logged-out marketing site", () => {
     // this reddens rather than silently widening the exclusion.
     expect(sources()).toContain("app/dashboard/SignIn.tsx");
     expect(isPostC1("app/dashboard/SignIn.tsx")).toBe(false);
-    expect(isPostC1("app/dashboard/DashboardApp.tsx")).toBe(true);
+    expect(isPostC1("app/dashboard/ParentDashboard.tsx")).toBe(true);
   });
 
   it("keeps the helper and the label for the post-C1 surfaces that will use them", () => {

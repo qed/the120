@@ -229,79 +229,95 @@ describe("the arrived_at migration (20260825120000)", () => {
   });
 });
 
-/* ─────────────────── the apps dashboard (fpv03 U4 rebuild) ─────────────────── */
+/* ─────────────────── the apps dashboard (parent-dashboard restructure) ─────────────────── */
 
-describe("DashboardApp — the S05 apps launcher (payment removed)", () => {
-  const app = read("app/dashboard/DashboardApp.tsx");
-  const code = app.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
-
-  // fpv03 U4 (deliberate rebuild + merge): DashboardApp used to be the
-  // dual-register (application | path) admissions dashboard. It is now the ONE
-  // parent dashboard — the S05 apps view (a per-kid launcher for the three apps
-  // an enrollment carries) at the top, with the per-kid management controls
-  // composed in below via <AccountDetails/> (the U4 merge collapsed the old
-  // second Account Details route into this page). The Path register, the seats
-  // box, the deposit banners, the reserve/checkout block and the Path progress
-  // bars are all GONE from the parent UI (founder: free while we test). The pure
-  // register/bar rules and the server gate below are untouched.
+describe("the parent dashboard — a kid list + per-kid portals (payment removed)", () => {
+  // The parent-dashboard restructure split the one merged launcher into two
+  // routes: /dashboard (ParentDashboard) is a clean white list of kid cards, and
+  // /dashboard/kids/[id] (KidPortal) is the per-kid apps launcher (the extracted
+  // FirstProfitCard + Gauntlet/Math rows) plus the per-kid controls
+  // (KidCredentials + KidSite). The Path register, the seats box, the deposit
+  // banners, the reserve/checkout block and the Path progress bars are all GONE
+  // from the parent UI (founder: free while we test). The pure register/bar rules
+  // and the server gate below are untouched.
+  const parent = read("app/dashboard/ParentDashboard.tsx");
+  const portal = read("app/dashboard/kids/[id]/KidPortal.tsx");
+  const fpCard = read("app/dashboard/FirstProfitCard.tsx");
+  const strip = (s: string) =>
+    s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const allCode = strip(parent + portal + fpCard);
 
   it("has no register swap left — no path/application skins, no DashHeader", () => {
-    expect(code).not.toContain("isPath");
-    expect(code).not.toContain("DashHeader");
-    expect(code).not.toContain("renderPathHome");
-    expect(code).not.toContain("bg-hq-canvas");
+    expect(allCode).not.toContain("isPath");
+    expect(allCode).not.toContain("DashHeader");
+    expect(allCode).not.toContain("renderPathHome");
+    expect(allCode).not.toContain("bg-hq-canvas");
   });
 
   it("carries no payment surface: no seats box, no deposit banner, no reserve/checkout", () => {
-    expect(code).not.toContain("seats remain");
-    expect(code).not.toContain("SEATS_TOTAL");
-    expect(code).not.toContain("depositBanner");
-    expect(code).not.toContain("renderReserveCta");
-    expect(code).not.toContain("reserveSeat");
-    expect(code).not.toContain("/api/checkout");
-    expect(code).not.toContain("cardVerdict");
+    expect(allCode).not.toContain("seats remain");
+    expect(allCode).not.toContain("SEATS_TOTAL");
+    expect(allCode).not.toContain("depositBanner");
+    expect(allCode).not.toContain("renderReserveCta");
+    expect(allCode).not.toContain("reserveSeat");
+    expect(allCode).not.toContain("/api/checkout");
+    expect(allCode).not.toContain("cardVerdict");
   });
 
-  it("renders the three S05 app rows and a per-kid heading", () => {
-    expect(app).toContain("First Profit");
-    expect(app).toContain("GAUNTLET");
-    expect(app).toContain("Math Academy");
-    expect(app).toContain("Coming soon");
-    expect(app).toMatch(/&rsquo;s Dashboard/);
+  it("the per-kid portal renders the three app rows and a per-kid heading", () => {
+    const rows = portal + fpCard;
+    expect(rows).toContain("First Profit");
+    expect(rows).toContain("GAUNTLET");
+    expect(rows).toContain("Math Academy");
+    expect(rows).toContain("Coming soon");
+    expect(portal).toMatch(/&rsquo;s Dashboard/);
   });
 
   it("the First Profit Login button mints a handoff and opens a NEW tab (the shipped mint path)", () => {
     // Reuses v3MintHandoffAction and the sync-open discipline: the blank tab is
     // opened BEFORE the await, or a popup blocker eats it.
-    expect(app).toContain("v3MintHandoffAction");
-    expect(app).toMatch(/window\.open\("", "_blank"\)/);
-    // No em dashes in the parent-facing copy the file ships (comment-stripped;
-    // the docblocks explain the rebuild in prose).
-    expect(code).not.toContain("—");
+    expect(fpCard).toContain("v3MintHandoffAction");
+    expect(fpCard).toMatch(/window\.open\("", "_blank"\)/);
+    // No em dashes in the parent-facing copy the files ship (comment-stripped;
+    // the docblocks explain the restructure in prose).
+    expect(allCode).not.toContain("—");
   });
 
-  it("the parent controls are composed into THIS page via AccountDetails (U4 merge)", () => {
-    // fpv03 U4 (deliberate update): the two-page split collapsed into one parent
-    // dashboard. The apps launcher no longer inlines the leaf controls itself —
-    // password reset / take-offline / photo consent still live in KidCredentials
-    // + KidSite, now mounted here THROUGH the composed <AccountDetails/> section
-    // (which the header menu's "Account Details" item scrolls to). So the
-    // launcher mounts AccountDetails rather than the leaf controls directly.
-    expect(app).toContain("import AccountDetails");
-    expect(app).toContain("<AccountDetails");
-    // The leaf controls are not hand-inlined in the launcher; AccountDetails
-    // owns them (KidSite is asserted in fp-ui-retirement + apps-launcher-pins).
-    expect(code).not.toContain("<KidCredentials");
-    expect(code).not.toContain("<KidSite");
-    // The header menu is now identical everywhere: "My Kids" → the top of this
-    // page, "Account Details" → the #account section composed in below. No
-    // "Dashboard" item (this IS the dashboard).
-    expect(app).toContain('href: "/dashboard"');
-    expect(app).toContain('href: "/dashboard#account"');
-    expect(app).toContain('label: "My Kids"');
-    expect(app).toContain('label: "Account Details"');
-    expect(app).not.toContain('label: "Dashboard"');
-    expect(app).not.toContain("/dashboard/account");
+  it("the per-kid controls are mounted on the per-kid portal (not the parent list)", () => {
+    // The restructure moved the controls off /dashboard and onto the per-kid
+    // portal, which mounts the leaf controls (KidCredentials + KidSite) directly
+    // for the one child it renders.
+    expect(portal).toContain("<KidCredentials");
+    expect(portal).toContain("<KidSite");
+    // The parent list is a directory only — no controls, no FP card.
+    expect(strip(parent)).not.toContain("KidCredentials");
+    expect(strip(parent)).not.toContain("KidSite");
+    expect(strip(parent)).not.toContain("FirstProfitCard");
+    // The header menu is minimal now: "My Kids" → /dashboard, and nothing else.
+    // No "Account Details" item, no "Dashboard" item, no /dashboard#account or
+    // /dashboard/account anchor (the controls are per-kid pages now).
+    //
+    // The menu is defined ONCE in app/dashboard/ui.tsx (review fix: two literal
+    // copies, one per surface, is the shape that drifts the day someone adds an
+    // item to one and not the other). So the label pin reads the single
+    // definition, and each surface is pinned to CONSUME it rather than to
+    // re-declare it — which is what actually keeps the two headers identical.
+    const ui = read("app/dashboard/ui.tsx");
+    expect(ui).toContain('ACCOUNT_MENU: AccountMenuItem[] = [{ label: "My Kids", href: "/dashboard" }]');
+    for (const [name, src] of [
+      ["parent list", parent],
+      ["per-kid portal", portal],
+    ] as const) {
+      expect(strip(src), name).toContain("ACCOUNT_MENU");
+      expect(strip(src), name).toContain("items={ACCOUNT_MENU}");
+      // No second copy of the menu on either surface.
+      expect(strip(src), name).not.toContain('label: "My Kids"');
+    }
+    expect(ui).not.toContain('label: "Account Details"');
+    expect(parent).not.toContain('label: "Account Details"');
+    expect(parent).not.toContain('label: "Dashboard"');
+    expect(strip(parent)).not.toContain("/dashboard#account");
+    expect(strip(parent)).not.toContain("/dashboard/account");
   });
 });
 

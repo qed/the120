@@ -7,6 +7,7 @@ import {
   FP_APP_URL,
   FP_LANDING_TARGET,
   FP_PARENT_TARGET,
+  fpParentKidTarget,
   RETIRED_FP_UI_ROUTES,
 } from "@/app/lib/fp/retired-ui-routes";
 import { REVIEW_QUEUE_URL } from "@/app/lib/fp/notify/template";
@@ -194,24 +195,32 @@ describe("every retired URL still resolves", () => {
   it("THE PAIRING: the site-live notice promises a take-offline control, so the dashboard must carry one", () => {
     // `/fp/family` carried the parent unpublish/republish control, and R21's
     // mail told every published family they could use it. Unit 10 retired that
-    // page; the control was RESTORED onto `/dashboard`, which is what
-    // `manageUrl` (FP_PARENT_TARGET) now resolves to. Both halves are asserted
+    // page; the control was RESTORED onto `/dashboard`. Both halves are asserted
     // together — a promise and its mechanism must never be two independently
     // true pins (the /fp/review learning, applied again).
+    //
+    // The parent-dashboard restructure sharpened this: `/dashboard` is now only
+    // the kid LIST, and the control lives on the per-kid portal. So the pin is
+    // no longer "manageUrl resolves to /dashboard" (which would now be true AND
+    // useless — a link to a page with no control on it); it is "manageUrl
+    // resolves to the child's OWN portal", which is the page asserted below to
+    // mount KidSite.
     const gateway = read("app/api/fp/site/site-gateway.ts");
     expect(stripComments(gateway)).not.toContain("/fp/family");
-    expect(gateway).toContain("FP_PARENT_TARGET");
+    expect(gateway).toContain("fpParentKidTarget");
     expect(FP_PARENT_TARGET).toBe("/dashboard");
+    expect(fpParentKidTarget("abc123")).toBe("/dashboard/kids/abc123");
 
     const notice = read("app/lib/fp/parent-email/rules.ts");
     expect(notice).toContain("take the page offline any time from your family dashboard");
 
     // The mechanism the sentence names: the parent dashboard mounts the
     // control, and the control drives the parent-scoped core through its Server
-    // Action. fpv03 U4 relocated it from the apps launcher to the Account
-    // Details page (still under /dashboard, still what FP_PARENT_TARGET resolves
-    // to — the header menu links to it), so the promise stays reachable.
-    expect(read("app/dashboard/AccountDetails.tsx")).toContain("KidSite");
+    // Action. The parent-dashboard restructure relocated it onto the per-kid
+    // portal (/dashboard/kids/<id>, still under /dashboard, still what
+    // FP_PARENT_TARGET resolves to — the parent list links to it), so the
+    // promise stays reachable.
+    expect(read("app/dashboard/kids/[id]/KidPortal.tsx")).toContain("KidSite");
     const panel = read("app/dashboard/KidSite.tsx");
     expect(panel).toContain("setFpSitePublishedAction");
     expect(panel).toContain("Take the page offline");

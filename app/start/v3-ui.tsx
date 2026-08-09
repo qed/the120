@@ -15,6 +15,40 @@
 
 import { motion, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
+import type { V3Step } from "@/app/lib/v3-signup/flow-rules";
+
+/* ------------------------------------------------------------ step order */
+
+/**
+ * The flow's five URL steps, in walking order. Lives HERE (not in V3Flow) so
+ * step screens like StepParent can size their progress kickers off the real
+ * step count without importing V3Flow — which imports them back (a cycle whose
+ * TDZ would bite any module-scope reader of this array).
+ */
+export const STEP_ORDER: readonly V3Step[] = ["parent", "kid", "cover", "story", "ready"];
+
+/* ------------------------------------------------------------ logo lockup */
+
+/**
+ * The one First Profit lockup: the bars mark (/path-logo.svg, already shipped
+ * for the path PWA) beside the wordmark. The brand header and the "Includes:"
+ * tile both render THIS so the two lockups cannot drift apart.
+ * eslint-disable on the img: a tiny inline mark from /public needs no
+ * optimizer hop.
+ */
+export function FPLogoLockup({ variant = "header" }: { variant?: "header" | "tile" }) {
+  const text =
+    variant === "header"
+      ? "text-sm font-bold uppercase tracking-[0.08em] text-v3-ink"
+      : "font-path-display text-lg font-black leading-none text-v3-ink";
+  return (
+    <span className={`flex items-center ${variant === "header" ? "gap-2.5" : "gap-1.5"}`}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/path-logo.svg" alt="" aria-hidden className="h-6 w-6 flex-none" />
+      <span className={text}>First Profit</span>
+    </span>
+  );
+}
 
 /* ------------------------------------------------------------ brand header */
 
@@ -22,58 +56,149 @@ export function V3BrandHeader({
   step,
   totalSteps,
   stepLabel,
+  end,
 }: {
   step: number;
   totalSteps: number;
   stepLabel: string;
+  /** fpv03 (Unit 2): optional right-side slot. When given it REPLACES the
+   *  header's step meter — the reskinned screens carry their own in-content
+   *  progress kicker (V3StepKicker), so the bar shows the account chip instead.
+   *  Steps that do not pass it keep the meter exactly as before. */
+  end?: ReactNode;
 }) {
   return (
-    <header className="sticky top-0 z-20 w-full border-b border-v3-ink/10 bg-v3-cream/90 backdrop-blur">
-      <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3 sm:gap-4 sm:px-5 sm:py-3.5">
-        <span className="flex h-7 w-7 flex-none items-center justify-center rounded bg-v3-one20 font-path-mono text-[11px] font-bold text-white">
-          120
-        </span>
-        <span className="hidden text-v3-ink/25 sm:inline" aria-hidden>
-          →
-        </span>
-        <span className="hidden items-center gap-2 sm:flex">
-          <span aria-hidden className="flex items-end gap-[2px]">
-            <span className="block h-2 w-1 rounded-sm bg-v3-profit" />
-            <span className="block h-3 w-1 rounded-sm bg-v3-sun" />
-            <span className="block h-4 w-1 rounded-sm bg-v3-one20" />
-          </span>
-          <span className="v3-label font-bold text-v3-ink">First Profit</span>
-        </span>
+    <header className="sticky top-0 z-20 w-full border-b border-v3-ink/10 bg-white/95 backdrop-blur">
+      <div className="mx-auto flex max-w-5xl items-center gap-2.5 px-4 py-3 sm:px-5 sm:py-3.5">
+        <FPLogoLockup variant="header" />
 
         <div className="ml-auto flex min-w-0 items-center gap-2 sm:gap-3">
-          {/* The label is the first thing to go on a phone: the dot meter and
-              its aria-label still carry the whole progress story. */}
-          <span className="v3-label hidden truncate text-v3-stone sm:inline">
-            Step {step} of {totalSteps} · {stepLabel}
-          </span>
-          <span className="v3-label text-v3-stone sm:hidden">
-            {step}/{totalSteps}
-          </span>
-          <div
-            className="flex flex-none gap-1"
-            role="progressbar"
-            aria-valuenow={step}
-            aria-valuemin={1}
-            aria-valuemax={totalSteps}
-            aria-label={`Onboarding progress: step ${step} of ${totalSteps}, ${stepLabel}`}
-          >
-            {Array.from({ length: totalSteps }).map((_, i) => (
-              <span
-                key={i}
-                className={`h-1.5 w-4 rounded-full transition-colors sm:w-6 ${
-                  i < step ? "bg-v3-profit" : "bg-v3-ink/10"
-                }`}
-              />
-            ))}
-          </div>
+          {end ?? (
+            <>
+              {/* The label is the first thing to go on a phone: the dot meter
+                  and its aria-label still carry the whole progress story. */}
+              <span className="v3-label hidden truncate text-v3-stone sm:inline">
+                Step {step} of {totalSteps} · {stepLabel}
+              </span>
+              <span className="v3-label text-v3-stone sm:hidden">
+                {step}/{totalSteps}
+              </span>
+              <div
+                className="flex flex-none gap-1"
+                role="progressbar"
+                aria-valuenow={step}
+                aria-valuemin={1}
+                aria-valuemax={totalSteps}
+                aria-label={`Onboarding progress: step ${step} of ${totalSteps}, ${stepLabel}`}
+              >
+                {Array.from({ length: totalSteps }).map((_, i) => (
+                  <span
+                    key={i}
+                    className={`h-1.5 w-4 rounded-full transition-colors sm:w-6 ${
+                      i < step ? "bg-v3-profit" : "bg-v3-ink/10"
+                    }`}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </header>
+  );
+}
+
+/* --------------------------------------------------------- in-content meter */
+
+/**
+ * fpv03 (Unit 2): the "STEP 1 OF 3 · YOUR DETAILS" kicker with segment pills
+ * that opens each reskinned screen. Purely presentational — the mock's macro
+ * count (3) is independent of the flow's five URL steps, so callers pass their
+ * own numbers.
+ */
+export function V3StepKicker({
+  current,
+  total,
+  label,
+}: {
+  current: number;
+  total: number;
+  label: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <span className="v3-label text-v3-stone">
+        Step {current} of {total} · {label}
+      </span>
+      <span aria-hidden className="flex gap-1.5">
+        {Array.from({ length: total }).map((_, i) => (
+          <span
+            key={i}
+            className={`h-1.5 w-7 rounded-full ${i < current ? "bg-v3-profit" : "bg-v3-ink/10"}`}
+          />
+        ))}
+      </span>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- includes tiles */
+
+/**
+ * fpv03 (Unit 2): the "Includes:" row — the three apps an enrollment carries,
+ * as small white tiles. Purely presentational. THE GAUNTLET is a styled text
+ * wordmark (no bundled asset exists for it); the other two are shipped marks.
+ * Exported alongside V3IncludesTiles so the U3/U4 screens reuse the same set.
+ */
+export const INCLUDES_TILES: ReadonlyArray<{
+  key: string;
+  art: ReactNode;
+  subcopy: string;
+}> = [
+  {
+    key: "gauntlet",
+    art: (
+      <span className="text-lg font-black leading-none tracking-[0.04em]">
+        <span className="text-[#2f6fd0]">THE</span>
+        <span className="text-[#e8762c]">GAUNTLET</span>
+      </span>
+    ),
+    subcopy: "Gr 3-12 math facts",
+  },
+  {
+    key: "math-academy",
+    art: (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src="/math-academy-long-logo.jpg" alt="Math Academy" className="h-7 w-auto" />
+    ),
+    subcopy: "Learn math 2X-4X faster",
+  },
+  {
+    key: "first-profit",
+    art: <FPLogoLockup variant="tile" />,
+    subcopy: "Start a real business",
+  },
+];
+
+/** The tile row itself, parameterized so later units can carry a different or
+ *  reordered set without forking the layout. */
+export function V3IncludesTiles({
+  tiles,
+}: {
+  tiles: ReadonlyArray<{ key: string; art: ReactNode; subcopy: string }>;
+}) {
+  return (
+    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      {tiles.map((tile) => (
+        <div
+          key={tile.key}
+          className="flex min-h-[92px] flex-col items-center justify-center gap-2 rounded-2xl border border-v3-ink/10 bg-white px-4 py-4 text-center shadow-v3-card"
+        >
+          {tile.art}
+          <span className="v3-label text-v3-stone">{tile.subcopy}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -81,9 +206,14 @@ export function V3BrandHeader({
 
 type ButtonVariant = "profit" | "ghost" | "ink";
 
+// The lifted/offset-shadow treatment is deliberately rolled out on `profit`
+// only for now; `ghost` and `ink` pick up theirs when their screens' fpv03
+// units land.
 const BUTTON_STYLES: Record<ButtonVariant, string> = {
+  // fpv03: the green pill wears a hard offset shadow and lifts on hover. The
+  // shadow drops with the disabled state so a dead button also LOOKS flat.
   profit:
-    "bg-v3-profit text-white hover:bg-v3-profit-dark focus-visible:outline-v3-profit disabled:bg-v3-ink/15 disabled:text-v3-ink/40",
+    "bg-v3-profit text-white shadow-[0_4px_0_0_#0f4227] hover:-translate-y-0.5 hover:bg-v3-profit-dark active:translate-y-0 focus-visible:outline-v3-profit disabled:bg-v3-ink/15 disabled:text-v3-ink/40 disabled:shadow-none disabled:hover:translate-y-0",
   ghost:
     "bg-transparent text-v3-ink ring-1 ring-inset ring-v3-ink/20 hover:bg-v3-ink/5 focus-visible:outline-v3-ink",
   ink: "bg-v3-ink text-white hover:bg-v3-ink/85 focus-visible:outline-v3-ink disabled:opacity-40",
@@ -100,7 +230,7 @@ export function V3Button({
       // min-h-[44px] + the full-width-under-sm default is the tap-target rule,
       // not decoration: a pill that only fits its text is a 32px target on a
       // phone.
-      className={`inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-full px-6 py-3 font-path-display text-base font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed sm:w-auto ${BUTTON_STYLES[variant]} ${className}`}
+      className={`inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-full px-6 py-3 font-path-display text-base font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed sm:w-auto ${BUTTON_STYLES[variant]} ${className}`}
     />
   );
 }
@@ -146,10 +276,10 @@ export function V3Field({
 /** One input treatment across every step. `w-full` everywhere — a fixed-width
  *  input is the classic 390px overflow. */
 export const V3_INPUT_CLASSES =
-  "mt-2 w-full rounded-xl border border-v3-ink/15 bg-white px-4 py-3 font-path-display text-lg text-v3-ink shadow-v3-card outline-none transition-colors placeholder:text-v3-ink/25 focus:border-v3-profit";
+  "mt-2 w-full rounded-2xl border border-v3-ink/10 bg-white px-4 py-3 font-path-display text-lg text-v3-ink shadow-v3-card outline-none transition-colors placeholder:text-v3-ink/25 focus:border-v3-profit";
 
 export const V3_TEXTAREA_CLASSES =
-  "mt-3 w-full resize-y rounded-xl border border-v3-ink/15 bg-white px-4 py-3 text-[15px] leading-relaxed text-v3-ink shadow-v3-card outline-none transition-colors placeholder:text-v3-ink/25 focus:border-v3-profit";
+  "mt-3 w-full resize-y rounded-2xl border border-v3-ink/10 bg-white px-4 py-3 text-[15px] leading-relaxed text-v3-ink shadow-v3-card outline-none transition-colors placeholder:text-v3-ink/25 focus:border-v3-profit";
 
 /* -------------------------------------------------------------- the notice */
 

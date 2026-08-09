@@ -145,6 +145,11 @@
      not worth the request; those lines use the display serif in
      italic instead. */
   --color-v3-ink: #1b1815;
+  /* fpv03 (Unit 2, reverted): stays the original warm prototype cream. The
+     near-neutral hsl(40 30% 99%) tried here desaturated the ground under the
+     not-yet-reskinned steps (StepAddKid/StepStory/StepCover/ArrivalWatch),
+     whose warm bg-v3-paper panels then read as tan patches; the reskinned
+     screens look right on this cream too. */
   --color-v3-cream: #faf7f1;
   --color-v3-paper: #f2ece0;
   --color-v3-profit: #1f7a48;

@@ -32,7 +32,28 @@ import {
   v3StartAction,
   v3VerifyCodeAction,
 } from "./actions";
-import { V3Button, V3Field, V3Notice, V3TextButton, V3_INPUT_CLASSES } from "./v3-ui";
+import {
+  INCLUDES_TILES,
+  STEP_ORDER,
+  V3Button,
+  V3Field,
+  V3IncludesTiles,
+  V3Notice,
+  V3StepKicker,
+  V3TextButton,
+  V3_INPUT_CLASSES,
+} from "./v3-ui";
+
+/** Both phases of this screen (form and code) are the SAME step 1, so they
+ *  share one kicker. The fpv03 mock numbers a 3-step macro flow — that count
+ *  applies once the signup-time cover/story steps retire (tracked for U3/U4);
+ *  until then the kicker's total must agree with the header meter's
+ *  "Step 2 of 5" on the very next screen, so it derives from STEP_ORDER. */
+const PARENT_STEP_KICKER = {
+  current: 1,
+  total: STEP_ORDER.length,
+  label: "Your details",
+} as const;
 
 /** Seconds the resend button stays disabled after a send. Mirrors the server's
  *  CAS cooldown; the server is the enforcement, this is only the affordance. */
@@ -210,8 +231,9 @@ export function StepParent({
   if (phase === "code") {
     return (
       <section className="mx-auto w-full max-w-xl px-5 py-10 sm:py-16">
-        <p className="v3-label text-v3-one20">Check your inbox</p>
-        <h1 className="mt-3 font-path-display text-3xl leading-[1.05] font-black text-v3-ink sm:text-4xl">
+        <V3StepKicker {...PARENT_STEP_KICKER} />
+        <p className="v3-label mt-6 text-v3-one20">Check your inbox</p>
+        <h1 className="mt-3 font-path-display text-4xl leading-[1.05] font-black text-v3-ink sm:text-5xl">
           Type the 6-digit code.
         </h1>
         <p className="mt-4 text-base leading-relaxed text-v3-stone">
@@ -259,15 +281,13 @@ export function StepParent({
 
   return (
     <section className="mx-auto w-full max-w-xl px-5 py-10 sm:py-16">
-      <p className="v3-label text-v3-one20">Welcome from The 120</p>
-      <h1 className="mt-3 font-path-display text-4xl leading-[1.05] font-black text-v3-ink sm:text-5xl">
+      <V3StepKicker {...PARENT_STEP_KICKER} />
+      <p className="v3-label mt-6 text-v3-one20">Welcome from The 120</p>
+      <h1 className="mt-3 font-path-display text-5xl leading-[1.02] font-black text-v3-ink sm:text-6xl">
         Enrollment
       </h1>
-      <p className="mt-4 max-w-md text-base leading-relaxed text-v3-stone">
-        The 120 offers academic programs in learning math at 2X-4X normal speed and First
-        Profit, a business program where your kid earns their first $1,000 over a 5 phase,
-        25 step process.
-      </p>
+      <p className="mt-6 text-base leading-relaxed text-v3-stone">Includes:</p>
+      <V3IncludesTiles tiles={INCLUDES_TILES} />
 
       <form
         onSubmit={(e) => {
@@ -323,8 +343,8 @@ export function StepParent({
           />
         </V3Field>
 
-        <p className="rounded-2xl border border-v3-ink/10 bg-white/70 p-4 text-sm leading-relaxed text-v3-stone">
-          Please sign up for the Admissions Portal and start the enrollment process.
+        <p className="rounded-2xl border border-v3-ink/10 bg-white p-4 text-sm leading-relaxed text-v3-stone shadow-v3-card">
+          Sign up to get your kid started on their business and their custom graphic novel.
         </p>
 
         {notice && <V3Notice tone={noticeTone}>{notice}</V3Notice>}

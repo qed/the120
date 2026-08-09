@@ -28,6 +28,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
@@ -41,7 +42,7 @@ import { StepAddKid } from "./StepAddKid";
 import { StepCover } from "./StepCover";
 import { StepStory } from "./StepStory";
 import { StepAccountReady } from "./StepAccountReady";
-import { V3BrandHeader } from "./v3-ui";
+import { STEP_ORDER, V3BrandHeader } from "./v3-ui";
 
 const STEP_LABELS: Record<V3Step, string> = {
   parent: "Your details",
@@ -50,8 +51,6 @@ const STEP_LABELS: Record<V3Step, string> = {
   story: "Page 1",
   ready: "Account ready",
 };
-
-const STEP_ORDER: V3Step[] = ["parent", "kid", "cover", "story", "ready"];
 
 /**
  * NOTE (review FIX 9a): this shell deliberately takes NO `existingKids` prop.
@@ -125,6 +124,28 @@ export function V3Flow({
         step={STEP_ORDER.indexOf(step) + 1}
         totalSteps={STEP_ORDER.length}
         stepLabel={STEP_LABELS[step]}
+        // fpv03 (Unit 2): the reskinned parent step carries its own in-content
+        // progress kicker, so the header shows the mock's ACCOUNT chip instead
+        // of doubling the meter. A signed-in parent gets the same /dashboard
+        // destination the escape link below already offers; signed-out it is a
+        // static label, because there is no account menu on this screen today.
+        end={
+          step === "parent" ? (
+            parentEmail ? (
+              <Link
+                href="/dashboard"
+                className="v3-label inline-flex min-h-[44px] items-center font-bold text-v3-ink hover:text-v3-profit"
+              >
+                Account
+              </Link>
+            ) : (
+              // Signed out there is nothing to open, so the chip must READ
+              // non-interactive too: lighter ink, no bold — only the signed-in
+              // Link gets the tappable treatment.
+              <span className="v3-label text-v3-ink/50">Account</span>
+            )
+          ) : undefined
+        }
       />
 
       <main>

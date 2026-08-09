@@ -44,6 +44,7 @@ import {
 } from "@/app/lib/fp/rate-limit-store";
 import {
   V3_ONBOARDING_RATE_LIMIT,
+  V3_SITE_PREVIEW_RATE_LIMIT,
   V3_START_IP_RATE_LIMIT,
   V3_START_RATE_LIMIT,
   V3_VERIFY_IP_RATE_LIMIT,
@@ -72,7 +73,12 @@ import {
   type V3SaveResult,
 } from "@/app/lib/v3-signup/v3-onboarding-core";
 import {
+  previewKidSiteHandle,
+  type SitePreviewResult,
+} from "@/app/lib/v3-signup/site-preview-core";
+import {
   deriveV3OnboardingRateLimitKey,
+  deriveV3SitePreviewRateLimitKey,
   deriveV3StartRateLimitKeys,
   deriveV3VerifyRateLimitKeys,
   formatVerificationCode,
@@ -397,6 +403,66 @@ export async function v3AddKidAction(input: unknown): Promise<V3AddKidResult> {
     return result;
   } catch (err) {
     console.error(`[fp/v3-onboarding] add-kid threw: ${err instanceof Error ? err.message : String(err)}`);
+    return { kind: "failed" };
+  }
+}
+
+/**
+ * The add-kid step's WEBSITE PREVIEW (fpv03 U3 amendment, founder request):
+ * given the typed kid name, answer the ACTUAL address auto-provisioning would
+ * grant — the shared allocator derivation plus a duplicate check against
+ * fp_public_sites (site-preview-core.ts owns the decision and documents the
+ * enumeration-oracle posture; the derived-only input, this session gate, and
+ * the per-parent budget are the mitigations).
+ *
+ * Read-only and advisory: nothing is reserved, and the client treats every
+ * non-`ok` kind as "fall back to the local predicate preview" — the preview
+ * must never block typing or submit.
+ *
+ * Refund rule: only `outage` (our failed read) hands the strike back.
+ * `bad_request` and `unusable` are caller-shaped input and keep theirs — the
+ * refunded-strike-refunds-the-attacker learning, same as every action here.
+ */
+export async function previewKidSiteAction(
+  input: unknown
+): Promise<SitePreviewResult | { kind: "failed" }> {
+  try {
+    const ctx = await parentContext();
+    // No session: refused before the rate limiter and before any client is
+    // constructed — an unauthenticated flood must not exhaust a real parent's
+    // budget (the same ordering every session-gated action here uses).
+    if (!ctx) return { kind: "failed" };
+    const key = deriveV3SitePreviewRateLimitKey(ctx.parentId);
+    if (!checkAndRecordRateLimit(key, V3_SITE_PREVIEW_RATE_LIMIT).allowed) {
+      return { kind: "failed" };
+    }
+    const result = await previewKidSiteHandle(
+      {
+        loadTakenHandles: async (candidates) => {
+          // supabaseAdmin() is justified as everywhere in this file:
+          // fp_public_sites is RLS-on service-role-only (the site routes read
+          // it the same way). The only inputs are the server-derived candidate
+          // handles — no client string reaches the filter — and what crosses
+          // back is the taken subset of that ladder, never row data.
+          const res = await supabaseAdmin()
+            .from("fp_public_sites")
+            .select("handle")
+            .in("handle", candidates as string[]);
+          if (res.error) {
+            console.error(`[fp/v3-onboarding] site-preview taken-check failed: ${res.error.message}`);
+            return null;
+          }
+          return new Set(
+            ((res.data ?? []) as { handle?: unknown }[]).map((r) => String(r.handle))
+          );
+        },
+      },
+      input
+    );
+    if (result.kind === "outage") releaseRateLimitEvent(key);
+    return result;
+  } catch (err) {
+    console.error(`[fp/v3-onboarding] site-preview threw: ${err instanceof Error ? err.message : String(err)}`);
     return { kind: "failed" };
   }
 }

@@ -240,12 +240,14 @@ export function StepAccountReady({
     <section className="mx-auto w-full max-w-5xl px-5 py-10 sm:py-16">
       <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-12">
         <div className="min-w-0">
-          <p className="v3-label text-v3-profit">Intro page + Page 1 · Done</p>
+          {/* fpv03 U3 amendment (founder): the "Intro page + Page 1 · Done"
+              kicker was removed, and the heading no longer claims pages that
+              signup stopped creating when the cover/story steps retired. */}
           <h1 className="mt-3 font-path-display text-3xl leading-[1.1] font-black text-v3-ink sm:text-[40px]">
-            {account.firstName}&rsquo;s journey has its first two pages.
+            {account.firstName}&rsquo;s journey is ready to begin.
           </h1>
           <p className="mt-4 text-base leading-relaxed text-v3-stone">
-            Behind the scenes we also created an account, so {account.firstName} can keep building.
+            We created {account.firstName}&rsquo;s account, so the building can start.
           </p>
 
           <div className="mt-8 rounded-2xl border border-v3-ink/10 bg-white p-5 sm:p-6">

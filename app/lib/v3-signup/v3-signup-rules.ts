@@ -80,6 +80,7 @@ import { escapeHtml } from "@/app/crm/lib/library-rules";
 import {
   V3_KID_RESET_NAMESPACE,
   V3_ONBOARDING_NAMESPACE,
+  V3_SITE_PREVIEW_NAMESPACE,
   V3_START_NAMESPACE,
   V3_START_IP_NAMESPACE,
   V3_VERIFY_NAMESPACE,
@@ -270,6 +271,17 @@ export function deriveV3VerifyRateLimitKeys(
  */
 export function deriveV3OnboardingRateLimitKey(parentId: string): string {
   return `${V3_ONBOARDING_NAMESPACE}:${encodeURIComponent(parentId)}`;
+}
+
+/**
+ * The add-kid website preview's budget key (fpv03 U3 amendment). Parent-id
+ * keyed for the same reason as the onboarding key above — the session already
+ * proved who the caller is, and the looping this bounds is one account's —
+ * in its OWN namespace so a keystroke stream can never spend the add/provision
+ * budget (see V3_SITE_PREVIEW_RATE_LIMIT's sizing note).
+ */
+export function deriveV3SitePreviewRateLimitKey(parentId: string): string {
+  return `${V3_SITE_PREVIEW_NAMESPACE}:${encodeURIComponent(parentId)}`;
 }
 
 /**

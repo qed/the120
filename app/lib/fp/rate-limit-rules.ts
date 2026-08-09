@@ -238,6 +238,29 @@ export const V3_KID_RESET_NAMESPACE = "fp-v3-kid-reset";
 
 export const V3_KID_RESET_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 20 };
 
+/* ─────────────── New User Flow v3 site-address preview (fpv03 U3 amendment) ── */
+
+/**
+ * The add-kid step's website preview (`previewKidSiteAction`): a read-only
+ * derived-handle lookup against fp_public_sites. Keyed on the PARENT ID from
+ * the cookie session, like the onboarding budget — the caller is authenticated
+ * by construction, and the parent is the account whose looping this bounds.
+ *
+ * Its OWN namespace rather than `fp-v3-onboarding`: the preview fires on a
+ * debounced keystroke stream, and a parent slowly typing three kids' names
+ * must never spend the budget their add/provision calls need (nor vice versa).
+ *
+ * Sized for the real caller: the 400ms debounce means a fully typed name costs
+ * a call or two, so 60/15min covers a family renaming freely while staying far
+ * below what walking a name list needs. The load-bearing oracle mitigations
+ * are structural, not volumetric: the parent gate, and the fact that the input
+ * is a NAME whose probed handles are derived server-side with only the picked
+ * handle answered (site-preview-core.ts documents the posture).
+ */
+export const V3_SITE_PREVIEW_NAMESPACE = "fp-v3-site-preview";
+
+export const V3_SITE_PREVIEW_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 60 };
+
 /** Events still inside the window (future-stamped ones included). Non-mutating. */
 export function pruneEvents(events: readonly number[], now: number, windowMs: number): number[] {
   return events.filter((t) => now - t < windowMs);

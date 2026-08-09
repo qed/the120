@@ -19,8 +19,8 @@
  * with the explicit override — the only way past.
  */
 
-import { useState, useTransition } from "react";
-import { v3AddKidAction, v3EditKidAction } from "./actions";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { previewKidSiteAction, v3AddKidAction, v3EditKidAction } from "./actions";
 import { splitKidName, type ExistingKid } from "@/app/lib/v3-signup/flow-rules";
 // The SAME pure predicates the real handle claim enforces server-side — pure
 // module, safe in a client bundle. The preview must never advertise an address
@@ -45,12 +45,14 @@ const KID_STEP_KICKER = {
 } as const;
 
 /**
- * The read-only website preview under KID'S WEBSITE (fpv03 S04). There is no
- * website/handle field in this flow's backend — the real handle is claimed
- * later, inside First Profit — so this renders a PREVIEW from the kid's first
- * name and nothing else: lowercase, letters and digits only, the same
- * first-token split the username generator uses. Presentational only; nothing
- * here reaches the wire.
+ * The FALLBACK website preview under KID'S WEBSITE (fpv03 S04, demoted by the
+ * U3 amendment): the AUTHORITATIVE preview is now `previewKidSiteAction` —
+ * the shared allocator derivation plus the duplicate ladder against real
+ * fp_public_sites rows, debounced below — so what renders is the actual
+ * address the kid will get. THIS function remains only as the degrade path
+ * (action pending, refused, or failed): a client-side derivation from the
+ * kid's first name, lowercase letters and digits, the same first-token split
+ * the username generator uses. Nothing from THIS function reaches the wire.
  *
  * The derived slug is screened through the SAME pure predicates the real claim
  * enforces (fpv03 U3 review, adversarial): a kid named Admin (reserved) or a
@@ -67,6 +69,9 @@ function sitePreviewSlug(fullName: string): string {
   if (slug.length === 0 || isReservedHandle(slug) || containsBlockedTerm(slug)) return "";
   return slug;
 }
+
+/** One fully typed name should cost roughly one action call. */
+const PREVIEW_DEBOUNCE_MS = 400;
 
 export function StepAddKid({
   consentPolicy,
@@ -102,6 +107,49 @@ export function StepAddKid({
   const [notice, setNotice] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<ExistingKid | null>(null);
   const [pending, startTransition] = useTransition();
+
+  // The AUTHORITATIVE preview answer (fpv03 U3 amendment, founder request):
+  // the debounced server verdict carrying the real allocator's rules —
+  // normalization, min length, charset, reserved, blocklist, AND the
+  // duplicate ladder (mary → mary2, the claim surface's own variants). The
+  // answer remembers WHICH name it was for, so a keystroke instantly demotes
+  // a stale answer to the local fallback instead of showing the previous
+  // name's address. Advisory only: it never blocks typing or submit, and no
+  // failure of it is surfaced.
+  const [preview, setPreview] = useState<{ forName: string; handle: string } | null>(null);
+  const [previewCallsInFlight, setPreviewCallsInFlight] = useState(0);
+  // Monotonic sequence so a slow response for an OLDER name can never
+  // overwrite the answer for the current one.
+  const previewSeq = useRef(0);
+
+  useEffect(() => {
+    const seq = ++previewSeq.current;
+    // Nothing typed: placeholder, and no wire call. (State resets are handled
+    // by the forName check at render time, not by a setState here.)
+    if (splitKidName(fullName).firstName === "") return;
+    const timer = setTimeout(() => {
+      void (async () => {
+        if (previewSeq.current !== seq) return;
+        setPreviewCallsInFlight((n) => n + 1);
+        try {
+          const res = await previewKidSiteAction({ fullName });
+          if (previewSeq.current === seq) {
+            setPreview(res.kind === "ok" ? { forName: fullName, handle: res.handle } : null);
+          }
+        } catch {
+          // Advisory only — the local predicate preview stands in.
+        } finally {
+          setPreviewCallsInFlight((n) => n - 1);
+        }
+      })();
+    }, PREVIEW_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [fullName]);
+
+  // What the address line renders: the server answer for THIS name, else the
+  // local fallback below. The subtle dim marks an in-flight refresh.
+  const serverHandle = preview !== null && preview.forName === fullName ? preview.handle : null;
+  const previewPending = previewCallsInFlight > 0;
 
   const submit = (differentChild: boolean) => {
     setNotice(null);
@@ -205,20 +253,27 @@ export function StepAddKid({
           />
         </V3Field>
 
-        {/* fpv03 S04: the KID'S WEBSITE preview. READ-ONLY and derived from the
-            typed name — this flow has no handle field, and the real address is
-            claimed inside First Profit later, so nothing here reaches the wire.
-            The real domain (firstprofit.school), never the mock's placeholder. */}
+        {/* fpv03 S04 + U3 amendment: the KID'S WEBSITE preview. READ-ONLY;
+            there is still no handle field — the server answer is the shared
+            allocator run over the typed name (previewKidSiteAction), so what
+            shows is the actual address provisioning would grant. The real
+            domain (firstprofit.school), never the mock's placeholder. */}
         <V3Field id="v3-kid-site" label="Kid's website">
           <p
             id="v3-kid-site"
             className={`${V3_INPUT_CLASSES} cursor-default select-none font-path-mono text-base text-v3-stone`}
           >
             firstprofit.school/
-            {/* Neutral placeholder when the name yields no showable slug —
-                empty, reserved, or blocklisted — never a specific address the
-                claim would refuse. */}
-            <span className="text-v3-ink">{sitePreviewSlug(fullName) || "your-kid"}</span>
+            {/* Server handle first; the local predicate slug while pending or
+                on failure; the neutral placeholder when the name yields no
+                showable slug (empty, reserved, blocklisted) — never a specific
+                address the claim would refuse. The pending dim is the subtle
+                loading state: typing is never blocked on it. */}
+            <span
+              className={`text-v3-ink transition-opacity ${previewPending ? "opacity-60" : ""}`}
+            >
+              {serverHandle ?? (sitePreviewSlug(fullName) || "your-kid")}
+            </span>
           </p>
         </V3Field>
 
@@ -257,7 +312,6 @@ export function StepAddKid({
               />
               <span className="text-sm leading-relaxed text-v3-stone">
                 The 120 may use a photo of my kid, if I provide one, in their story artwork.
-                Optional. You can revoke this at any time by contacting The 120.
               </span>
             </label>
             <button

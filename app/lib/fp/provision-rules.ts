@@ -266,6 +266,10 @@ export type SignInCandidate = {
   childId: string;
   familyId: string;
   firstName: string;
+  /** `children.last_name` (text; '' = unset). Only the FP login path selects it —
+   *  absent/non-string narrows to '' (unset), never a dropped row. Feeds the
+   *  book-cover "By: First Last" byline; NEVER logged. */
+  lastName: string;
   username: string | null;
   /** `children.fp_username_legacy` (fpv03 U3c) — the pre-migration username
    *  kept as a login ALIAS. NULL for every un-migrated child; absent/non-string
@@ -336,6 +340,12 @@ export function parseCandidateRow(row: {
   if (child === null || typeof child !== "object") return null;
   const firstName = (child as { first_name?: unknown }).first_name;
   if (typeof firstName !== "string") return null;
+  // last_name (book-cover byline): OPTIONAL on the row — only the FP login path
+  // selects it (the /fp name path does not). Malformed/absent narrows to the
+  // unset sentinel (''), NEVER a dropped row: a byline is decoration and must
+  // not be able to cost a child their login.
+  const rawLastName = (child as { last_name?: unknown }).last_name;
+  const lastName = typeof rawLastName === "string" ? rawLastName : "";
   // fp_username is OPTIONAL on the row: a child not yet backfilled (U12) has NULL,
   // and the /fp name-path select does not request the column at all. A missing or
   // non-string value narrows to null (an unmatchable username), NEVER a dropped
@@ -379,6 +389,7 @@ export function parseCandidateRow(row: {
     childId: row.child_id,
     familyId: row.family_id,
     firstName,
+    lastName,
     username,
     usernameLegacy,
     birthYear,

@@ -239,7 +239,7 @@ export async function exchangeHandoffCode(
   const child = await db
     .from("children")
     .select(
-      "id, first_name, birth_year, grade, fp_cover_status, fp_cover_blob_key, fp_cover_data_url"
+      "id, first_name, last_name, birth_year, grade, fp_cover_status, fp_cover_blob_key, fp_cover_data_url"
     )
     .eq("id", childId)
     .maybeSingle();
@@ -310,6 +310,7 @@ export async function exchangeHandoffCode(
   }
 
   const firstName = typeof child.data.first_name === "string" ? child.data.first_name : "";
+  const lastName = typeof child.data.last_name === "string" ? child.data.last_name : "";
   const ensure = deps.ensureProfile ?? ensurePlayerProfile;
   const profile: EnsureProfileResult = await ensure(db, { userId, childId, firstName });
   if (!profile.ok) {
@@ -328,7 +329,7 @@ export async function exchangeHandoffCode(
     body: {
       access_token: minted.accessToken,
       refresh_token: minted.refreshToken,
-      profile: { handle: profile.handle, firstName },
+      profile: { handle: profile.handle, firstName, lastName },
       // Derived AT READ TIME from birth_year, falling back to the stored grade —
       // the identical call the login route makes, so the two responses cannot
       // drift. NEVER logged (child data rides the never-log rule).

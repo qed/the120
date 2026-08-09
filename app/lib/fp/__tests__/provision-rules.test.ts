@@ -245,6 +245,7 @@ describe("parseCandidateRow — fail-closed narrowing of the sign-in candidate j
       childId: "child-1",
       familyId: "fam-1",
       firstName: "Maya",
+      lastName: "",
       username: "maya",
       usernameLegacy: null,
       birthYear: "",
@@ -317,6 +318,24 @@ describe("parseCandidateRow — fail-closed narrowing of the sign-in candidate j
       expect(parsed).not.toBeNull();
       expect(parsed?.coverDataUrl).toBeNull();
     }
+  });
+
+  it("carries last_name when the join selects it, coercing malformed/absent to \"\" (Unit 7 byline)", () => {
+    expect(
+      parseCandidateRow({
+        ...valid,
+        children: { first_name: "Maya", fp_username: "maya", last_name: "Kuperman" },
+      })?.lastName
+    ).toBe("Kuperman");
+    // A byline is decoration: a malformed or absent last_name narrows to the
+    // unset sentinel, never dropping a real student from the candidate set.
+    expect(
+      parseCandidateRow({
+        ...valid,
+        children: { first_name: "Maya", fp_username: "maya", last_name: 42 },
+      })?.lastName
+    ).toBe("");
+    expect(parseCandidateRow(valid)?.lastName).toBe("");
   });
 
   it("carries birth_year and grade when the join selects them (Unit 3 read path)", () => {

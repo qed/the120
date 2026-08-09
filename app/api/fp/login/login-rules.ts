@@ -126,7 +126,7 @@ export function classifyIdentifier(identifier: string): IdentifierClassification
 export type FpSessionBody = {
   access_token: string;
   refresh_token: string;
-  profile: { handle: string; firstName: string };
+  profile: { handle: string; firstName: string; lastName: string };
   grade: number | null;
   /**
    * THE COMIC COVER (v3 Unit 7; R12) — OPTIONAL, and omitted rather than
@@ -194,6 +194,7 @@ const FP_SESSION_BODY_OPTIONAL_SHAPE: Record<OptionalBodyKeys<FpSessionBody>, tr
 const FP_SESSION_PROFILE_SHAPE: Record<keyof FpSessionBody["profile"], true> = {
   handle: true,
   firstName: true,
+  lastName: true,
 };
 
 /** Always present in a 200 from EITHER door. */

@@ -215,7 +215,7 @@ export async function POST(req: Request): Promise<Response> {
     const res = await admin
       .from("path_student_profiles")
       .select(
-        "id, user_id, child_id, family_id, children!inner(first_name, fp_username, fp_username_legacy, birth_year, grade, fp_cover_status, fp_cover_blob_key, fp_cover_data_url)"
+        "id, user_id, child_id, family_id, children!inner(first_name, last_name, fp_username, fp_username_legacy, birth_year, grade, fp_cover_status, fp_cover_blob_key, fp_cover_data_url)"
       )
       .order("created_at", { ascending: true });
     if (res.error) {
@@ -408,7 +408,11 @@ export async function POST(req: Request): Promise<Response> {
       const body: FpSessionBody = {
         access_token: session.access_token,
         refresh_token: session.refresh_token,
-        profile: { handle: profile.handle, firstName: candidate.firstName },
+        profile: {
+          handle: profile.handle,
+          firstName: candidate.firstName,
+          lastName: candidate.lastName,
+        },
         // Derived AT READ TIME (Unit 3; R9): birth_year first (never stale
         // across school years), stored children.grade as the fallback, null
         // when neither. UNCLAMPED even outside 3-12 — display code decides

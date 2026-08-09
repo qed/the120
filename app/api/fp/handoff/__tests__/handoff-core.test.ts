@@ -61,6 +61,7 @@ function seedKid(
   cfg: {
     parentId?: string;
     firstName?: string;
+    lastName?: string;
     grade?: number;
     coverStatus?: string | null;
     coverBlobKey?: string | null;
@@ -73,6 +74,7 @@ function seedKid(
     id: childId,
     parent_id: cfg.parentId ?? PARENT,
     first_name: cfg.firstName ?? "Remi",
+    last_name: cfg.lastName ?? "Newal",
     birth_year: "",
     grade: cfg.grade ?? 5,
     fp_cover_status: cfg.coverStatus ?? null,
@@ -240,7 +242,7 @@ describe("mint — the session authorizes, the child id does not", () => {
 describe("exchange — the code is the only thing that authorizes", () => {
   it("returns the login-shaped token pair and marks the row used", async () => {
     const h = harness();
-    const kid = seedKid(h.store, { firstName: "Remi", grade: 5 });
+    const kid = seedKid(h.store, { firstName: "Remi", lastName: "Newal", grade: 5 });
     const minted = await mintHandoffCode(h.mintDeps, { childId: kid.childId }, { parentId: PARENT }, FALLBACK);
     expect(minted.kind).toBe("minted");
 
@@ -268,6 +270,9 @@ describe("exchange — the code is the only thing that authorizes", () => {
     expect(res.body.access_token).toBe(`access-${kid.childId}`);
     expect(res.body.refresh_token).toBe(`refresh-${kid.childId}`);
     expect(res.body.profile.firstName).toBe("Remi");
+    // The book-cover byline (v3 Unit 7): last name rides the same profile the
+    // login door returns, so "By: First Last" renders identically either way.
+    expect(res.body.profile.lastName).toBe("Newal");
     expect(typeof res.body.profile.handle).toBe("string");
     expect(res.body.grade).toBe(5);
 
@@ -282,6 +287,21 @@ describe("exchange — the code is the only thing that authorizes", () => {
     // child's auth user, which is what makes the session playable.
     expect(h.store.fp_player_profiles).toHaveLength(1);
     expect(h.store.fp_player_profiles[0].child_id).toBe(kid.childId);
+  });
+
+  it("coerces an empty last_name to \"\" (first-name-only byline degrades cleanly)", async () => {
+    const h = harness();
+    const kid = seedKid(h.store, { firstName: "Remi", lastName: "" });
+    await mintHandoffCode(h.mintDeps, { childId: kid.childId }, { parentId: PARENT }, FALLBACK);
+    const res = await exchangeHandoffCode(
+      h.exchangeDeps,
+      { code: h.codes[0] },
+      { ip: "203.0.113.9", ua: "vitest" }
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.body.profile.firstName).toBe("Remi");
+    expect(res.body.profile.lastName).toBe("");
   });
 
   /* ────────────── the comic cover, in LOCKSTEP with /api/fp/login ────────── */

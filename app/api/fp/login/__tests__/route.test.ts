@@ -75,6 +75,7 @@ const STORED_COVER = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
 function seedChild(
   fpUsername: string | null,
   roster?: {
+    lastName?: string;
     usernameLegacy?: string | null;
     birthYear?: string;
     grade?: number | null;
@@ -93,6 +94,7 @@ function seedChild(
         created_at: "2026-01-01T00:00:00Z",
         children: {
           first_name: "Alex",
+          last_name: roster?.lastName ?? "Kuperman",
           fp_username: fpUsername,
           fp_username_legacy: roster?.usernameLegacy ?? null,
           birth_year: roster?.birthYear ?? "",
@@ -151,6 +153,10 @@ describe("POST /api/fp/login — username-only resolution (Slice B U13)", () => 
     const body = await res.json();
     expect(body.access_token).toBe("access-abc");
     expect(body.refresh_token).toBe("refresh-xyz");
+    // The profile carries first AND last name (v3 Unit 7 book-cover byline),
+    // the same shape the handoff and login-code doors return.
+    expect(body.profile.firstName).toBe("Alex");
+    expect(body.profile.lastName).toBe("Kuperman");
     // Signed in against the UNCHANGED internal `.invalid` identity derived from
     // the child id — never the username, never a deliverable address.
     expect(authRef.calls).toHaveLength(1);
@@ -158,6 +164,15 @@ describe("POST /api/fp/login — username-only resolution (Slice B U13)", () => 
       email: INTERNAL_EMAIL,
       password: "correct horse tulip",
     });
+  });
+
+  it("coerces an empty last_name to \"\" (first-name-only byline degrades cleanly)", async () => {
+    seedChild("alex", { lastName: "" });
+    const res = await post({ identifier: "alex", password: "correct horse tulip" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.profile.firstName).toBe("Alex");
+    expect(body.profile.lastName).toBe("");
   });
 
   it("resolves case-insensitively — `Alex` matches the stored lowercase `alex`", async () => {

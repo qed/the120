@@ -38,7 +38,12 @@ type Kid = { childId: string; userId: string; firstName: string };
 
 function seedKid(
   store: Store,
-  cfg: { username?: string | null; usernameLegacy?: string | null; firstName?: string } = {}
+  cfg: {
+    username?: string | null;
+    usernameLegacy?: string | null;
+    firstName?: string;
+    lastName?: string;
+  } = {}
 ): Kid {
   const childId = randomUUID();
   const userId = randomUUID();
@@ -46,6 +51,7 @@ function seedKid(
     id: childId,
     parent_id: PARENT,
     first_name: cfg.firstName ?? "Remi",
+    last_name: cfg.lastName ?? "Newal",
     fp_username: cfg.username === undefined ? "remi.newal@firstprofit.school" : cfg.username,
     fp_username_legacy: cfg.usernameLegacy ?? null,
     birth_year: "",
@@ -320,6 +326,9 @@ describe("redeem — the grant", () => {
     expect(res.body.access_token).toBe(`access-${kid.childId}`);
     expect(res.body.refresh_token).toBe(`refresh-${kid.childId}`);
     expect(res.body.profile.firstName).toBe("Remi");
+    // The book-cover byline (v3 Unit 7): last name rides the same profile the
+    // other doors return, so "By: First Last" renders identically everywhere.
+    expect(res.body.profile.lastName).toBe("Newal");
     // Shape parity with the shared contract, derived from the type's own keys.
     for (const key of FP_SESSION_BODY_REQUIRED_KEYS) {
       expect(Object.keys(res.body)).toContain(key);
@@ -330,6 +339,23 @@ describe("redeem — the grant", () => {
     expect(row.consumed_at).toBe(new Date(NOW).toISOString());
     expect(row.consumed_ip).toBe(ctx.ip);
     expect(row.consumed_ua).toBe(ctx.ua);
+  });
+
+  it("coerces an empty last_name to \"\" (first-name-only byline degrades cleanly)", async () => {
+    const h = harness();
+    seedKid(h.store, { lastName: "" });
+    const code = await mintFor(h, "remi.newal@firstprofit.school");
+
+    const res = await redeemLoginCode(
+      h.redeemDeps,
+      { username: "remi.newal@firstprofit.school", code },
+      ctx
+    );
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.body.profile.firstName).toBe("Remi");
+    expect(res.body.profile.lastName).toBe("");
   });
 
   it("the kid can type the code with spaces and fullwidth digits (normalization)", async () => {

@@ -70,6 +70,19 @@ export function V3BrandHeader({
   return (
     <header className="sticky top-0 z-20 w-full border-b border-v3-ink/10 bg-white/95 backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center gap-2.5 px-4 py-3 sm:px-5 sm:py-3.5">
+        {/* fpv03 U2 amendment: the 120 → First Profit connection, restored.
+            The 120 chip and the arrow are the pre-U2 header's exact treatment
+            (git: the head of this file at U2's parent commit); what changed is
+            that the arrow now points at the shared FPLogoLockup instead of a
+            forked bars-and-wordmark copy, and the pair is visible at every
+            width — at 390px the row still clears the step meter/end slot
+            because the lockup carries no fixed widths. */}
+        <span className="flex h-7 w-7 flex-none items-center justify-center rounded bg-v3-one20 font-path-mono text-[11px] font-bold text-white">
+          120
+        </span>
+        <span aria-hidden className="flex-none text-v3-ink/25">
+          →
+        </span>
         <FPLogoLockup variant="header" />
 
         <div className="ml-auto flex min-w-0 items-center gap-2 sm:gap-3">

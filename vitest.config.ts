@@ -27,6 +27,10 @@ export default defineConfig({
       // remembered: app/lib/__tests__/vitest-include-coverage.test.ts fails if
       // any test file in the repo is left outside this list.
       "app/staff/**/__tests__/**/*.test.{ts,tsx}",
+      // The v3 front door's own decision helpers (fpv03 U2 amendment: the
+      // completed-parent redirect). Added in the same commit as the first test
+      // under app/start, per the allowlist tripwire's rule.
+      "app/start/**/__tests__/**/*.test.{ts,tsx}",
       // Machine-bound scripts (R28 erase-entrypoint Unit). Added in the same
       // commit as the first scripts/ test so the allowlist tripwire
       // (app/lib/__tests__/vitest-include-coverage.test.ts) stays green.

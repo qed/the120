@@ -322,28 +322,38 @@ describe("children-core relies on RLS, not a hand-written scope check", () => {
 describe("/start and a signed-in visitor (v3 Unit 9: the v2 self-redirect is retired)", () => {
   const code = stripComments(read("../../start/page.tsx"));
 
-  /* ⚠ JUDGMENT CALL, stated rather than buried. The v2 page answered a
-   * signed-in visitor with `resolveReentry` + `redirect()`, because v2's
-   * `/start` was an EMAIL CAPTURE form and re-capturing under a different
-   * address would have swapped a family's own session. v3's `/start` is not a
-   * capture form: it is the five-step flow, and a signed-in parent standing on
-   * it is the ordinary add-another-kid case. Porting the redirect would have
-   * been actively harmful — `resolveReentry` answers `dashboard` for a family
-   * that already has a First Profit child, which is exactly the family walking
-   * the add-a-kid loop, and V3_ADD_KID_HREF points AT this page. The bounce
-   * would have made the loop unenterable.
+  /* ⚠ JUDGMENT CALL, stated rather than buried — and AMENDED (fpv03 U2).
+   * The v2 page answered every signed-in visitor with `resolveReentry` +
+   * `redirect()`; v3 Unit 9 removed that wholesale because the blanket bounce
+   * would have made the add-a-kid loop unenterable — `V3_ADD_KID_HREF` points
+   * AT this page. This block originally pinned "no redirect at all".
    *
-   * What replaces it is the flow's own resolver: `resolveV3Step` clamps the
-   * URL against server facts, so a signed-in family lands where they actually
-   * are instead of where a URL claims. */
+   * The founder's live test then found the other failure: a fully-onboarded
+   * parent visiting a BARE `/start` watches their kid's journey replayed. The
+   * fpv03 U2 amendment reintroduces a redirect, but a NARROW one, decided by
+   * the pure `shouldRedirectToDashboard` (app/start/start-redirect-rules.ts):
+   * completed parents only (>=1 provisioned child, or the active draft
+   * already minted one), and NEVER when a valid explicit `?step=` is present
+   * — which is exactly the form every deliberate re-entry link takes
+   * (`/start?step=kid`). So the property this block has always protected —
+   * the add-a-kid loop stays enterable — survives; it is now pinned
+   * behaviorally in app/start/__tests__/start-redirect-rules.test.ts.
+   *
+   * What handles the re-entered flow is still the resolver: `resolveV3Step`
+   * clamps the URL against server facts, so a signed-in family lands where
+   * they actually are instead of where a URL claims. */
 
   it("reads the session and resolves the step from server facts, not from the URL alone", () => {
     expect(code).toMatch(/getUser\(\)/);
     expect(code).toMatch(/resolveV3Step\(/);
   });
 
-  it("does not bounce a signed-in family away from the flow they were sent to", () => {
-    // No redirect at all on this page — the add-a-kid destination IS here.
-    expect(code).not.toMatch(/\bredirect\(/);
+  it("bounces only through the pure completed-parent decision, never unconditionally", () => {
+    // The ONLY redirect on this page is the amendment's, and it is gated by
+    // shouldRedirectToDashboard — which answers false for any valid ?step=,
+    // keeping the add-a-kid destination reachable.
+    expect(code).toMatch(/shouldRedirectToDashboard\(/);
+    expect(code).toMatch(/redirect\("\/dashboard"\)/);
+    expect((code.match(/\bredirect\(/g) ?? []).length).toBe(1);
   });
 });

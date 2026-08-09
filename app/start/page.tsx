@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { emitFunnelEvent } from "@/app/lib/funnel/events";
 import { readCtaSource } from "@/app/lib/cta-source";
 import { supabaseServer } from "@/app/lib/supabase/server";
@@ -7,6 +8,7 @@ import { FP_CONSENT_POLICY, currentPolicyHash } from "@/app/api/fp/signup/consen
 import { loadV3OnboardingState } from "@/app/lib/v3-signup/v3-onboarding-core";
 import { resolveV3Step } from "@/app/lib/v3-signup/flow-rules";
 import { isCoverAiLive } from "@/app/api/fp/cover/cover-rules";
+import { shouldRedirectToDashboard } from "./start-redirect-rules";
 import { V3Flow } from "./V3Flow";
 
 /**
@@ -91,6 +93,29 @@ export default async function V3StartPage({
       };
 
   const rawStep = Array.isArray(params.step) ? params.step[0] : params.step;
+
+  // ── fpv03 U2 amendment: completed parents skip the funnel ──
+  // A signed-in parent whose onboarding is effectively complete (>=1
+  // provisioned child, or the active draft already minted one) is sent to the
+  // dashboard rather than shown their kid's journey replayed. An explicit
+  // valid `?step=` suppresses this — the dashboard's own add-kid CTA is
+  // `/start?step=kid` (V3_ADD_KID_HREF) — and a mid-flow parent never matches.
+  // Decision logic is pure (see start-redirect-rules.ts); only the redirect
+  // itself lives here. It sits BELOW the start_view emit on purpose: the
+  // emit-before-everything-conditional property is pinned by
+  // app/lib/__tests__/funnel-event-rules.test.ts (emit precedes the
+  // supabaseServer() read), so a redirected request still lands in the
+  // funnel denominator.
+  if (
+    shouldRedirectToDashboard({
+      parentVerified,
+      rawStep: rawStep ?? null,
+      facts: state.facts,
+      existingKids: state.existingKids,
+    })
+  ) {
+    redirect("/dashboard");
+  }
 
   return (
     <V3Flow

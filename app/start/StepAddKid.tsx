@@ -97,8 +97,10 @@ export function StepAddKid({
   // and ToS rows are a PRESENTATIONAL SPLIT of the single version+hash
   // attestation this step has always recorded. Both must be ticked before the
   // one consent echo is sent; nothing about the recording model forks.
-  const [siteAccepted, setSiteAccepted] = useState(draftId !== null);
-  const [termsAccepted, setTermsAccepted] = useState(draftId !== null);
+  // Founder decision 2026-08-09: all three consent rows arrive PRE-CHECKED
+  // (fresh signups included) and the submit CTA requires all three.
+  const [siteAccepted, setSiteAccepted] = useState(true);
+  const [termsAccepted, setTermsAccepted] = useState(true);
   // The OPTIONAL photo line, DEFAULT ON. Unchecking sends `photoDeclined:
   // true`, which stamps the per-child photo-consent tombstone at child
   // creation (fail-safe: on/absent records nothing).
@@ -184,16 +186,17 @@ export function StepAddKid({
           return;
         case "consent_refused":
           // The stale-policy path (fpv03 U3 review, learnings): the reload this
-          // notice asks for re-renders the NEW consent text, and ticks given to
-          // the OLD text must not carry across a policy-version change. Reset
-          // all three consent-adjacent states here — site/terms unticked, photo
-          // back to its default ON — so even a re-render that keeps this
-          // component mounted starts the re-attest from scratch.
-          setSiteAccepted(false);
-          setTermsAccepted(false);
+          // notice asks for re-renders the NEW consent text, so ticks given to
+          // the OLD text must not silently carry. Under the founder's
+          // pre-checked model (2026-08-09) the reset restores the DEFAULT
+          // state (all three ticked) rather than unticking, and the notice
+          // asks the parent to reload so the new text is what stands above
+          // the pre-ticked boxes.
+          setSiteAccepted(true);
+          setTermsAccepted(true);
           setPhotoOk(true);
           setNotice(
-            "The consent notice was updated while this page was open. Reload the page and tick the box again."
+            "The consent notice was updated while this page was open. Please reload the page and press the button again."
           );
           return;
         default:
@@ -202,12 +205,16 @@ export function StepAddKid({
     });
   };
 
+  // Founder decision 2026-08-09: the CTA is enabled only when ALL THREE rows
+  // are ticked (photo included). The edit path (draftId) shows no checkboxes
+  // and keeps its consent from the original attestation.
+  const allConsentsTicked = draftId !== null || (siteAccepted && termsAccepted && photoOk);
+
   const onSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     if (pending) return;
-    // Both rows of the split attestation are required; the photo line is not.
-    if (!draftId && (!siteAccepted || !termsAccepted)) {
-      setNotice("Please tick both consent boxes so we can create your kid's account.");
+    if (!allConsentsTicked) {
+      setNotice("Please tick all three boxes so we can create your kid's account.");
       return;
     }
     submit(false);
@@ -279,19 +286,11 @@ export function StepAddKid({
 
         {!draftId && (
           <div className="space-y-3">
-            {/* The split attestation (see the state comment): two rows, one
-                recorded consent. The photo row is the separate OPTIONAL line. */}
-            <label className="flex min-h-[44px] items-start gap-3">
-              <input
-                type="checkbox"
-                checked={siteAccepted}
-                onChange={(e) => setSiteAccepted(e.target.checked)}
-                className="mt-0.5 h-5 w-5 flex-none accent-v3-profit"
-              />
-              <span className="text-sm leading-relaxed text-v3-stone">
-                I consent to my kid having a website for their new business.
-              </span>
-            </label>
+            {/* The split attestation (see the state comment): rows in founder
+                order (2026-08-09): ToS first, then site, then photo. All three
+                arrive PRE-CHECKED and the CTA requires all three, so a parent
+                who unchecks any row (photo included) cannot submit; the
+                photoDeclined wiring stays for the post-signup revoke path. */}
             <label className="flex min-h-[44px] items-start gap-3">
               <input
                 type="checkbox"
@@ -301,6 +300,17 @@ export function StepAddKid({
               />
               <span className="text-sm leading-relaxed text-v3-stone">
                 I agree to Terms of Service
+              </span>
+            </label>
+            <label className="flex min-h-[44px] items-start gap-3">
+              <input
+                type="checkbox"
+                checked={siteAccepted}
+                onChange={(e) => setSiteAccepted(e.target.checked)}
+                className="mt-0.5 h-5 w-5 flex-none accent-v3-profit"
+              />
+              <span className="text-sm leading-relaxed text-v3-stone">
+                I consent to my kid having a website for their new business.
               </span>
             </label>
             <label className="flex min-h-[44px] items-start gap-3">
@@ -321,7 +331,7 @@ export function StepAddKid({
               aria-expanded={policyOpen}
               aria-controls="v3-consent-text"
             >
-              {policyOpen ? "Hide the full notice" : "Read the full notice"}
+              {policyOpen ? "Hide our Terms of Service" : "Read our Terms of Service"}
             </button>
             {/* The RENDERED text: the consent record binds to this, and the
                 payload echoes its version + hash. */}
@@ -372,7 +382,7 @@ export function StepAddKid({
 
         {notice && <V3Notice tone="error">{notice}</V3Notice>}
 
-        <V3Button type="submit" disabled={pending}>
+        <V3Button type="submit" disabled={pending || !allConsentsTicked}>
           {pending ? "Saving…" : "Start their journey"}
         </V3Button>
         {draftId && (

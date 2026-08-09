@@ -26,32 +26,99 @@ import Link from "next/link";
 import { useDashboard } from "./store";
 import { ACCOUNT_MENU, AppHeader } from "./ui";
 import SignIn from "./SignIn";
-import { childName, type Child } from "./data";
+import { childName, pathBarWidthPct, PATH_TASK_TOTAL, type Child } from "./data";
 
-/** One clickable kid card: the whole card is a Link into that kid's portal. */
-function KidCard({ c }: { c: Child }) {
+/**
+ * One kid card: their name, their grade, their REAL Path progress, and TWO
+ * destinations.
+ *
+ * The card is a container, not one big Link, because it now offers two
+ * different places to go and a link inside a link is invalid HTML (the browser
+ * closes the outer anchor early, so the markup a screen reader walks is not the
+ * markup intended). So the kid's own space gets the large primary link, and the
+ * parent's controls get their own quiet one below a divider.
+ *
+ * The stats are the child's verified First Profit task count, loaded server-side
+ * by the dashboard gate on every page load (no client poll).
+ *
+ * ⚠ THE BAR ONLY RENDERS FOR A KID WHO IS ACTUALLY ON THE PATH. The gate loads
+ * counts only for a path-register family, so for a legacy family (a `member`
+ * child, or any pre-First-Profit account that still reaches /dashboard) the map
+ * is null and every count would default to 0 — printing "0 / 125 verified" at a
+ * parent about a curriculum their kid never joined. That is not a missing stat,
+ * it is a false one. So the bar is gated on the same per-child FP discriminator
+ * the register uses: no fp account, no Path row at all.
+ *
+ * For a kid who IS on the Path, an absent key and a failed read both mean the
+ * honest 0 floor — a bar that has not moved, rather than a vanishing row.
+ */
+function KidCard({ c, verified }: { c: Child; verified: number }) {
+  // The same signal `isPathRegisterChild` keys on: an fp account exists.
+  const onThePath = c.fpUsername != null;
   return (
-    <Link
-      href={`/dashboard/kids/${c.id}`}
-      className="group flex min-h-[72px] items-center justify-between gap-4 rounded-3xl border border-v3-ink/10 bg-white p-5 shadow-[0_2px_0_0_rgb(27_24_21_/_0.06)] transition hover:-translate-y-0.5 hover:border-v3-ink/20 sm:p-6"
-    >
-      <span className="min-w-0">
-        <span className="v3-label text-v3-stone">Dashboard</span>
-        <span className="mt-1 block truncate font-path-display text-2xl font-black leading-tight text-v3-ink">
-          {c.firstName || childName(c)}
+    <div className="flex flex-col rounded-3xl border border-v3-ink/10 bg-white p-5 shadow-[0_2px_0_0_rgb(27_24_21_/_0.06)] transition hover:border-v3-ink/20 sm:p-6">
+      <Link href={`/dashboard/kids/${c.id}`} className="group block">
+        <span className="flex items-start justify-between gap-4">
+          <span className="min-w-0">
+            <span className="block truncate font-path-display text-2xl font-black leading-tight text-v3-ink">
+              {c.firstName || childName(c)}
+            </span>
+            <span className="mt-1 block v3-label text-v3-stone">
+              {c.grade === "" ? "Grade not set" : `Grade ${c.grade}`}
+            </span>
+          </span>
+          <span className="inline-flex flex-none items-center gap-1 font-path-mono text-xs font-bold uppercase tracking-[0.12em] text-v3-profit transition-colors group-hover:text-v3-profit-dark">
+            Open
+            <span aria-hidden className="text-base leading-none">
+              &rsaquo;
+            </span>
+          </span>
         </span>
-      </span>
-      <span className="inline-flex flex-none items-center gap-1 font-path-mono text-xs font-bold uppercase tracking-[0.12em] text-v3-profit transition-colors group-hover:text-v3-profit-dark">
-        Open
+
+        {/* The Path progress: the count and the bar say the same thing, so a
+            parent who cannot read the bar (colour, size) still gets the number.
+            The numerator is clamped like the bar width is — the two halves of
+            one stat must never contradict each other if a count ever exceeds
+            the manifest total. */}
+        {onThePath && (
+          <>
+            <span className="mt-5 flex items-center justify-between gap-2 font-path-mono text-[0.65rem] font-bold uppercase tracking-[0.12em] text-v3-stone">
+              <span>The Path</span>
+              <span>
+                {Math.min(verified, PATH_TASK_TOTAL)} / {PATH_TASK_TOTAL} verified
+              </span>
+            </span>
+            <span className="mt-1.5 block h-1.5 w-full rounded-full bg-v3-ink/10">
+              <span
+                className="block h-full rounded-full bg-v3-profit"
+                style={{ width: `${pathBarWidthPct(verified, PATH_TASK_TOTAL)}%` }}
+              />
+            </span>
+          </>
+        )}
+      </Link>
+
+      <Link
+        href={`/dashboard/kids/${c.id}/account`}
+        className="mt-5 inline-flex min-h-[44px] items-center gap-1.5 border-t border-v3-ink/10 pt-4 font-path-mono text-[0.65rem] font-bold uppercase tracking-[0.12em] text-v3-stone transition-colors hover:text-v3-ink"
+      >
+        Account details
         <span aria-hidden className="text-base leading-none">
           &rsaquo;
         </span>
-      </span>
-    </Link>
+      </Link>
+    </div>
   );
 }
 
-export default function ParentDashboard() {
+export default function ParentDashboard({
+  verifiedTaskCounts = null,
+}: {
+  /** Child id → REAL verified First Profit task count, loaded server-side by
+   *  the dashboard gate. null = the family is not in the path register, or the
+   *  read failed; either way every bar renders its honest 0 floor. */
+  verifiedTaskCounts?: Record<string, number> | null;
+}) {
   const { ready, session, children } = useDashboard();
 
   // Auth gate: signed out always shows the SignIn swap (client-side), exactly as
@@ -103,7 +170,7 @@ export default function ParentDashboard() {
                 tree, so the day someone adds a hook to KidCard it would break
                 the Rules of Hooks with no compiler error. */}
             {children.map((c) => (
-              <KidCard key={c.id} c={c} />
+              <KidCard key={c.id} c={c} verified={verifiedTaskCounts?.[c.id] ?? 0} />
             ))}
           </div>
         )}

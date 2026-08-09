@@ -96,10 +96,11 @@ export function buildSiteCoreDeps(admin: SupabaseClient): SiteCoreDeps {
     },
     sendMail: (input) => sendEmail(input),
     // Was `/fp/family` — the First Profit parent page, retired in v3 plan
-    // Unit 10. The dashboard is where a parent's kids live now. Since the
-    // parent-dashboard restructure `/dashboard` is only the kid LIST, so this
-    // resolves per child to that child's own portal, which is the page that
-    // actually mounts the take-offline control the R21 mail promises.
+    // Unit 10. The dashboard is where a parent's kids live now. `/dashboard`
+    // itself is only the kid LIST, and the kid's portal is the KID's apps, so
+    // this resolves per child to that child's ACCOUNT page — the one that
+    // actually mounts the take-offline control the R21 mail promises. The path
+    // lives in fpParentKidTarget, which moves whenever the control does.
     manageUrl: (childId: string) => `${SITE_URL}${fpParentKidTarget(childId)}`,
   };
 }

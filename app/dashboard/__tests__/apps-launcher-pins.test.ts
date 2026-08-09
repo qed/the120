@@ -122,7 +122,7 @@ describe("ParentDashboard — a clean white list of clickable kid cards", () => 
 
 /* ─────────────────── the per-kid portal ─────────────────── */
 
-describe("KidPortal — the per-kid apps launcher + controls, picked by id", () => {
+describe("KidPortal — the per-kid apps launcher, picked by id", () => {
   const app = stripComments(read("app/dashboard/kids/[id]/KidPortal.tsx"));
 
   it("picks the child by id from the RLS-scoped store, with a not-found fallback", () => {
@@ -138,9 +138,13 @@ describe("KidPortal — the per-kid apps launcher + controls, picked by id", () 
     expect(app).toMatch(/&rsquo;s Dashboard/);
   });
 
-  it("mounts the per-kid controls verbatim (KidCredentials + KidSite) for the one child", () => {
-    expect(app).toContain("<KidCredentials");
-    expect(app).toContain("<KidSite");
+  // THE KID'S PAGE IS THE KID'S. The parent controls moved to their own route;
+  // the portal keeps only a link across. Mirrored by the KidAccount pins below,
+  // so neither audience's surface can quietly absorb the other's.
+  it("mounts NO parent controls, only a link to this kid's account page", () => {
+    expect(app).not.toContain("<KidCredentials");
+    expect(app).not.toContain("<KidSite");
+    expect(app).toContain("href={`/dashboard/kids/${c.id}/account`}");
   });
 
   it("owns the same client auth gate and links back to the parent dashboard", () => {
@@ -149,7 +153,30 @@ describe("KidPortal — the per-kid apps launcher + controls, picked by id", () 
   });
 });
 
-/* ─────────────────── the two server pages ─────────────────── */
+/* ─────────────────── the per-kid ACCOUNT page ─────────────────── */
+
+describe("KidAccount — one kid's parent controls, picked by id", () => {
+  const app = stripComments(read("app/dashboard/kids/[id]/account/KidAccount.tsx"));
+
+  it("picks the child by the SAME RLS-scoped store lookup, with a not-found fallback", () => {
+    expect(app).toContain("children.find((c) => c.id === childId)");
+    expect(app).toContain("Kid not found");
+  });
+
+  it("mounts the per-kid controls verbatim (KidCredentials + KidSite) for the one child", () => {
+    expect(app).toContain("<KidCredentials");
+    expect(app).toContain("<KidSite");
+  });
+
+  it("mounts no apps, and owns the same client auth gate", () => {
+    expect(app).not.toContain("FirstProfitCard");
+    expect(app).not.toContain("GAUNTLET");
+    expect(app).toContain("if (ready && !session) return <SignIn");
+    expect(app).toContain('href="/dashboard"');
+  });
+});
+
+/* ─────────────────── the three server pages ─────────────────── */
 
 describe("app/dashboard/page.tsx — the parent list loads only the gate", () => {
   const page = stripComments(read("app/dashboard/page.tsx"));
@@ -160,24 +187,49 @@ describe("app/dashboard/page.tsx — the parent list loads only the gate", () =>
     expect(page).toContain("<ParentDashboard");
   });
 
-  it("loads NO per-kid facts (fpSites / consent policy moved to the per-kid page)", () => {
+  it("loads NO per-kid READS (fpSites / consent policy live on the account page)", () => {
+    expect(page).not.toContain("loadParentSitesForRequest");
+    expect(page).not.toContain("consentPolicy");
+    expect(page).not.toContain("photoConsentChildIds");
+  });
+
+  // The Path bars on the kid cards. These counts are NOT an extra read: the gate
+  // facts the redirect already awaited carry them, so the bars cost nothing.
+  it("threads the verified counts the gate already loaded into the kid cards", () => {
+    expect(page).toContain("verifiedTaskCounts={facts.verifiedTaskCounts}");
+  });
+});
+
+describe("app/dashboard/kids/[id]/page.tsx — the kid's page: gate, and no kid reads", () => {
+  const page = stripComments(read("app/dashboard/kids/[id]/page.tsx"));
+
+  it("runs the same gate + redirect the parent page does", () => {
+    expect(page).toMatch(/cache\(\(\) => loadDashboardGateFactsCore\(\)\)/);
+    expect(page).toMatch(/if \(verdict\.action === "redirect"\) redirect\(verdict\.route\)/);
+  });
+
+  it("threads only the route id — the parent-control facts moved to the account page", () => {
+    expect(page).toMatch(/params: Promise<\{ id: string \}>/);
+    expect(page).toContain("childId={id}");
     expect(page).not.toContain("loadParentSitesForRequest");
     expect(page).not.toContain("consentPolicy");
     expect(page).not.toContain("photoConsentChildIds");
   });
 });
 
-describe("app/dashboard/kids/[id]/page.tsx — gate before data, then the per-kid facts", () => {
-  const page = stripComments(read("app/dashboard/kids/[id]/page.tsx"));
+describe("app/dashboard/kids/[id]/account/page.tsx — gate before data, then the per-kid facts", () => {
+  const page = stripComments(read("app/dashboard/kids/[id]/account/page.tsx"));
 
-  it("runs the same gate + redirect the parent page does, before any kid data", () => {
+  // The ordering that matters: nothing about a kid is read for a request the
+  // gate is about to bounce.
+  it("runs the gate + redirect BEFORE any kid data loads", () => {
     const gate = page.indexOf('if (verdict.action === "redirect")');
     const load = page.indexOf("loadParentSitesForRequest()");
     expect(gate).toBeGreaterThan(-1);
     expect(load).toBeGreaterThan(gate);
   });
 
-  it("threads the route id and the per-kid facts down to KidPortal", () => {
+  it("threads the route id and the per-kid facts down to KidAccount", () => {
     expect(page).toMatch(/params: Promise<\{ id: string \}>/);
     expect(page).toContain("childId={id}");
     expect(page).toContain("fpSites={fpSites}");

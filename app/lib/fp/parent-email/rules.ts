@@ -359,14 +359,15 @@ export type SiteLiveNoticeInput = {
  * carries the parent unpublish/republish control. That was `/fp/family`; v3
  * plan Unit 10 retired the First Profit UI on the120.school and briefly took
  * the control with it, so this sentence briefly said "reply to this email"
- * instead. The control now lives on the PER-KID portal
+ * instead. The control now lives on the per-kid ACCOUNT page
  * (`app/dashboard/KidSite.tsx` over `app/lib/fp/fp-site-parent-core.ts`,
- * mounted at `/dashboard/kids/<childId>` since the parent-dashboard
- * restructure), and the caller resolves `manageUrl` to that child's own portal
- * via `fpParentKidTarget` — NOT to `/dashboard`, which is only the kid list and
- * carries no control. So the original promise is honest again. If the control
- * ever moves again, this sentence moves with it: the pairing is pinned in
- * app/lib/__tests__/fp-ui-retirement.test.ts rather than remembered.
+ * mounted at `/dashboard/kids/<childId>/account`), and the caller resolves
+ * `manageUrl` there via `fpParentKidTarget` — NOT to `/dashboard` (only the kid
+ * list) and NOT to the kid's portal (only the kid's apps); neither carries the
+ * control. So the original promise is honest again. The control has now moved
+ * twice in one day and this sentence moved with it both times, because the
+ * pairing is PINNED in app/lib/__tests__/fp-ui-retirement.test.ts — destination
+ * resolves to the page that mounts KidSite — rather than remembered.
  *
  * Escaping: child name, headline (learner-controlled strings) and the handle
  * are escaped in the html part per the module posture; the text part stays

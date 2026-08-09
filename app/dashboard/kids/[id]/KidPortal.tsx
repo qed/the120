@@ -1,18 +1,20 @@
 "use client";
 
 /**
- * THE PER-KID PORTAL — everything about ONE kid (fpv03 parent-dashboard
- * restructure). Reached at /dashboard/kids/<childId> from a card on the parent
- * dashboard.
+ * THE PER-KID PORTAL — ONE kid's apps (fpv03 parent-dashboard restructure).
+ * Reached at /dashboard/kids/<childId> from a card on the parent dashboard.
  *
- * TOP: this kid's apps launcher — the First Profit card with the one-time "Login"
- * handoff (mounted verbatim from app/dashboard/FirstProfitCard.tsx, so the popup
- * discipline / unmount guard / mint path is defined once), plus the Gauntlet and
- * Math Academy "Coming soon" rows.
+ * THIS PAGE IS THE KID'S, and only the kid's: their apps launcher — the First
+ * Profit card with the one-time "Login" handoff (mounted verbatim from
+ * app/dashboard/FirstProfitCard.tsx, so the popup discipline / unmount guard /
+ * mint path is defined once), plus the Gauntlet and Math Academy "Coming soon"
+ * rows.
  *
- * BELOW: this kid's parent controls — password reset + photo consent
- * (KidCredentials) and take-page-offline (KidSite), the shipped leaf components
- * reused verbatim, scoped to THIS one kid.
+ * The PARENT's controls for this kid (password reset, photo consent,
+ * take-page-offline) deliberately do NOT live here. They are a different
+ * audience doing a different job, so they have their own page at
+ * /dashboard/kids/<childId>/account, reached by its own link on the kid's card.
+ * That is also why this page loads no consent/site facts any more.
  *
  * ── OWNERSHIP / NOT FOUND ──
  * The client store loads `children` RLS-scoped (only the signed-in parent's
@@ -30,10 +32,7 @@ import { useDashboard } from "../../store";
 import { ACCOUNT_MENU, AppHeader } from "../../ui";
 import SignIn from "../../SignIn";
 import FirstProfitCard from "../../FirstProfitCard";
-import KidCredentials, { type ConsentPolicyBundle } from "../../KidCredentials";
-import KidSite from "../../KidSite";
-import { childName, type Child } from "../../data";
-import type { ParentSiteRow } from "@/app/lib/fp/fp-public-site-rules";
+import { type Child } from "../../data";
 
 const GAUNTLET_BLURB =
   "Cover grades 3-12 math facts (including Calculus), making them effortless so you can focus your mental energy on complex problem solving, the underlying basic calculations.";
@@ -76,20 +75,9 @@ function AppRow({ label, children }: { label: string; children: React.ReactNode 
 
 export default function KidPortal({
   childId,
-  consentPolicy,
-  photoConsentChildIds = null,
-  fpSites = null,
 }: {
   /** The child id from the route (`/dashboard/kids/<childId>`). */
   childId: string;
-  /** The consent policy + hash, computed server-side and threaded down for the
-   *  credentials panel (KidCredentials). Absent = the consent affordance does
-   *  not render. */
-  consentPolicy?: ConsentPolicyBundle;
-  /** Child ids whose photo-consent gate is OPEN; null = the read failed. */
-  photoConsentChildIds?: string[] | null;
-  /** Each child's public page + state, parent-scoped; null = the read failed. */
-  fpSites?: ParentSiteRow[] | null;
 }) {
   const { ready, session, children } = useDashboard();
 
@@ -109,11 +97,7 @@ export default function KidPortal({
     </Link>
   );
 
-  const consentFor = (id: string): boolean | null =>
-    photoConsentChildIds === null ? null : photoConsentChildIds.includes(id);
-
   const kidBody = (c: Child) => {
-    const site = fpSites?.find((s) => s.childId === c.id) ?? null;
     return (
       <>
         <h1 className="mt-6 font-path-display text-4xl font-black leading-none tracking-tight text-v3-ink sm:text-5xl">
@@ -152,24 +136,17 @@ export default function KidPortal({
           </AppRow>
         </div>
 
-        {/* The per-kid parent controls: password reset + photo consent, and the
-            take-page-offline control. Reused verbatim with their shipped props. */}
-        <section className="mt-12">
-          <p className="v3-label text-v3-stone">Account Details</p>
-          <h2 className="mt-2 font-path-display text-3xl font-black leading-none tracking-tight text-v3-ink sm:text-4xl">
-            Manage {c.firstName || childName(c)}
-          </h2>
-          <p className="mt-3 max-w-xl text-base leading-relaxed text-v3-stone">
-            Manage this kid&rsquo;s login, their public page, and photo permission.
-          </p>
-
-          <div className="mt-6 rounded-3xl border border-v3-ink/10 bg-white p-5 shadow-[0_2px_0_0_rgb(27_24_21_/_0.06)] sm:p-6">
-            {consentPolicy ? (
-              <KidCredentials child={c} photoConsentOpen={consentFor(c.id)} policy={consentPolicy} />
-            ) : null}
-            {site ? <KidSite site={site} /> : null}
-          </div>
-        </section>
+        {/* The parent's controls for this kid are NOT on this page (it is the
+            kid's). This is the one quiet way across to them. */}
+        <Link
+          href={`/dashboard/kids/${c.id}/account`}
+          className="mt-10 inline-flex min-h-[44px] items-center gap-1.5 font-path-mono text-xs font-bold uppercase tracking-[0.12em] text-v3-stone transition-colors hover:text-v3-ink"
+        >
+          Account details
+          <span aria-hidden className="text-base leading-none">
+            &rsaquo;
+          </span>
+        </Link>
       </>
     );
   };

@@ -620,12 +620,20 @@ describe("wiring — the verdict is a pure module, no longer consumed by the app
   // pins below are the "retired" proof for a component four render sites once
   // shared.
   it("the parent dashboard surfaces render no funnel card, no reserve CTA, no editor view", () => {
-    // The parent-dashboard restructure split the launcher into three client
-    // surfaces; the negative pins sweep all three so a funnel card cannot creep
-    // back onto any of them.
+    // The parent-dashboard restructure split the launcher into FOUR client
+    // surfaces (the kid list, the kid's portal, that kid's account page, and the
+    // extracted FP card); the negative pins sweep all four so a funnel card
+    // cannot creep back onto any of them.
+    //
+    // ⚠ A SURFACE MISSING FROM THIS LIST IS A SURFACE THE INVARIANT NO LONGER
+    // BINDS — and it fails silently, because a sweep over the files that ARE
+    // listed still passes. KidAccount.tsx was carved out of KidPortal.tsx and
+    // did not appear here for one review cycle. Add the file the day you add
+    // the route.
     const src =
       read("app/dashboard/ParentDashboard.tsx") +
       read("app/dashboard/kids/[id]/KidPortal.tsx") +
+      read("app/dashboard/kids/[id]/account/KidAccount.tsx") +
       read("app/dashboard/FirstProfitCard.tsx");
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
     expect(code).not.toContain("cardVerdict");

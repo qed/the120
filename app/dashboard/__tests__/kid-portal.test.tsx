@@ -3,13 +3,15 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * KidPortal first render (parent-dashboard restructure).
+ * KidPortal first render — the KID's page (apps only).
  *
  * Node-env render pin (see kid-credentials-panel.test.tsx). The store is mocked
- * so the portal picks a deterministic child by id; the leaf action modules are
- * mocked exactly as the credentials-panel test mocks them, so importing the real
- * KidCredentials / KidSite / FirstProfitCard does not drag server code into the
- * browser-less test.
+ * so the portal picks a deterministic child by id; the action modules behind
+ * FirstProfitCard are mocked so importing the real component does not drag
+ * server code into the browser-less test.
+ *
+ * The parent controls live at /dashboard/kids/<id>/account and are covered by
+ * kid-account.test.tsx — this file pins that they are NOT here.
  */
 
 const { store } = vi.hoisted(() => ({
@@ -34,42 +36,18 @@ vi.mock("@/app/dashboard/SignIn", () => ({
   default: () => createElement("p", null, "SIGN IN MARKER"),
 }));
 vi.mock("@/app/start/actions", () => ({ v3MintHandoffAction: vi.fn() }));
-vi.mock("@/app/lib/v3-signup/actions/kid-credentials", () => ({
-  resetKidPasswordAction: vi.fn(),
-  captureChildConsentAction: vi.fn(),
-  revokeChildConsentAction: vi.fn(),
-}));
-vi.mock("@/app/lib/fp/actions/fp-site-parent", () => ({ setFpSitePublishedAction: vi.fn() }));
 
 import KidPortal from "@/app/dashboard/kids/[id]/KidPortal";
 import { emptyChild, type Child } from "@/app/dashboard/data";
-import type { ParentSiteRow } from "@/app/lib/fp/fp-public-site-rules";
 
 function makeChild(id: string, over: Partial<Child> = {}): Child {
   return { ...emptyChild(id), ...over };
 }
 
-const POLICY = { version: "2026-08-05.1", hash: "abc123", text: "I confirm I am the parent." };
+const render = (childId: string) =>
+  renderToStaticMarkup(createElement(KidPortal, { childId }));
 
-const site = (childId: string): ParentSiteRow => ({
-  childId,
-  firstName: "Remi",
-  handle: "remi-lemonade",
-  status: "published",
-  operatorLocked: false,
-});
-
-const render = (childId: string, fpSites: ParentSiteRow[] | null = null) =>
-  renderToStaticMarkup(
-    createElement(KidPortal, {
-      childId,
-      consentPolicy: POLICY,
-      photoConsentChildIds: [],
-      fpSites,
-    })
-  );
-
-describe("KidPortal — the per-kid apps launcher + controls", () => {
+describe("KidPortal — the per-kid apps launcher (controls moved to /account)", () => {
   // The store fixture is module-scoped and mutated per test; `ready` in
   // particular is flipped by the loading-state test below, so reset it here or
   // that test silently poisons every test declared after it.
@@ -80,7 +58,7 @@ describe("KidPortal — the per-kid apps launcher + controls", () => {
   it("renders the FP login card, the Gauntlet + Math rows, and the kid heading", () => {
     store.session = { user: {} };
     store.children = [makeChild("k1", { firstName: "Remi", fpUsername: "remi.newal" })];
-    const out = render("k1", [site("k1")]);
+    const out = render("k1");
     expect(out).toMatch(/Remi’s Dashboard/);
     expect(out).toContain("First Profit");
     expect(out).toContain("Login"); // the FP handoff button (kid has an account)
@@ -89,13 +67,16 @@ describe("KidPortal — the per-kid apps launcher + controls", () => {
     expect(out).toContain("Coming soon");
   });
 
-  it("mounts this kid's controls: KidCredentials (login/permissions) and KidSite (public page)", () => {
+  // THE KID'S PAGE IS THE KID'S. The parent's controls moved to their own route;
+  // this pins that they did not quietly come back, and that the one way across
+  // is a link rather than a mounted panel.
+  it("mounts NO parent controls, only a link to this kid's account details", () => {
     store.session = { user: {} };
     store.children = [makeChild("k1", { firstName: "Remi", fpUsername: "remi.newal" })];
-    const out = render("k1", [site("k1")]);
-    expect(out).toContain("Login &amp; permissions"); // KidCredentials disclosure
-    expect(out).toContain("Public page"); // KidSite
-    expect(out).toContain("remi-lemonade"); // this kid's handle
+    const out = render("k1");
+    expect(out).not.toContain("Login &amp; permissions"); // KidCredentials disclosure
+    expect(out).not.toContain("Public page"); // KidSite
+    expect(out).toContain('href="/dashboard/kids/k1/account"');
   });
 
   it("renders a clean 'Kid not found' state for an id the parent does not own", () => {
@@ -103,9 +84,12 @@ describe("KidPortal — the per-kid apps launcher + controls", () => {
     store.children = [makeChild("k1", { firstName: "Remi" })];
     const out = render("stranger-id");
     expect(out).toContain("Kid not found");
-    // None of this kid's apps or controls render for a non-match.
     expect(out).not.toContain("GAUNTLET");
-    expect(out).not.toContain("Login &amp; permissions");
+    // The OWNED kid in the store must not bleed into the render for a
+    // different id. Asserting on k1's own href (rather than the bare string
+    // "/account", which lives in the same branch as GAUNTLET and so could
+    // never fail independently) is what makes this a real ownership check.
+    expect(out).not.toContain("/dashboard/kids/k1/account");
   });
 
   it("swaps to SignIn when signed out", () => {

@@ -209,18 +209,23 @@ describe("every retired URL still resolves", () => {
     expect(stripComments(gateway)).not.toContain("/fp/family");
     expect(gateway).toContain("fpParentKidTarget");
     expect(FP_PARENT_TARGET).toBe("/dashboard");
-    expect(fpParentKidTarget("abc123")).toBe("/dashboard/kids/abc123");
+    expect(fpParentKidTarget("abc123")).toBe("/dashboard/kids/abc123/account");
 
     const notice = read("app/lib/fp/parent-email/rules.ts");
     expect(notice).toContain("take the page offline any time from your family dashboard");
 
-    // The mechanism the sentence names: the parent dashboard mounts the
-    // control, and the control drives the parent-scoped core through its Server
-    // Action. The parent-dashboard restructure relocated it onto the per-kid
-    // portal (/dashboard/kids/<id>, still under /dashboard, still what
-    // FP_PARENT_TARGET resolves to — the parent list links to it), so the
-    // promise stays reachable.
-    expect(read("app/dashboard/kids/[id]/KidPortal.tsx")).toContain("KidSite");
+    // The mechanism the sentence names: the control is mounted on the page the
+    // link resolves to, and drives the parent-scoped core through its Server
+    // Action. It has now moved twice — onto the per-kid portal, then off it onto
+    // the per-kid ACCOUNT page when the portal became the kid's own space — and
+    // both times this assertion moved with it, because it reads the page
+    // fpParentKidTarget names rather than a remembered path.
+    // The route file that serves fpParentKidTarget's path, named once here so
+    // the two cannot drift: /dashboard/kids/<id>/account → this component.
+    expect(fpParentKidTarget("<id>")).toBe("/dashboard/kids/<id>/account");
+    expect(read("app/dashboard/kids/[id]/account/KidAccount.tsx")).toContain("KidSite");
+    // And NOT on the kid's own portal, which is deliberately controls-free.
+    expect(read("app/dashboard/kids/[id]/KidPortal.tsx")).not.toContain("KidSite");
     const panel = read("app/dashboard/KidSite.tsx");
     expect(panel).toContain("setFpSitePublishedAction");
     expect(panel).toContain("Take the page offline");

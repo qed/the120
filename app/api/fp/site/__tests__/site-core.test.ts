@@ -15,6 +15,7 @@
  */
 import { describe, expect, it, vi, afterEach } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fpParentKidTarget } from "@/app/lib/fp/retired-ui-routes";
 import {
   fakeClient,
   newStore,
@@ -83,7 +84,11 @@ function makeDeps(
       sent.push(input);
       return { ok: true };
     },
-    manageUrl: (childId: string) => `https://the120.school/dashboard/kids/${childId}`,
+    // Delegates to the REAL route helper rather than retyping the path: a fake
+    // that hardcodes a route keeps passing while asserting a URL the app no
+    // longer serves, which is exactly the drift the 2026-08-09 solutions doc
+    // ("splitting one page into two routes...") was written about.
+    manageUrl: (childId: string) => `https://the120.school${fpParentKidTarget(childId)}`,
   };
   return { deps, sent };
 }

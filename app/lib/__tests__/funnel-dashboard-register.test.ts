@@ -112,9 +112,14 @@ describe("the dashboard gate loads the flip fact (dashboard-gate-core + page.tsx
   // (the auth/session wiring) stay, which is why the cache() pin above remains,
   // and the flip fact still loads server-side (the core select pin below is
   // untouched — dashboardRegister still gates the counts read in the core).
-  it("no longer passes a register or verified counts to the apps view (payment removed)", () => {
+  // The REGISTER stayed gone (it was the payment/admissions flip). The verified
+  // COUNTS came back by founder request: the kid cards carry a Path progress bar
+  // again. The two were retired in the same sweep but are not the same thing —
+  // the counts are First Profit progress, which outlived payment entirely, and
+  // they ride facts the gate already loaded rather than a new read.
+  it("passes no register, but DOES pass the verified counts the kid cards render", () => {
     expect(page).not.toMatch(/register=\{register\}/);
-    expect(page).not.toMatch(/verifiedTaskCounts=/);
+    expect(page).toContain("verifiedTaskCounts={facts.verifiedTaskCounts}");
   });
 });
 
@@ -232,20 +237,28 @@ describe("the arrived_at migration (20260825120000)", () => {
 /* ─────────────────── the apps dashboard (parent-dashboard restructure) ─────────────────── */
 
 describe("the parent dashboard — a kid list + per-kid portals (payment removed)", () => {
-  // The parent-dashboard restructure split the one merged launcher into two
-  // routes: /dashboard (ParentDashboard) is a clean white list of kid cards, and
-  // /dashboard/kids/[id] (KidPortal) is the per-kid apps launcher (the extracted
-  // FirstProfitCard + Gauntlet/Math rows) plus the per-kid controls
-  // (KidCredentials + KidSite). The Path register, the seats box, the deposit
-  // banners, the reserve/checkout block and the Path progress bars are all GONE
-  // from the parent UI (founder: free while we test). The pure register/bar rules
-  // and the server gate below are untouched.
+  // The parent-dashboard restructure split the one merged launcher into THREE
+  // routes, one per audience: /dashboard (ParentDashboard) is a white list of kid
+  // cards; /dashboard/kids/[id] (KidPortal) is the KID's apps launcher (the
+  // extracted FirstProfitCard + Gauntlet/Math rows); /dashboard/kids/[id]/account
+  // (KidAccount) is the PARENT's controls for that kid (KidCredentials +
+  // KidSite). The Path register, the seats box, the deposit banners and the
+  // reserve/checkout block are all GONE from the parent UI (founder: free while
+  // we test). The Path progress BAR is back on each kid card by founder request —
+  // that is FP progress, not payment. The pure register/bar rules and the server
+  // gate below are untouched.
+  //
+  // ⚠ EVERY CLIENT SURFACE OF THE DASHBOARD IS SWEPT HERE. The sweeps below
+  // (no em dash, no payment strings, no register skins) are only as strong as
+  // this list: a new surface left out of it is a surface the invariants no
+  // longer bind. Add the file here the day you add the route.
   const parent = read("app/dashboard/ParentDashboard.tsx");
   const portal = read("app/dashboard/kids/[id]/KidPortal.tsx");
+  const account = read("app/dashboard/kids/[id]/account/KidAccount.tsx");
   const fpCard = read("app/dashboard/FirstProfitCard.tsx");
   const strip = (s: string) =>
     s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
-  const allCode = strip(parent + portal + fpCard);
+  const allCode = strip(parent + portal + account + fpCard);
 
   it("has no register swap left — no path/application skins, no DashHeader", () => {
     expect(allCode).not.toContain("isPath");
@@ -283,12 +296,15 @@ describe("the parent dashboard — a kid list + per-kid portals (payment removed
     expect(allCode).not.toContain("—");
   });
 
-  it("the per-kid controls are mounted on the per-kid portal (not the parent list)", () => {
-    // The restructure moved the controls off /dashboard and onto the per-kid
-    // portal, which mounts the leaf controls (KidCredentials + KidSite) directly
-    // for the one child it renders.
-    expect(portal).toContain("<KidCredentials");
-    expect(portal).toContain("<KidSite");
+  it("each audience gets its own surface: apps on the kid's page, controls on the account page", () => {
+    // The controls mount on the ACCOUNT page — the kid's portal is the kid's.
+    expect(account).toContain("<KidCredentials");
+    expect(account).toContain("<KidSite");
+    expect(strip(portal)).not.toContain("<KidCredentials");
+    expect(strip(portal)).not.toContain("<KidSite");
+    // ...and the apps mount on the portal, not on the account page.
+    expect(portal).toContain("<FirstProfitCard");
+    expect(strip(account)).not.toContain("FirstProfitCard");
     // The parent list is a directory only — no controls, no FP card.
     expect(strip(parent)).not.toContain("KidCredentials");
     expect(strip(parent)).not.toContain("KidSite");

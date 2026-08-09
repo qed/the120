@@ -60,18 +60,25 @@ export const FP_APP_URL: string = FIRST_PROFIT_SIGN_IN_URL;
 export const FP_PARENT_TARGET: string = v3RemapRoute({ screen: "dashboard" }) ?? "/dashboard";
 
 /**
- * Where ONE child's controls live: the per-kid portal under the parent target.
+ * Where ONE child's PARENT CONTROLS live — password reset, photo consent, and
+ * the take-page-offline control.
  *
- * The parent-dashboard restructure split `/dashboard` into a kid LIST and a
- * per-kid portal, and the take-offline control went with the portal. A mail
- * about ONE child must therefore link to THAT child's page, not the list — the
- * R21 site-live notice is a transactional safety notice whose whole value is
- * how fast a parent can reach the control, and "find the right card among N"
- * is not fast. Built from FP_PARENT_TARGET rather than a second literal so the
- * two move together if the dashboard ever moves again.
+ * A mail about ONE child must link to THAT child's controls, not to a list: the
+ * R21 site-live notice is a transactional safety notice whose whole value is how
+ * fast a parent reaches the control, and "find the right card among N" is not
+ * fast.
+ *
+ * ⚠ THIS PATH TRACKS THE CONTROL, NOT THE PREFIX. The parent-dashboard
+ * restructure first split `/dashboard` into a kid list + a per-kid portal (so
+ * this pointed at the portal); the follow-up then moved the controls OFF the
+ * portal — which is now the kid's own app space — and onto a dedicated account
+ * page. Each time, this function moved with them, because the pin in
+ * fp-ui-retirement.test.ts asserts that what this resolves to is the page that
+ * actually mounts KidSite. Built from FP_PARENT_TARGET rather than a second
+ * literal so both move together if the dashboard itself ever moves.
  */
 export function fpParentKidTarget(childId: string): string {
-  return `${FP_PARENT_TARGET}/kids/${childId}`;
+  return `${FP_PARENT_TARGET}/kids/${childId}/account`;
 }
 
 /**

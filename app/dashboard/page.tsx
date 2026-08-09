@@ -14,11 +14,18 @@ export const metadata: Metadata = {
  * THE PARENT DASHBOARD (/dashboard) — the server half.
  *
  * The parent-dashboard restructure made this a clean landing that LISTS the
- * kids (app/dashboard/ParentDashboard.tsx); each kid opens their own portal at
- * /dashboard/kids/<childId>, where the apps launcher AND the per-kid management
- * controls now live. So this page loads NO per-kid facts any more — no fpSites,
- * no consent policy, no photo-consent ids. Those move to the per-kid page.tsx,
- * which is where the controls that need them render.
+ * kids (app/dashboard/ParentDashboard.tsx). Each card opens that kid's own
+ * space at /dashboard/kids/<childId> (their apps) and offers a second link to
+ * /dashboard/kids/<childId>/account (the parent's controls for them).
+ *
+ * So this page performs NO per-kid READS: no fpSites, no consent policy, no
+ * photo-consent ids. Those belong to the controls, and moved to the account
+ * page.tsx that renders them.
+ *
+ * The ONE per-child-keyed fact it still threads is `verifiedTaskCounts`, which
+ * feeds the Path bar on each card. It is not an exception to the rule above:
+ * it is an aggregate count already carried on the gate facts this page had to
+ * await anyway for the redirect, so the bars add no read and no round trip.
  *
  * The gate + redirect stay: they are the auth/session wiring, unchanged. The
  * split from the memoized-auth-gate learning holds — `cache()` a NON-throwing
@@ -40,5 +47,8 @@ export default async function DashboardPage({
 
   // DashboardProvider is mounted once by app/dashboard/layout.tsx, so hopping
   // to a kid's portal and back does not remount the store or refetch the family.
-  return <ParentDashboard />;
+  //
+  // The verified counts ride along on the gate facts the redirect already
+  // needed — no extra read — and feed the Path bar on each kid's card.
+  return <ParentDashboard verifiedTaskCounts={facts.verifiedTaskCounts} />;
 }

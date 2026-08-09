@@ -189,6 +189,7 @@ describe("the emit points exist (wiring scans — server-side only, R56)", () =>
       "app/start/StepAccountReady.tsx",
       "app/dashboard/ParentDashboard.tsx",
       "app/dashboard/kids/[id]/KidPortal.tsx",
+      "app/dashboard/kids/[id]/account/KidAccount.tsx",
       "app/dashboard/FirstProfitCard.tsx",
     ]) {
       expect(read(f), f).not.toContain('from "@/app/lib/funnel/events"');

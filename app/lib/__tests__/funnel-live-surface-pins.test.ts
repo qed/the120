@@ -105,7 +105,9 @@ describe("the dashboard's own chrome (per-kid apps launcher)", () => {
   // portal; the FP card is its own component now. The chrome pins read the
   // portal plus that card together, which is the launcher surface a parent sees.
   const app = stripComments(
-    read("app/dashboard/kids/[id]/KidPortal.tsx") + read("app/dashboard/FirstProfitCard.tsx")
+    read("app/dashboard/kids/[id]/KidPortal.tsx") +
+      read("app/dashboard/kids/[id]/account/KidAccount.tsx") +
+      read("app/dashboard/FirstProfitCard.tsx")
   );
 
   // The admissions dashboard's chrome (the red add-a-child pill, the dual-register

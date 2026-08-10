@@ -3,6 +3,7 @@ import {
   SAVE_DOC_DELETED_ID_MAX_CHARS,
   SAVE_DOC_DELETED_IDS_MAX,
   SAVE_DOC_IDEAS_FUSE_LIMIT,
+  SAVE_DOC_MONOTONIC_FLAG_KEYS,
   SAVE_DOC_MONOTONIC_IDEA_KEYS,
   guardSaveDocUpdate,
 } from "../fp-save-doc-guard-rules";
@@ -641,5 +642,209 @@ describe("the monotonic key list", () => {
       "doneByTask",
       "doneAtByTask",
     ]);
+  });
+});
+
+describe("guardSaveDocUpdate — monotonic story flags (v3)", () => {
+  it("is exactly the top-level flag set the gameCore persisted-doc union OR's, in order", () => {
+    expect([...SAVE_DOC_MONOTONIC_FLAG_KEYS]).toEqual([
+      "storyIntroSeen",
+      "firstRunComplete",
+      "dashboardOrientationSeen",
+      "onboardingComplete",
+    ]);
+  });
+
+  it.each([...SAVE_DOC_MONOTONIC_FLAG_KEYS])(
+    "preserves OLD's `true` for `%s` when NEW omits the key entirely (old-build write)",
+    (key) => {
+      const oldDoc = { docVersion: 1, ideas: [], [key]: true };
+      const incoming = { docVersion: 1, ideas: [] };
+      const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+      expect(out[key]).toBe(true);
+    },
+  );
+
+  it.each([...SAVE_DOC_MONOTONIC_FLAG_KEYS])(
+    "preserves OLD's `true` for `%s` when NEW sends a regressed `false` (a stale/buggy client)",
+    (key) => {
+      const oldDoc = { docVersion: 1, ideas: [], [key]: true };
+      const incoming = { docVersion: 1, ideas: [], [key]: false };
+      const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+      expect(out[key]).toBe(true);
+    },
+  );
+
+  it("does all four flags together in one repair", () => {
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [],
+      storyIntroSeen: true,
+      firstRunComplete: true,
+      dashboardOrientationSeen: true,
+      onboardingComplete: true,
+    };
+    const incoming = { docVersion: 1, ideas: [] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.storyIntroSeen).toBe(true);
+    expect(out.firstRunComplete).toBe(true);
+    expect(out.dashboardOrientationSeen).toBe(true);
+    expect(out.onboardingComplete).toBe(true);
+  });
+
+  it("never invents `false` — when neither side has a flag, it stays absent", () => {
+    const oldDoc = { docVersion: 1, ideas: [] };
+    const incoming = { docVersion: 1, ideas: [] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    for (const key of SAVE_DOC_MONOTONIC_FLAG_KEYS) {
+      expect(Object.hasOwn(out, key)).toBe(false);
+    }
+  });
+
+  it("never invents `true` when OLD's value is absent (only NEW's own value applies)", () => {
+    const oldDoc = { docVersion: 1, ideas: [] };
+    const incoming = { docVersion: 1, ideas: [], firstRunComplete: false };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.firstRunComplete).toBe(false);
+  });
+
+  it("leaves NEW's `true` untouched when OLD is not `true` (no redundant write)", () => {
+    const oldDoc = { docVersion: 1, ideas: [], firstRunComplete: false };
+    const incoming = { docVersion: 1, ideas: [], firstRunComplete: true };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.firstRunComplete).toBe(true);
+  });
+
+  it.each([
+    ["a string", "true"],
+    ["a number", 1],
+    ["an object", { value: true }],
+    ["null", null],
+  ])("never raises when OLD's flag value is %s (junk shape never raises `true`)", (_name, bad) => {
+    const oldDoc = { docVersion: 1, ideas: [], firstRunComplete: bad };
+    const incoming = { docVersion: 1, ideas: [] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(Object.hasOwn(out, "firstRunComplete")).toBe(false);
+  });
+});
+
+describe("guardSaveDocUpdate — coverLook / coverLookAt LAST-WRITE-WINS (v3)", () => {
+  it("OLD's newer cover wins over NEW's older cover", () => {
+    const oldDoc = { docVersion: 1, ideas: [], coverLook: "night-hero", coverLookAt: 5000 };
+    const incoming = { docVersion: 1, ideas: [], coverLook: "storybook-classic", coverLookAt: 1000 };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.coverLook).toBe("night-hero");
+    expect(out.coverLookAt).toBe(5000);
+  });
+
+  it("NEW's newer cover wins over OLD's older cover", () => {
+    const oldDoc = { docVersion: 1, ideas: [], coverLook: "night-hero", coverLookAt: 1000 };
+    const incoming = { docVersion: 1, ideas: [], coverLook: "manga-arc", coverLookAt: 5000 };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.coverLook).toBe("manga-arc");
+    expect(out.coverLookAt).toBe(5000);
+  });
+
+  it("a TIE goes to NEW", () => {
+    const oldDoc = { docVersion: 1, ideas: [], coverLook: "night-hero", coverLookAt: 5000 };
+    const incoming = { docVersion: 1, ideas: [], coverLook: "manga-arc", coverLookAt: 5000 };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.coverLook).toBe("manga-arc");
+    expect(out.coverLookAt).toBe(5000);
+  });
+
+  it("NEW wins when NEW omits the pair entirely and OLD has no stamp (old build with no cover concept)", () => {
+    const oldDoc = { docVersion: 1, ideas: [], coverLook: "night-hero" };
+    const incoming = { docVersion: 1, ideas: [] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    // OLD has a look but no valid numeric stamp — never wins (no stamp to compare).
+    expect(Object.hasOwn(out, "coverLook")).toBe(false);
+  });
+
+  it("OLD wins when NEW omits the pair entirely (old-build write) and OLD has a valid stamp", () => {
+    const oldDoc = { docVersion: 1, ideas: [], coverLook: "night-hero", coverLookAt: 5000 };
+    const incoming = { docVersion: 1, ideas: [] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.coverLook).toBe("night-hero");
+    expect(out.coverLookAt).toBe(5000);
+  });
+
+  // THE EMPTY LOOK. An empty string is not a look. The client's own check is a
+  // truthiness test, so `""` never wins there; the SQL trigger reads raw jsonb
+  // with no normalization, so both layers must agree explicitly or a malformed
+  // row could let an empty look beat a real one. (v3 review, found
+  // independently by two reviewers.)
+  it("an EMPTY-string coverLook on OLD never wins, even with a newer stamp", () => {
+    const oldDoc = { docVersion: 1, ideas: [], coverLook: "", coverLookAt: 9000 };
+    const incoming = { docVersion: 1, ideas: [], coverLook: "manga-arc", coverLookAt: 1000 };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.coverLook).toBe("manga-arc");
+    expect(out.coverLookAt).toBe(1000);
+  });
+
+  it("an EMPTY-string coverLook on NEW does not block OLD's real look", () => {
+    const oldDoc = { docVersion: 1, ideas: [], coverLook: "night-hero", coverLookAt: 5000 };
+    const incoming = { docVersion: 1, ideas: [], coverLook: "", coverLookAt: 9000 };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.coverLook).toBe("night-hero");
+    expect(out.coverLookAt).toBe(5000);
+  });
+
+  it("DEFENSIVE PAIRING: a lookless-but-stamped OLD cannot clobber NEW's valid look", () => {
+    const oldDoc = { docVersion: 1, ideas: [], coverLookAt: 9999 }; // stamp with no look — malformed
+    const incoming = { docVersion: 1, ideas: [], coverLook: "manga-arc", coverLookAt: 1 };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.coverLook).toBe("manga-arc");
+    expect(out.coverLookAt).toBe(1);
+  });
+
+  it("a lookless-but-stamped NEW does not block OLD's valid look from winning", () => {
+    const oldDoc = { docVersion: 1, ideas: [], coverLook: "night-hero", coverLookAt: 5000 };
+    const incoming = { docVersion: 1, ideas: [], coverLookAt: 1 }; // stamp with no look
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.coverLook).toBe("night-hero");
+    expect(out.coverLookAt).toBe(5000);
+  });
+
+  it("does not invent the pair when neither side has a coverLook (absent-stays-absent)", () => {
+    const oldDoc = { docVersion: 1, ideas: [] };
+    const incoming = { docVersion: 1, ideas: [] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(Object.hasOwn(out, "coverLook")).toBe(false);
+    expect(Object.hasOwn(out, "coverLookAt")).toBe(false);
+  });
+
+  it.each([
+    ["a number", 42],
+    ["an object", { id: "x" }],
+    ["an array", ["x"]],
+    ["null", null],
+  ])("never raises when OLD's coverLook is %s (junk shape never wins)", (_name, bad) => {
+    const oldDoc = { docVersion: 1, ideas: [], coverLook: bad, coverLookAt: 5000 };
+    const incoming = { docVersion: 1, ideas: [], coverLook: "manga-arc", coverLookAt: 1 };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.coverLook).toBe("manga-arc");
+    expect(out.coverLookAt).toBe(1);
+  });
+
+  it.each([
+    ["a string", "5000"],
+    ["an object", { at: 5000 }],
+    ["null", null],
+  ])("never raises when OLD's coverLookAt is %s (junk shape never wins)", (_name, bad) => {
+    const oldDoc = { docVersion: 1, ideas: [], coverLook: "night-hero", coverLookAt: bad };
+    const incoming = { docVersion: 1, ideas: [], coverLook: "manga-arc", coverLookAt: 1 };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.coverLook).toBe("manga-arc");
+    expect(out.coverLookAt).toBe(1);
+  });
+
+  it("runs even when idea handling is skipped (NEW's ideas not an array)", () => {
+    const oldDoc = { docVersion: 1, ideas: [], coverLook: "night-hero", coverLookAt: 5000 };
+    const incoming = { docVersion: 1, ideas: "junk" };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.coverLook).toBe("night-hero");
+    expect(out.coverLookAt).toBe(5000);
+    expect(out.ideas).toBe("junk");
   });
 });

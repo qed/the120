@@ -3,11 +3,14 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   SAVE_DOC_CARRIED_TOP_KEYS,
+  SAVE_DOC_COVER_LOOK_AT_KEY,
+  SAVE_DOC_COVER_LOOK_KEY,
   SAVE_DOC_DELETED_ID_MAX_CHARS,
   SAVE_DOC_DELETED_IDS_KEY,
   SAVE_DOC_DELETED_IDS_MAX,
   SAVE_DOC_IDEA_IDENTITY_KEY,
   SAVE_DOC_IDEAS_FUSE_LIMIT,
+  SAVE_DOC_MONOTONIC_FLAG_KEYS,
   SAVE_DOC_MONOTONIC_IDEA_KEYS,
 } from "../fp-save-doc-guard-rules";
 
@@ -25,14 +28,16 @@ import {
 //
 // v2 (idea tombstones): the guard function was REPLACED whole by
 // 20260911120000_fp_save_doc_guard_tombstones.sql (20260906 is applied
-// history and must not be amended in place), so this parity test parses the
-// v2 file — every v1 structural pin below still holds there, plus the new
-// deletedIdeaIds pins.
-describe("migration parity: fp_save_doc_guard_tombstones.sql (guard v2)", () => {
+// history and must not be amended in place). v3 (story fields) REPLACES it
+// whole again, via 20260922120000_fp_save_doc_guard_story_fields.sql (20260911
+// is applied history and must not be amended in place either) — so this
+// parity test parses the v3 file: every v1/v2 structural pin below still
+// holds there, plus the new monotonic-flag and coverLook LWW pins.
+describe("migration parity: fp_save_doc_guard_story_fields.sql (guard v3)", () => {
   const raw = readFileSync(
     path.resolve(
       process.cwd(),
-      "supabase/migrations/20260911120000_fp_save_doc_guard_tombstones.sql"
+      "supabase/migrations/20260922120000_fp_save_doc_guard_story_fields.sql"
     ),
     "utf8"
   );
@@ -265,6 +270,100 @@ describe("migration parity: fp_save_doc_guard_tombstones.sql (guard v2)", () => 
     expect(unionAt).toBeLessThan(ideasGateAt);
   });
 
+  // ------------------------------------------- monotonic story flags (v3)
+
+  it("grafts exactly the TS mirror's monotonic story-flag list, in order", () => {
+    const m = body.match(/foreach\s+v_flag_key\s+in\s+array\s+array\[([^\]]*)\]/i);
+    expect(m, "foreach v_flag_key in array array[...] (story flags)").not.toBeNull();
+    const keys = m![1]
+      .split(",")
+      .map((s) => s.trim().replace(/^'|'$/g, ""))
+      .filter(Boolean);
+    expect(keys).toEqual([...SAVE_DOC_MONOTONIC_FLAG_KEYS]);
+  });
+
+  it("forces a flag to true only when OLD is literally `true` and NEW is distinct from `true` — never inventing false", () => {
+    const flagGraft = new RegExp(
+      String.raw`if\s*\(\s*OLD\.doc\s*->\s*v_flag_key\s*\)\s*=\s*'true'::jsonb\s+and\s*\(\s*NEW\.doc\s*->\s*v_flag_key\s*\)\s+is\s+distinct\s+from\s+'true'::jsonb\s+then\s+v_doc\s*:=\s*jsonb_set\s*\(\s*v_doc\s*,\s*array\[v_flag_key\]\s*,\s*'true'::jsonb\s*\)`,
+      "i"
+    );
+    expect(flagGraft.test(body)).toBe(true);
+    // Never a literal `false` assignment anywhere in the flag graft.
+    expect(/jsonb_set\s*\(\s*v_doc\s*,\s*array\[v_flag_key\]\s*,\s*'false'::jsonb\s*\)/i.test(body)).toBe(false);
+  });
+
+  it("runs the monotonic-flag graft INSIDE the protected region, after the tombstone union and before the ideas gate", () => {
+    const tombstoneAt = body.search(new RegExp(String.raw`'\{${SAVE_DOC_DELETED_IDS_KEY}\}'`, "i"));
+    const flagAt = body.search(/OLD\.doc\s*->\s*v_flag_key\s*\)\s*=\s*'true'::jsonb/i);
+    const ideasGateAt = body.search(
+      /if\s+jsonb_typeof\s*\(\s*v_old_ideas\s*\)\s*=\s*'array'\s+and\s+jsonb_typeof\s*\(\s*v_new_ideas\s*\)\s*=\s*'array'\s+then/i
+    );
+    expect(flagAt).toBeGreaterThan(tombstoneAt);
+    expect(flagAt).toBeLessThan(ideasGateAt);
+  });
+
+  // ------------------------------------------------- coverLook LWW (v3)
+
+  // ⚠ THESE THREE ARE NULL-SAFETY PINS, NOT STYLE PINS (v3 review, P0).
+  // `->` on an absent key is SQL NULL, jsonb_typeof() is STRICT, and a plain
+  // `<> 'string'` on NULL is NULL — which plpgsql's IF treats as false. The
+  // first draft of this graft used `<>` and therefore did NOT fire when NEW
+  // omitted the pair, silently ERASING a child's cover in exactly the
+  // old-build case the guard exists for. So the presence tests MUST be
+  // NULL-safe (`is not distinct from`), and the ::numeric casts MUST sit in a
+  // branch only reachable once both sides are known numbers (PostgreSQL does
+  // not promise OR short-circuiting, and a raise here would drop the WHOLE
+  // repair through the exception handler).
+  it("coverLook LWW: both presence gates are NULL-SAFE and require a NON-EMPTY look", () => {
+    for (const v of ["v_old_cover_ok", "v_new_cover_ok"]) {
+      expect(
+        new RegExp(String.raw`${v}\s*:=[\s\S]{0,400}?is\s+not\s+distinct\s+from\s*'string'`, "i").test(body),
+        `${v} uses a NULL-safe string test`
+      ).toBe(true);
+      expect(
+        new RegExp(String.raw`${v}\s*:=[\s\S]{0,400}?is\s+not\s+distinct\s+from\s*'number'`, "i").test(body),
+        `${v} uses a NULL-safe number test`
+      ).toBe(true);
+      expect(
+        new RegExp(String.raw`${v}\s*:=[\s\S]{0,400}?<>\s*''`, "i").test(body),
+        `${v} rejects the empty-string look`
+      ).toBe(true);
+    }
+    // The NULL-unsafe shape must never come back on these gates.
+    expect(/jsonb_typeof\s*\([^)]*coverLook[^)]*\)\s*<>/i.test(body)).toBe(false);
+  });
+
+  it("coverLook LWW: the ::numeric comparison is UNREACHABLE unless both pairs are valid", () => {
+    // The strict-greater compare lives in an `elsif` under `if v_old_cover_ok`
+    // + `if not v_new_cover_ok`, so it can only evaluate when both sides are
+    // already known numbers. Pin that nesting, not just the comparison text.
+    expect(
+      new RegExp(
+        String.raw`if\s+v_old_cover_ok\s+then[\s\S]{0,600}?if\s+not\s+v_new_cover_ok\s+then[\s\S]{0,600}?elsif\s*\(\s*OLD\.doc\s*->>\s*'${SAVE_DOC_COVER_LOOK_AT_KEY}'\s*\)::numeric\s*>\s*\(\s*NEW\.doc\s*->>\s*'${SAVE_DOC_COVER_LOOK_AT_KEY}'\s*\)::numeric`,
+        "i"
+      ).test(body)
+    ).toBe(true);
+  });
+
+  it("coverLook LWW: OLD's win writes BOTH coverLook and coverLookAt from OLD's values", () => {
+    expect(
+      new RegExp(String.raw`jsonb_set\s*\(\s*v_doc\s*,\s*'\{${SAVE_DOC_COVER_LOOK_KEY}\}'\s*,\s*v_old_cover\s*\)`, "i").test(body)
+    ).toBe(true);
+    expect(
+      new RegExp(String.raw`jsonb_set\s*\(\s*v_doc\s*,\s*'\{${SAVE_DOC_COVER_LOOK_AT_KEY}\}'\s*,\s*v_old_at\s*\)`, "i").test(body)
+    ).toBe(true);
+  });
+
+  it("runs the coverLook LWW graft INSIDE the protected region, after the monotonic-flag graft and before the ideas gate", () => {
+    const flagAt = body.search(/OLD\.doc\s*->\s*v_flag_key\s*\)\s*=\s*'true'::jsonb/i);
+    const coverAt = body.search(/v_old_cover\s*:=\s*OLD\.doc\s*->\s*'coverLook'/i);
+    const ideasGateAt = body.search(
+      /if\s+jsonb_typeof\s*\(\s*v_old_ideas\s*\)\s*=\s*'array'\s+and\s+jsonb_typeof\s*\(\s*v_new_ideas\s*\)\s*=\s*'array'\s+then/i
+    );
+    expect(coverAt).toBeGreaterThan(flagAt);
+    expect(coverAt).toBeLessThan(ideasGateAt);
+  });
+
   // -------------------------------------------------- defensive shape gates
 
   it("passes through when either doc is null or not a JSON object", () => {
@@ -308,8 +407,17 @@ describe("migration parity: fp_save_doc_guard_tombstones.sql (guard v2)", () => 
     expect(raw).toMatch(/probe/i);
   });
 
-  it("the v2 header carries the tombstone deploy ordering (guard BEFORE DELETE_IDEA), the applied-ledger note, and the projection-unchanged note", () => {
-    expect(raw).toMatch(/BEFORE\s+the[\s\S]{0,80}DELETE_IDEA/i);
+  it("the header carries the tombstone deploy ordering (guard BEFORE DELETE_IDEA), the applied-ledger note, and the projection-unchanged note", () => {
+    // NOTE (v3 review): this assertion used to be
+    // `/BEFORE\s+the[\s\S]{0,80}DELETE_IDEA/i`, which matched across a `--`
+    // comment line break and therefore pinned the WRAPPING of a prose
+    // paragraph, not any behavior. It cost a real author a re-wrap to keep it
+    // green, which is the tell: a test whose failure is fixed by reflowing a
+    // sentence is testing the sentence. Kept as a deliberate DOC pin (the
+    // deploy-ordering rule genuinely lives in prose — no parser can verify
+    // it), but matched wrap-insensitively so it pins the CLAIM, not the
+    // line breaks. The executable guarantees are pinned against `body` above.
+    expect(raw.replace(/\s*--\s*/g, " ")).toMatch(/BEFORE the .{0,120}DELETE_IDEA/i);
     expect(raw).toMatch(/20260910/);
     expect(raw).toMatch(/docVersion is NOT bumped/i);
     expect(raw).toMatch(/PROJECTION UNCHANGED/i);

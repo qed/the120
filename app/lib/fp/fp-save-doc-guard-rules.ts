@@ -1,8 +1,10 @@
 /**
  * First Profit SAVE DOC GUARD — the pure TS mirror of the fp_player_saves
- * BEFORE UPDATE doc guard (v2: migration
- * supabase/migrations/20260911120000_fp_save_doc_guard_tombstones.sql, which
- * replaced the v1 function from 20260906120000_fp_save_doc_guard.sql).
+ * BEFORE UPDATE doc guard (v3: migration
+ * supabase/migrations/20260922120000_fp_save_doc_guard_story_fields.sql,
+ * which replaced the v2 function from
+ * 20260911120000_fp_save_doc_guard_tombstones.sql, which replaced the v1
+ * function from 20260906120000_fp_save_doc_guard.sql).
  *
  * THE SPEC LIVES HERE. This suite has no test database, so the plpgsql in the
  * migration cannot be executed by tests. Instead, `guardSaveDocUpdate` below
@@ -59,6 +61,25 @@
  *    old-build save that omits the field can never un-delete (OLD's
  *    tombstones are re-added, then honored), and tombstones only ever
  *    suppress RE-APPEND — the guard never removes an idea present in NEW;
+ *  - MONOTONIC STORY FLAGS (v3): for each key in SAVE_DOC_MONOTONIC_FLAG_KEYS
+ *    (`storyIntroSeen`, `firstRunComplete`, `dashboardOrientationSeen`,
+ *    `onboardingComplete` — the exact set the client's own unionCompletionMaps
+ *    OR-unions in gameCore.ts), if OLD's value is the boolean `true` and
+ *    NEW's value is anything else (absent, `false`, or malformed), the
+ *    repaired doc's key is forced to `true`. A `false` is NEVER invented —
+ *    when OLD is not `true`, NEW's value (of any shape, including absent) is
+ *    left exactly as sent;
+ *  - COVER LOOK LWW (v3): the OPTIONAL `coverLook`/`coverLookAt` pair is
+ *    EDITABLE LATEST-INTENT with LAST-WRITE-WINS, mirroring the client's own
+ *    persisted-doc merge with local := NEW, server := OLD. NEW's pair wins
+ *    by default; OLD's pair wins ONLY when OLD carries a present STRING
+ *    `coverLook` AND a NUMBER `coverLookAt` (the DEFENSIVE PAIRING guard — a
+ *    stamped-but-lookless side can never clobber a valid look) AND (NEW's
+ *    `coverLook` is not a string, OR NEW's `coverLookAt` is not a number, OR
+ *    OLD's stamp is STRICTLY GREATER than NEW's — NEW wins ties). The pair
+ *    is written back only when a look survived (absent-stays-absent when
+ *    neither side carries a string `coverLook`); the guard never invents
+ *    shape NEW didn't send;
  *  - malformed shapes pass NEW through unchanged; the guard never throws.
  *
  * NO `server-only`, NO Next/Supabase imports — unit-testable in the node-only
@@ -128,6 +149,26 @@ export const SAVE_DOC_DELETED_ID_MAX_CHARS = 64;
  * docs. Mirrors the literal `200` in the migration (parity-pinned).
  */
 export const SAVE_DOC_IDEAS_FUSE_LIMIT = 200;
+
+/**
+ * The MONOTONIC top-level story flags (v3), EXACTLY the set the first-profit
+ * gameCore's persisted-doc union OR-unions (storyIntroSeen since fpv03 U5,
+ * coverLook's sibling firstRunComplete and dashboardOrientationSeen since U6/
+ * U7a, and the legacy pre-fpv03 onboardingComplete since U7b deleted its own
+ * writer). Once true, always true: a stale/old-build write that omits or
+ * regresses one of these can never clear it server-side. Order mirrors the
+ * SQL's foreach array literal (parity-tested).
+ */
+export const SAVE_DOC_MONOTONIC_FLAG_KEYS = [
+  "storyIntroSeen",
+  "firstRunComplete",
+  "dashboardOrientationSeen",
+  "onboardingComplete",
+] as const;
+
+/** The editable-latest-intent cover-look pair (v3, fpv03 U6 S07). */
+export const SAVE_DOC_COVER_LOOK_KEY = "coverLook";
+export const SAVE_DOC_COVER_LOOK_AT_KEY = "coverLookAt";
 
 /** JSON-object check matching jsonb_typeof(x) = 'object' (arrays excluded). */
 function isJsonObject(value: unknown): value is Record<string, unknown> {
@@ -248,6 +289,53 @@ export function guardSaveDocUpdate(oldDoc: unknown, newDoc: unknown): unknown {
     collectTombstones(oldDoc, tombstones, tombstoned);
     if (tombstones.length > 0 || hasKey(newDoc, SAVE_DOC_DELETED_IDS_KEY)) {
       out = { ...out, [SAVE_DOC_DELETED_IDS_KEY]: tombstones };
+    }
+
+    // ── Graft A (v3): monotonic story flags ────────────────────────────
+    // Mirrors the client's own unionCompletionMaps OR-union of these exact
+    // four flags: if OLD carried the boolean `true` and NEW's value at the
+    // same key is anything other than `true` (absent, `false`, or a
+    // malformed shape), the repaired doc's key is forced to `true`. A
+    // `false` is NEVER invented — when OLD is not `true`, NEW's value
+    // (present or absent, any shape) is left exactly as sent.
+    for (const key of SAVE_DOC_MONOTONIC_FLAG_KEYS) {
+      if (oldDoc[key] === true && newDoc[key] !== true) {
+        out = { ...out, [key]: true };
+      }
+    }
+
+    // ── Graft B (v3): coverLook / coverLookAt, LAST-WRITE-WINS ─────────
+    // Mirrors the client's own persisted-doc merge (gameCore.ts) with
+    // local := NEW, server := OLD: NEW's pair wins by default (`out`
+    // already carries NEW's values verbatim, whatever their shape); OLD's
+    // pair wins ONLY when OLD carries a present STRING coverLook AND a
+    // NUMBER coverLookAt (the DEFENSIVE PAIRING guard — a stamped-but-
+    // lookless OLD can never clobber a valid look on NEW) AND (NEW carries
+    // no usable pair, OR OLD's stamp is STRICTLY GREATER than NEW's — NEW
+    // wins ties, matching the client's own `sCoverAt > coverLookAt` rule).
+    //
+    // A usable look must be a NON-EMPTY string. The client's check is a
+    // truthiness test (`serverDoc.coverLook &&` in gameCore.ts), which an
+    // empty string fails; a bare `typeof === "string"` here would let an
+    // empty look win over the other side's real one. The client never
+    // persists `""` (fromSaveDoc strips it), but the SQL trigger reads raw
+    // jsonb with no such normalization, so the two must agree explicitly.
+    {
+      const oldCover = oldDoc[SAVE_DOC_COVER_LOOK_KEY];
+      const oldAt = oldDoc[SAVE_DOC_COVER_LOOK_AT_KEY];
+      const newCover = newDoc[SAVE_DOC_COVER_LOOK_KEY];
+      const newAt = newDoc[SAVE_DOC_COVER_LOOK_AT_KEY];
+      const oldCoverOk =
+        typeof oldCover === "string" && oldCover !== "" && typeof oldAt === "number";
+      const newCoverOk =
+        typeof newCover === "string" && newCover !== "" && typeof newAt === "number";
+      if (oldCoverOk && (!newCoverOk || (oldAt as number) > (newAt as number))) {
+        out = {
+          ...out,
+          [SAVE_DOC_COVER_LOOK_KEY]: oldCover,
+          [SAVE_DOC_COVER_LOOK_AT_KEY]: oldAt,
+        };
+      }
     }
 
     // ── Per-idea grafts (only when BOTH sides have an ideas ARRAY) ─────

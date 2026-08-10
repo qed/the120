@@ -8,6 +8,8 @@ import {
   SAVE_DOC_DELETED_ID_MAX_CHARS,
   SAVE_DOC_DELETED_IDS_KEY,
   SAVE_DOC_DELETED_IDS_MAX,
+  SAVE_DOC_HERO_CONFIG_AT_KEY,
+  SAVE_DOC_HERO_CONFIG_KEY,
   SAVE_DOC_IDEA_IDENTITY_KEY,
   SAVE_DOC_IDEAS_FUSE_LIMIT,
   SAVE_DOC_MONOTONIC_FLAG_KEYS,
@@ -30,14 +32,17 @@ import {
 // 20260911120000_fp_save_doc_guard_tombstones.sql (20260906 is applied
 // history and must not be amended in place). v3 (story fields) REPLACES it
 // whole again, via 20260922120000_fp_save_doc_guard_story_fields.sql (20260911
-// is applied history and must not be amended in place either) — so this
-// parity test parses the v3 file: every v1/v2 structural pin below still
-// holds there, plus the new monotonic-flag and coverLook LWW pins.
-describe("migration parity: fp_save_doc_guard_story_fields.sql (guard v3)", () => {
+// is applied history and must not be amended in place either). v4 (hero
+// config) REPLACES it whole AGAIN, via
+// 20260923120000_fp_save_doc_guard_hero.sql (20260922 is applied history and
+// must not be amended in place either) — so this parity test parses the v4
+// file: every v1/v2/v3 structural pin below still holds there, plus the new
+// heroConfig LWW pins.
+describe("migration parity: fp_save_doc_guard_hero.sql (guard v4)", () => {
   const raw = readFileSync(
     path.resolve(
       process.cwd(),
-      "supabase/migrations/20260922120000_fp_save_doc_guard_story_fields.sql"
+      "supabase/migrations/20260923120000_fp_save_doc_guard_hero.sql"
     ),
     "utf8"
   );
@@ -362,6 +367,61 @@ describe("migration parity: fp_save_doc_guard_story_fields.sql (guard v3)", () =
     );
     expect(coverAt).toBeGreaterThan(flagAt);
     expect(coverAt).toBeLessThan(ideasGateAt);
+  });
+
+  // ------------------------------------------------- heroConfig LWW (v4)
+
+  // ⚠ THESE ARE NULL-SAFETY PINS, NOT STYLE PINS — copied verbatim from the
+  // coverLook pins above (v3 review, P0; the bug they catch is identical in
+  // shape for this graft). A plain `<>` comparison against 'object' on an
+  // absent key's NULL typeof would itself be NULL and be treated as FALSE by
+  // plpgsql's IF, so the presence tests MUST be NULL-safe (`is not distinct
+  // from`), and the ::numeric casts MUST sit in a branch only reachable once
+  // both sides are known numbers.
+  it("heroConfig LWW: both presence gates are NULL-SAFE and require an OBJECT shape", () => {
+    for (const v of ["v_old_hero_ok", "v_new_hero_ok"]) {
+      expect(
+        new RegExp(String.raw`${v}\s*:=[\s\S]{0,400}?is\s+not\s+distinct\s+from\s*'object'`, "i").test(body),
+        `${v} uses a NULL-safe object-shape test`
+      ).toBe(true);
+      expect(
+        new RegExp(String.raw`${v}\s*:=[\s\S]{0,400}?is\s+not\s+distinct\s+from\s*'number'`, "i").test(body),
+        `${v} uses a NULL-safe number test`
+      ).toBe(true);
+    }
+    // The NULL-unsafe `<>` shape must never come back on these gates.
+    expect(/jsonb_typeof\s*\([^)]*heroConfig[^)]*\)\s*<>/i.test(body)).toBe(false);
+  });
+
+  it("heroConfig LWW: the ::numeric comparison is UNREACHABLE unless both pairs are valid", () => {
+    // Same nesting shape as coverLook: the strict-greater compare lives in an
+    // `elsif` under `if v_old_hero_ok` + `if not v_new_hero_ok`, so it can
+    // only evaluate when both sides are already known numbers.
+    expect(
+      new RegExp(
+        String.raw`if\s+v_old_hero_ok\s+then[\s\S]{0,600}?if\s+not\s+v_new_hero_ok\s+then[\s\S]{0,600}?elsif\s*\(\s*OLD\.doc\s*->>\s*'${SAVE_DOC_HERO_CONFIG_AT_KEY}'\s*\)::numeric\s*>\s*\(\s*NEW\.doc\s*->>\s*'${SAVE_DOC_HERO_CONFIG_AT_KEY}'\s*\)::numeric`,
+        "i"
+      ).test(body)
+    ).toBe(true);
+  });
+
+  it("heroConfig LWW: OLD's win writes BOTH heroConfig and heroConfigAt from OLD's values", () => {
+    expect(
+      new RegExp(String.raw`jsonb_set\s*\(\s*v_doc\s*,\s*'\{${SAVE_DOC_HERO_CONFIG_KEY}\}'\s*,\s*v_old_hero\s*\)`, "i").test(body)
+    ).toBe(true);
+    expect(
+      new RegExp(String.raw`jsonb_set\s*\(\s*v_doc\s*,\s*'\{${SAVE_DOC_HERO_CONFIG_AT_KEY}\}'\s*,\s*v_old_hero_at\s*\)`, "i").test(body)
+    ).toBe(true);
+  });
+
+  it("runs the heroConfig LWW graft INSIDE the protected region, immediately after the coverLook graft and before the ideas gate", () => {
+    const coverAt = body.search(/v_old_cover\s*:=\s*OLD\.doc\s*->\s*'coverLook'/i);
+    const heroAt = body.search(/v_old_hero\s*:=\s*OLD\.doc\s*->\s*'heroConfig'/i);
+    const ideasGateAt = body.search(
+      /if\s+jsonb_typeof\s*\(\s*v_old_ideas\s*\)\s*=\s*'array'\s+and\s+jsonb_typeof\s*\(\s*v_new_ideas\s*\)\s*=\s*'array'\s+then/i
+    );
+    expect(heroAt).toBeGreaterThan(coverAt);
+    expect(heroAt).toBeLessThan(ideasGateAt);
   });
 
   // -------------------------------------------------- defensive shape gates

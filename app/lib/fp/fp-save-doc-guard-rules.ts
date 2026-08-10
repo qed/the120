@@ -1,10 +1,11 @@
 /**
  * First Profit SAVE DOC GUARD — the pure TS mirror of the fp_player_saves
- * BEFORE UPDATE doc guard (v3: migration
- * supabase/migrations/20260922120000_fp_save_doc_guard_story_fields.sql,
- * which replaced the v2 function from
- * 20260911120000_fp_save_doc_guard_tombstones.sql, which replaced the v1
- * function from 20260906120000_fp_save_doc_guard.sql).
+ * BEFORE UPDATE doc guard (v4: migration
+ * supabase/migrations/20260923120000_fp_save_doc_guard_hero.sql, which
+ * replaced the v3 function from
+ * 20260922120000_fp_save_doc_guard_story_fields.sql, which replaced the v2
+ * function from 20260911120000_fp_save_doc_guard_tombstones.sql, which
+ * replaced the v1 function from 20260906120000_fp_save_doc_guard.sql).
  *
  * THE SPEC LIVES HERE. This suite has no test database, so the plpgsql in the
  * migration cannot be executed by tests. Instead, `guardSaveDocUpdate` below
@@ -80,6 +81,19 @@
  *    is written back only when a look survived (absent-stays-absent when
  *    neither side carries a string `coverLook`); the guard never invents
  *    shape NEW didn't send;
+ *  - HERO CONFIG LWW (v4): the OPTIONAL `heroConfig`/`heroConfigAt` pair
+ *    mirrors COVER LOOK LWW exactly, with `heroConfig` (a jsonb OBJECT
+ *    rather than a string) in place of `coverLook`. NEW's pair wins by
+ *    default; OLD's pair wins ONLY when OLD carries a present OBJECT
+ *    `heroConfig` AND a NUMBER `heroConfigAt` (the same DEFENSIVE PAIRING
+ *    guard) AND (NEW's `heroConfig` is not an object, OR NEW's
+ *    `heroConfigAt` is not a number, OR OLD's stamp is STRICTLY GREATER than
+ *    NEW's — NEW wins ties). The pair is written back only when a config
+ *    survived (absent-stays-absent when neither side carries an object
+ *    `heroConfig`); there is no "non-empty" validity test for an object the
+ *    way there is for a string — `jsonb_typeof(...) = 'object'` is the whole
+ *    test, which excludes arrays and scalars; the guard never invents shape
+ *    NEW didn't send;
  *  - malformed shapes pass NEW through unchanged; the guard never throws.
  *
  * NO `server-only`, NO Next/Supabase imports — unit-testable in the node-only
@@ -169,6 +183,14 @@ export const SAVE_DOC_MONOTONIC_FLAG_KEYS = [
 /** The editable-latest-intent cover-look pair (v3, fpv03 U6 S07). */
 export const SAVE_DOC_COVER_LOOK_KEY = "coverLook";
 export const SAVE_DOC_COVER_LOOK_AT_KEY = "coverLookAt";
+
+/**
+ * The editable-latest-intent hero-config pair (v4, fpv03 U9a). Mirrors
+ * SAVE_DOC_COVER_LOOK_KEY/_AT_KEY exactly, but the value is a jsonb OBJECT
+ * (the kid's avatar choices) rather than a string.
+ */
+export const SAVE_DOC_HERO_CONFIG_KEY = "heroConfig";
+export const SAVE_DOC_HERO_CONFIG_AT_KEY = "heroConfigAt";
 
 /** JSON-object check matching jsonb_typeof(x) = 'object' (arrays excluded). */
 function isJsonObject(value: unknown): value is Record<string, unknown> {
@@ -334,6 +356,36 @@ export function guardSaveDocUpdate(oldDoc: unknown, newDoc: unknown): unknown {
           ...out,
           [SAVE_DOC_COVER_LOOK_KEY]: oldCover,
           [SAVE_DOC_COVER_LOOK_AT_KEY]: oldAt,
+        };
+      }
+    }
+
+    // ── Graft C (v4): heroConfig / heroConfigAt, LAST-WRITE-WINS ───────
+    // Mirrors Graft B exactly, with `heroConfig` (a jsonb OBJECT) in place of
+    // `coverLook` (a string). NEW's pair wins by default (`out` already
+    // carries NEW's values verbatim); OLD's pair wins ONLY when OLD carries
+    // a present OBJECT heroConfig AND a NUMBER heroConfigAt (the same
+    // DEFENSIVE PAIRING guard as coverLook — a stamped-but-configless OLD
+    // can never clobber a valid config on NEW) AND (NEW carries no usable
+    // pair, OR OLD's stamp is STRICTLY GREATER than NEW's — NEW wins ties).
+    //
+    // OBJECT-SHAPE VALIDITY: unlike coverLook's non-empty-STRING test, there
+    // is no meaningful "empty but invalid" object, so the validity test here
+    // is exactly `isJsonObject(...)` (mirrors jsonb_typeof(...) = 'object'),
+    // which excludes arrays (isJsonObject explicitly rejects Array.isArray)
+    // and scalars.
+    {
+      const oldHero = oldDoc[SAVE_DOC_HERO_CONFIG_KEY];
+      const oldHeroAt = oldDoc[SAVE_DOC_HERO_CONFIG_AT_KEY];
+      const newHero = newDoc[SAVE_DOC_HERO_CONFIG_KEY];
+      const newHeroAt = newDoc[SAVE_DOC_HERO_CONFIG_AT_KEY];
+      const oldHeroOk = isJsonObject(oldHero) && typeof oldHeroAt === "number";
+      const newHeroOk = isJsonObject(newHero) && typeof newHeroAt === "number";
+      if (oldHeroOk && (!newHeroOk || (oldHeroAt as number) > (newHeroAt as number))) {
+        out = {
+          ...out,
+          [SAVE_DOC_HERO_CONFIG_KEY]: oldHero,
+          [SAVE_DOC_HERO_CONFIG_AT_KEY]: oldHeroAt,
         };
       }
     }

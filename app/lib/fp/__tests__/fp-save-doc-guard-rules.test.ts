@@ -8,6 +8,10 @@ import {
   guardSaveDocUpdate,
 } from "../fp-save-doc-guard-rules";
 
+// NOTE: coverLook-graft tests above target the string-shaped v3 pair.
+// heroConfig (v4, added below) is deliberately object-shaped and lives in
+// its own describe block at the end of this file.
+
 // ── Behavioral spec of the fp_player_saves doc guard ─────────────────────────
 // This TS MIRROR IS THE SPEC the SQL parity test pins: the node suite has no
 // test database, so the plpgsql trigger in
@@ -846,5 +850,188 @@ describe("guardSaveDocUpdate — coverLook / coverLookAt LAST-WRITE-WINS (v3)", 
     expect(out.coverLook).toBe("night-hero");
     expect(out.coverLookAt).toBe(5000);
     expect(out.ideas).toBe("junk");
+  });
+});
+
+describe("guardSaveDocUpdate — heroConfig / heroConfigAt LAST-WRITE-WINS (v4)", () => {
+  it("OLD's newer hero wins over NEW's older hero", () => {
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [],
+      heroConfig: { skin: "fox", outfit: "scout" },
+      heroConfigAt: 5000,
+    };
+    const incoming = {
+      docVersion: 1,
+      ideas: [],
+      heroConfig: { skin: "owl", outfit: "chef" },
+      heroConfigAt: 1000,
+    };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.heroConfig).toEqual({ skin: "fox", outfit: "scout" });
+    expect(out.heroConfigAt).toBe(5000);
+  });
+
+  it("NEW's newer hero wins over OLD's older hero", () => {
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [],
+      heroConfig: { skin: "fox", outfit: "scout" },
+      heroConfigAt: 1000,
+    };
+    const incoming = {
+      docVersion: 1,
+      ideas: [],
+      heroConfig: { skin: "wolf", outfit: "explorer" },
+      heroConfigAt: 5000,
+    };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.heroConfig).toEqual({ skin: "wolf", outfit: "explorer" });
+    expect(out.heroConfigAt).toBe(5000);
+  });
+
+  it("a TIE goes to NEW", () => {
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [],
+      heroConfig: { skin: "fox" },
+      heroConfigAt: 5000,
+    };
+    const incoming = {
+      docVersion: 1,
+      ideas: [],
+      heroConfig: { skin: "wolf" },
+      heroConfigAt: 5000,
+    };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.heroConfig).toEqual({ skin: "wolf" });
+    expect(out.heroConfigAt).toBe(5000);
+  });
+
+  it("OLD wins when NEW omits the pair entirely (old-build write) and OLD has a valid stamp — the FULL-OMISSION probe", () => {
+    // This is the case the migration header calls out by name: the
+    // NULL-propagation bug in v3's first coverLook draft would have made
+    // this exact omission silently ERASE the field instead of preserving it.
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [],
+      heroConfig: { skin: "fox", outfit: "scout" },
+      heroConfigAt: 5000,
+    };
+    const incoming = { docVersion: 1, ideas: [] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.heroConfig).toEqual({ skin: "fox", outfit: "scout" });
+    expect(out.heroConfigAt).toBe(5000);
+  });
+
+  it("NEW wins when NEW omits the pair entirely and OLD has no valid stamp", () => {
+    const oldDoc = { docVersion: 1, ideas: [], heroConfig: { skin: "fox" } };
+    const incoming = { docVersion: 1, ideas: [] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    // OLD has a config but no valid numeric stamp — never wins.
+    expect(Object.hasOwn(out, "heroConfig")).toBe(false);
+  });
+
+  it.each([
+    ["a string", "fox"],
+    ["an array", ["fox", "scout"]],
+    ["a number", 42],
+    ["null", null],
+  ])("a non-object heroConfig on OLD (%s) never wins, even with a newer stamp", (_name, bad) => {
+    const oldDoc = { docVersion: 1, ideas: [], heroConfig: bad, heroConfigAt: 9000 };
+    const incoming = { docVersion: 1, ideas: [], heroConfig: { skin: "wolf" }, heroConfigAt: 1 };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.heroConfig).toEqual({ skin: "wolf" });
+    expect(out.heroConfigAt).toBe(1);
+  });
+
+  it.each([
+    ["a string", "fox"],
+    ["an array", ["fox", "scout"]],
+    ["a number", 42],
+    ["null", null],
+  ])("a non-object heroConfig on NEW (%s) does not block OLD's real config from winning", (_name, bad) => {
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [],
+      heroConfig: { skin: "fox", outfit: "scout" },
+      heroConfigAt: 5000,
+    };
+    const incoming = { docVersion: 1, ideas: [], heroConfig: bad, heroConfigAt: 1 };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.heroConfig).toEqual({ skin: "fox", outfit: "scout" });
+    expect(out.heroConfigAt).toBe(5000);
+  });
+
+  it("DEFENSIVE PAIRING: a configless-but-stamped OLD cannot clobber NEW's valid config", () => {
+    const oldDoc = { docVersion: 1, ideas: [], heroConfigAt: 9999 }; // stamp with no config
+    const incoming = { docVersion: 1, ideas: [], heroConfig: { skin: "wolf" }, heroConfigAt: 1 };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.heroConfig).toEqual({ skin: "wolf" });
+    expect(out.heroConfigAt).toBe(1);
+  });
+
+  it("a configless-but-stamped NEW does not block OLD's valid config from winning", () => {
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [],
+      heroConfig: { skin: "fox", outfit: "scout" },
+      heroConfigAt: 5000,
+    };
+    const incoming = { docVersion: 1, ideas: [], heroConfigAt: 1 }; // stamp with no config
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.heroConfig).toEqual({ skin: "fox", outfit: "scout" });
+    expect(out.heroConfigAt).toBe(5000);
+  });
+
+  it("does not invent the pair when neither side has a heroConfig (absent-stays-absent)", () => {
+    const oldDoc = { docVersion: 1, ideas: [] };
+    const incoming = { docVersion: 1, ideas: [] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(Object.hasOwn(out, "heroConfig")).toBe(false);
+    expect(Object.hasOwn(out, "heroConfigAt")).toBe(false);
+  });
+
+  it.each([
+    ["a string", "5000"],
+    ["an object", { at: 5000 }],
+    ["null", null],
+  ])("never raises when OLD's heroConfigAt is %s (junk shape never wins)", (_name, bad) => {
+    const oldDoc = { docVersion: 1, ideas: [], heroConfig: { skin: "fox" }, heroConfigAt: bad };
+    const incoming = { docVersion: 1, ideas: [], heroConfig: { skin: "wolf" }, heroConfigAt: 1 };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.heroConfig).toEqual({ skin: "wolf" });
+    expect(out.heroConfigAt).toBe(1);
+  });
+
+  it("runs even when idea handling is skipped (NEW's ideas not an array)", () => {
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [],
+      heroConfig: { skin: "fox", outfit: "scout" },
+      heroConfigAt: 5000,
+    };
+    const incoming = { docVersion: 1, ideas: "junk" };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.heroConfig).toEqual({ skin: "fox", outfit: "scout" });
+    expect(out.heroConfigAt).toBe(5000);
+    expect(out.ideas).toBe("junk");
+  });
+
+  it("runs independently of the coverLook graft (both LWW pairs repair in one save)", () => {
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [],
+      coverLook: "night-hero",
+      coverLookAt: 5000,
+      heroConfig: { skin: "fox", outfit: "scout" },
+      heroConfigAt: 5000,
+    };
+    const incoming = { docVersion: 1, ideas: [] }; // old-build write: omits both pairs
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.coverLook).toBe("night-hero");
+    expect(out.coverLookAt).toBe(5000);
+    expect(out.heroConfig).toEqual({ skin: "fox", outfit: "scout" });
+    expect(out.heroConfigAt).toBe(5000);
   });
 });

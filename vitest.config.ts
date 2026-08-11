@@ -4,6 +4,27 @@ import path from "path";
 export default defineConfig({
   test: {
     environment: "node",
+    // ── WHY 30s AND NOT VITEST'S 5s DEFAULT ──────────────────────────────────
+    // These suites are routinely run CONCURRENTLY (several agents, or a run
+    // alongside `next dev`), and the heaviest tests here are CPU-bound rather
+    // than I/O-bound: the slowest invoke a real page/component tree and pay the
+    // whole compile on their first render. Measured on an idle machine the top
+    // few are ~0.5-1.1s (`v3-start-always-live`'s first render 787ms, the
+    // gauntlet generator sweep 1073ms, the requireStaff entry-point sweep
+    // 939ms). Under three concurrent full runs the SAME tests were measured at
+    // 5008ms and 5014ms — a ~6x inflation that lands just past the 5s default,
+    // so the suite reported a red that had nothing to do with the code.
+    //
+    // That matters more here than in a repo with CI: there is no CI, so
+    // `npm run ship` IS the gate, and a gate that cries wolf teaches everyone
+    // to re-run until green — which is exactly how a REAL failure gets waved
+    // through. 30s still catches a genuinely hung test (the whole suite runs in
+    // ~25s), it just stops timing out work that was only ever slow.
+    //
+    // If you find yourself raising this again, measure first: a test that needs
+    // more than 30s of CPU is a test with a problem, not a timeout with one.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     include: [
       "app/2026-27/**/__tests__/**/*.test.{ts,tsx}",
       "app/crm/__tests__/**/*.test.{ts,tsx}",

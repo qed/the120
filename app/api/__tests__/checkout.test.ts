@@ -1,9 +1,11 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import type Stripe from "stripe";
 
+import {
+  DASHBOARD_SWEEP_SURFACES,
+  readRepoFile as read,
+  readSurfaces,
+} from "@/app/lib/__tests__/helpers/dashboard-surfaces";
 import {
   ALLOWED_ORIGINS,
   CONSENT_MIN_POLICY_VERSION,
@@ -28,9 +30,6 @@ import {
 } from "@/app/lib/funnel/deposit-core";
 import { canReserveSeatForChild } from "@/app/dashboard/data";
 import { SITE_URL } from "@/app/lib/site";
-
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const read = (p: string) => readFileSync(path.resolve(REPO_ROOT, p), "utf8");
 
 const SESSION_INPUT: CheckoutSessionInput = {
   childId: "child-1",
@@ -127,15 +126,12 @@ describe("R51a — the policy record", () => {
     // now happens ON the Stripe-hosted page (consent_collection, pinned
     // structurally below), so the boolean must not exist at all: any
     // reappearance of `policyAccepted` is a claim the client cannot make.
-    // The parent-dashboard restructure split the one launcher into three client
-    // surfaces (the parent list, the per-kid portal, the FP card); the pin
-    // sweeps all three, so no client surface can fabricate an acceptance.
-    const ui =
-      read("app/dashboard/ParentDashboard.tsx") +
-      read("app/dashboard/kids/[id]/KidPortal.tsx") +
-      read("app/dashboard/kids/[id]/KidRouteShell.tsx") +
-      read("app/dashboard/kids/[id]/account/KidAccount.tsx") +
-      read("app/dashboard/FirstProfitCard.tsx");
+    // The pin sweeps EVERY client surface of the dashboard, so no client
+    // surface can fabricate an acceptance. The list is shared
+    // (app/lib/__tests__/helpers/dashboard-surfaces.ts) rather than retyped
+    // here — a surface missing from a hand-copy is a surface allowed to
+    // fabricate one, silently.
+    const ui = readSurfaces(DASHBOARD_SWEEP_SURFACES);
     expect(ui).not.toContain("policyAccepted");
     const route = read("app/api/checkout/route.ts");
     expect(route).not.toContain("policyAccepted");

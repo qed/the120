@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 import { globSync } from "tinyglobby";
 
 import {
+  DASHBOARD_SWEEP_SURFACES,
+  readSurfaces,
+} from "./helpers/dashboard-surfaces";
+import {
   DEPOSIT_REFUND_DEADLINE,
   DEPOSIT_REFUND_DEADLINE_LABEL,
 } from "@/app/lib/site";
@@ -104,13 +108,13 @@ describe("no surface retypes the deadline", () => {
     // deposit banner is gone rather than merely reading the constant. The
     // deadline label now lives only where money still does (nurture email,
     // welcome template, checkout route) — asserted elsewhere.
-    const src = stripComments(
-      readSource("app/dashboard/ParentDashboard.tsx") +
-        readSource("app/dashboard/kids/[id]/KidPortal.tsx") +
-        readSource("app/dashboard/kids/[id]/KidRouteShell.tsx") +
-        readSource("app/dashboard/kids/[id]/account/KidAccount.tsx") +
-        readSource("app/dashboard/FirstProfitCard.tsx")
-    );
+    // The surface list is shared (helpers/dashboard-surfaces.ts) rather than
+    // retyped here, so a route added tomorrow is swept by this pin without
+    // anyone remembering it; the registry test reddens if the list falls behind
+    // what is on disk. Note this file's own stripComments is kept — its
+    // line-comment rule differs from the other consumers', and unifying it
+    // would quietly change what this sweep sees.
+    const src = stripComments(readSurfaces(DASHBOARD_SWEEP_SURFACES));
     expect(src).not.toContain("DEPOSIT_REFUND_DEADLINE_LABEL");
     expect(src).not.toContain("September 30, 2026");
   });

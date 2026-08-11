@@ -1,7 +1,9 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+
+import {
+  SURFACE,
+  readRepoFile as read,
+} from "@/app/lib/__tests__/helpers/dashboard-surfaces";
 
 /**
  * Parent-dashboard restructure wiring pins (source-scan convention: this repo's
@@ -21,9 +23,6 @@ import { describe, expect, it } from "vitest";
  * gate-redirects to /dashboard.
  */
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(HERE, "../../..");
-const read = (rel: string) => readFileSync(path.resolve(ROOT, rel), "utf8");
 const stripComments = (src: string) =>
   src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
@@ -61,7 +60,7 @@ describe("app/dashboard/account/page.tsx — gate precedes the redirect (no open
 /* ─────────────────── the First Profit Login handoff (FirstProfitCard) ─────────────────── */
 
 describe("FirstProfitCard — the child-bound Login handoff", () => {
-  const card = stripComments(read("app/dashboard/FirstProfitCard.tsx"));
+  const card = stripComments(read(SURFACE.firstProfitCard));
 
   it("mints with the card's OWN child id (a refactor that loses it burns the wrong code)", () => {
     expect(card).toContain("v3MintHandoffAction({ childId: child.id })");
@@ -89,7 +88,7 @@ describe("FirstProfitCard — the child-bound Login handoff", () => {
 /* ─────────────────── the parent dashboard (kid grid) ─────────────────── */
 
 describe("ParentDashboard — a clean white list of clickable kid cards", () => {
-  const app = stripComments(read("app/dashboard/ParentDashboard.tsx"));
+  const app = stripComments(read(SURFACE.parentDashboard));
 
   it("reads as clean/white, not the v3-cream grain", () => {
     expect(app).toContain("bg-white");
@@ -128,7 +127,7 @@ describe("ParentDashboard — a clean white list of clickable kid cards", () => 
 // the extraction is that there is a single implementation to review, and the
 // pins have to say so or they quietly re-license a second copy.
 describe("KidRouteShell — the ONE ownership/chrome implementation both per-kid routes mount", () => {
-  const shell = stripComments(read("app/dashboard/kids/[id]/KidRouteShell.tsx"));
+  const shell = stripComments(read(SURFACE.kidRouteShell));
 
   it("picks the child by id from the RLS-scoped store, with a not-found fallback", () => {
     expect(shell).toContain("children.find((c) => c.id === childId)");
@@ -229,12 +228,12 @@ describe("the KidRouteShell body render props call NO hooks (or the route crashe
   const bodies: ReadonlyArray<[label: string, region: string]> = [
     [
       "KidPortal.tsx kidBody",
-      bodyRegion(stripComments(read("app/dashboard/kids/[id]/KidPortal.tsx")), "const kidBody = (c: Child) => {"),
+      bodyRegion(stripComments(read(SURFACE.kidPortal)), "const kidBody = (c: Child) => {"),
     ],
     [
       "KidAccount.tsx body",
       bodyRegion(
-        stripComments(read("app/dashboard/kids/[id]/account/KidAccount.tsx")),
+        stripComments(read(SURFACE.kidAccount)),
         "const body = (c: Child) => {"
       ),
     ],
@@ -266,7 +265,7 @@ describe("the KidRouteShell body render props call NO hooks (or the route crashe
 /* ─────────────────── the per-kid portal ─────────────────── */
 
 describe("KidPortal — the per-kid apps launcher, picked by id", () => {
-  const app = stripComments(read("app/dashboard/kids/[id]/KidPortal.tsx"));
+  const app = stripComments(read(SURFACE.kidPortal));
 
   it("gets its ownership check from the shared shell, in the KID's cream surface", () => {
     expect(app).toContain('<KidRouteShell childId={childId} surface="kid" body={kidBody} />');
@@ -296,7 +295,7 @@ describe("KidPortal — the per-kid apps launcher, picked by id", () => {
 /* ─────────────────── the per-kid ACCOUNT page ─────────────────── */
 
 describe("KidAccount — one kid's parent controls, picked by id", () => {
-  const app = stripComments(read("app/dashboard/kids/[id]/account/KidAccount.tsx"));
+  const app = stripComments(read(SURFACE.kidAccount));
 
   it("gets the SAME ownership check from the SAME shell, in the PARENT's white surface", () => {
     expect(app).toContain('<KidRouteShell childId={childId} surface="parent" body={body} />');
@@ -319,8 +318,8 @@ describe("KidAccount — one kid's parent controls, picked by id", () => {
  * space, white is the parent's. Nothing else in the suite would notice the day
  * one of them silently started looking like the other. */
 describe("the two per-kid audiences keep their own wrapper treatment", () => {
-  const portal = stripComments(read("app/dashboard/kids/[id]/KidPortal.tsx"));
-  const account = stripComments(read("app/dashboard/kids/[id]/account/KidAccount.tsx"));
+  const portal = stripComments(read(SURFACE.kidPortal));
+  const account = stripComments(read(SURFACE.kidAccount));
 
   it('the kid\'s portal asks for surface="kid" and the account page for surface="parent"', () => {
     expect(portal).toContain('surface="kid"');
@@ -404,7 +403,7 @@ describe("app/dashboard/kids/[id]/account/page.tsx — gate before data, then th
 
 describe("V3BrandLockup — navigating on the dashboard, inert on /start", () => {
   it('the dashboard header links the lockup home (href="/dashboard")', () => {
-    const ui = read("app/dashboard/ui.tsx");
+    const ui = read(SURFACE.ui);
     expect(ui).toContain('<V3BrandLockup href="/dashboard"');
   });
 

@@ -1,8 +1,11 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import {
+  DASHBOARD_SWEEP_SURFACES,
+  SURFACE,
+  readRepoFile as read,
+  readSurfaces,
+} from "./helpers/dashboard-surfaces";
 import {
   APPLICANT_STATES,
   type ApplicantState,
@@ -28,9 +31,6 @@ import {
   V3_ADD_KID_HREF,
   type RemapContext,
 } from "@/app/lib/v3-signup/remap-rules";
-
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const read = (p: string) => readFileSync(path.resolve(REPO_ROOT, p), "utf8");
 
 /**
  * Reconnect U3: the state-aware child card as a PURE verdict (components are
@@ -622,20 +622,18 @@ describe("wiring — the verdict is a pure module, no longer consumed by the app
   it("the parent dashboard surfaces render no funnel card, no reserve CTA, no editor view", () => {
     // The parent-dashboard restructure split the launcher into FOUR client
     // surfaces (the kid list, the kid's portal, that kid's account page, and the
-    // extracted FP card); the negative pins sweep all four so a funnel card
-    // cannot creep back onto any of them.
+    // extracted FP card); the negative pins sweep all of them so a funnel card
+    // cannot creep back onto any one.
     //
-    // ⚠ A SURFACE MISSING FROM THIS LIST IS A SURFACE THE INVARIANT NO LONGER
-    // BINDS — and it fails silently, because a sweep over the files that ARE
-    // listed still passes. KidAccount.tsx was carved out of KidPortal.tsx and
-    // did not appear here for one review cycle. Add the file the day you add
-    // the route.
-    const src =
-      read("app/dashboard/ParentDashboard.tsx") +
-      read("app/dashboard/kids/[id]/KidPortal.tsx") +
-      read("app/dashboard/kids/[id]/KidRouteShell.tsx") +
-      read("app/dashboard/kids/[id]/account/KidAccount.tsx") +
-      read("app/dashboard/FirstProfitCard.tsx");
+    // The list used to be spelled out here, and in five other test files, and a
+    // surface missing from any of them was a surface the invariant no longer
+    // bound — silently, because a sweep over the files that ARE listed still
+    // passes. KidAccount.tsx was carved out of KidPortal.tsx and did not appear
+    // here for one review cycle. It is ONE list now
+    // (app/lib/__tests__/helpers/dashboard-surfaces.ts), and
+    // app/dashboard/__tests__/dashboard-surface-registry.test.ts reddens if a
+    // client surface exists on disk that the list does not name.
+    const src = readSurfaces(DASHBOARD_SWEEP_SURFACES);
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
     expect(code).not.toContain("cardVerdict");
     expect(code).not.toContain("reserveRefusalMessage");
@@ -657,7 +655,7 @@ describe("wiring — the verdict is a pure module, no longer consumed by the app
   });
 
   it("the store reads applicant_state through parseApplicantState (fail-closed)", () => {
-    const src = read("app/dashboard/store.tsx");
+    const src = read(SURFACE.store);
     expect(src).toContain("parseApplicantState(r.applicant_state)");
   });
 });

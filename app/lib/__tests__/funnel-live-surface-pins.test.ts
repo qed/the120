@@ -1,7 +1,10 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+
+import {
+  PER_KID_SWEEP_SURFACES,
+  readRepoFile as read,
+  readSurfaces,
+} from "./helpers/dashboard-surfaces";
 
 /**
  * THE SURVIVORS OF THE FIDELITY-PIN FAMILY (v3 plan Unit 9).
@@ -28,9 +31,6 @@ import { describe, expect, it } from "vitest";
  *    retired with the flow.
  */
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(HERE, "../../..");
-const read = (rel: string) => readFileSync(path.resolve(ROOT, rel), "utf8");
 const stripComments = (src: string) =>
   src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
@@ -104,12 +104,14 @@ describe("the dashboard's own chrome (per-kid apps launcher)", () => {
   // The parent-dashboard restructure moved the apps launcher onto the per-kid
   // portal; the FP card is its own component now. The chrome pins read the
   // portal plus that card together, which is the launcher surface a parent sees.
-  const app = stripComments(
-    read("app/dashboard/kids/[id]/KidPortal.tsx") +
-      read("app/dashboard/kids/[id]/KidRouteShell.tsx") +
-      read("app/dashboard/kids/[id]/account/KidAccount.tsx") +
-      read("app/dashboard/FirstProfitCard.tsx")
-  );
+  //
+  // PER_KID_SWEEP_SURFACES, not the full sweep set: this describe block asserts
+  // what the PER-KID launcher renders (AppHeader, max-w-5xl, the three app
+  // rows), and `/dashboard` — the white directory of kid cards — is a different
+  // screen that renders none of them. The narrower scope is the pin's meaning,
+  // not an oversight, so it is a NAMED subset of the one shared list rather
+  // than a hand-list of its own (see helpers/dashboard-surfaces.ts).
+  const app = stripComments(readSurfaces(PER_KID_SWEEP_SURFACES));
 
   // The admissions dashboard's chrome (the red add-a-child pill, the dual-register
   // top bars, the two-column card grid) retired with the payment experience. What

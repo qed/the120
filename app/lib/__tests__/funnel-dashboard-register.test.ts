@@ -1,8 +1,14 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import {
+  DASHBOARD_SWEEP_SURFACES,
+  REPO_ROOT,
+  SURFACE,
+  readRepoFile as read,
+  readSurfaces,
+} from "./helpers/dashboard-surfaces";
 import {
   dashboardRegister,
   type DashboardGateChild,
@@ -21,9 +27,6 @@ import { TASK_STATES } from "@/app/lib/fp/transition-table";
  * STICKY (a refund never un-flips), legacy families never flip, and the two
  * registers never mix on one screen.
  */
-
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const read = (p: string) => readFileSync(path.resolve(REPO_ROOT, p), "utf8");
 
 const child = (over: Partial<DashboardGateChild> = {}): DashboardGateChild => ({
   id: "c1",
@@ -250,16 +253,19 @@ describe("the parent dashboard — a kid list + per-kid portals (payment removed
   //
   // ⚠ EVERY CLIENT SURFACE OF THE DASHBOARD IS SWEPT HERE. The sweeps below
   // (no em dash, no payment strings, no register skins) are only as strong as
-  // this list: a new surface left out of it is a surface the invariants no
-  // longer bind. Add the file here the day you add the route.
-  const parent = read("app/dashboard/ParentDashboard.tsx");
-  const portal = read("app/dashboard/kids/[id]/KidPortal.tsx");
-  const shell = read("app/dashboard/kids/[id]/KidRouteShell.tsx");
-  const account = read("app/dashboard/kids/[id]/account/KidAccount.tsx");
-  const fpCard = read("app/dashboard/FirstProfitCard.tsx");
+  // the list they walk: a surface left out of it is a surface the invariants no
+  // longer bind, and it fails silently. That list is no longer retyped here —
+  // it lives once in app/lib/__tests__/helpers/dashboard-surfaces.ts, and
+  // app/dashboard/__tests__/dashboard-surface-registry.test.ts reddens if a
+  // client surface exists on disk that the list does not name.
+  const parent = read(SURFACE.parentDashboard);
+  const portal = read(SURFACE.kidPortal);
+  const shell = read(SURFACE.kidRouteShell);
+  const account = read(SURFACE.kidAccount);
+  const fpCard = read(SURFACE.firstProfitCard);
   const strip = (s: string) =>
     s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
-  const allCode = strip(parent + portal + shell + account + fpCard);
+  const allCode = strip(readSurfaces(DASHBOARD_SWEEP_SURFACES));
 
   it("has no register swap left — no path/application skins, no DashHeader", () => {
     expect(allCode).not.toContain("isPath");
@@ -319,7 +325,7 @@ describe("the parent dashboard — a kid list + per-kid portals (payment removed
     // item to one and not the other). So the label pin reads the single
     // definition, and each surface is pinned to CONSUME it rather than to
     // re-declare it — which is what actually keeps the two headers identical.
-    const ui = read("app/dashboard/ui.tsx");
+    const ui = read(SURFACE.ui);
     expect(ui).toContain('ACCOUNT_MENU: AccountMenuItem[] = [{ label: "My Kids", href: "/dashboard" }]');
     // The per-kid surface is the shared KidRouteShell now (both per-kid routes
     // mount it), so IT is the consumer to pin — same rule, one header.
@@ -453,7 +459,7 @@ describe("sumVerifiedTaskCounts — the hero stat box's family total", () => {
 /* ─────────────────── the store carries the fact read-only ─────────────────── */
 
 describe("the client store treats arrived_at as server-owned", () => {
-  const store = read("app/dashboard/store.tsx");
+  const store = read(SURFACE.store);
 
   it("rowToChild maps it; the store holds NO children write path at all (U9: read side only)", () => {
     expect(store).toMatch(/arrivedAt: r\.arrived_at \?\? null/);

@@ -1,8 +1,9 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import {
+  DASHBOARD_SWEEP_SURFACES,
+  readRepoFile as read,
+} from "./helpers/dashboard-surfaces";
 import {
   FUNNEL_EVENT_NAMES,
   FUNNEL_STAGES,
@@ -11,9 +12,6 @@ import {
   sanitizeEventProperties,
   stageFromEvents,
 } from "@/app/lib/funnel/event-rules";
-
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const read = (p: string) => readFileSync(path.resolve(REPO_ROOT, p), "utf8");
 
 /** U16 (R56–R59): the event vocabulary, the no-PII rule, and the stage
  *  ladder — plus wiring scans pinning that every emit point exists and the
@@ -187,11 +185,10 @@ describe("the emit points exist (wiring scans — server-side only, R56)", () =>
       "app/start/StepCover.tsx",
       "app/start/StepStory.tsx",
       "app/start/StepAccountReady.tsx",
-      "app/dashboard/ParentDashboard.tsx",
-      "app/dashboard/kids/[id]/KidPortal.tsx",
-      "app/dashboard/kids/[id]/KidRouteShell.tsx",
-      "app/dashboard/kids/[id]/account/KidAccount.tsx",
-      "app/dashboard/FirstProfitCard.tsx",
+      // The dashboard half of the sweep is the SHARED list — retyping it here
+      // was one of six copies, and a surface missing from any copy was a
+      // surface the no-client-emit rule stopped binding, silently.
+      ...DASHBOARD_SWEEP_SURFACES,
     ]) {
       expect(read(f), f).not.toContain('from "@/app/lib/funnel/events"');
     }

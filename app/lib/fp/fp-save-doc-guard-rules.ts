@@ -1,8 +1,9 @@
 /**
  * First Profit SAVE DOC GUARD — the pure TS mirror of the fp_player_saves
- * BEFORE UPDATE doc guard (v4: migration
- * supabase/migrations/20260923120000_fp_save_doc_guard_hero.sql, which
- * replaced the v3 function from
+ * BEFORE UPDATE doc guard (v5: migration
+ * supabase/migrations/20260924120000_fp_save_doc_guard_story_panels.sql, which
+ * replaced the v4 function from 20260923120000_fp_save_doc_guard_hero.sql,
+ * which replaced the v3 function from
  * 20260922120000_fp_save_doc_guard_story_fields.sql, which replaced the v2
  * function from 20260911120000_fp_save_doc_guard_tombstones.sql, which
  * replaced the v1 function from 20260906120000_fp_save_doc_guard.sql).
@@ -94,6 +95,29 @@
  *    way there is for a string — `jsonb_typeof(...) = 'object'` is the whole
  *    test, which excludes arrays and scalars; the guard never invents shape
  *    NEW didn't send;
+ *  - STORY PANELS (v5): the OPTIONAL top-level `storyPanels` map
+ *    (`{ [questionId]: { answer: string; answerAt?: number } }`) carries TWO
+ *    semantics at once, and they are NOT the same rule:
+ *      (1) KEY EXISTENCE IS MONOTONIC — the merged key set is OLD ∪ NEW. A
+ *          key present in OLD but ABSENT from NEW is grafted back VERBATIM
+ *          (the old-build clobber this exists to prevent); a key is never
+ *          subtracted, whatever its value's shape;
+ *      (2) A KEY PRESENT ON BOTH SIDES resolves as an INSEPARABLE UNIT,
+ *          last-write-wins on `answerAt`: the winning side's WHOLE value is
+ *          taken, never an `answer` from one side with an `answerAt` from the
+ *          other. OLD's unit wins ONLY when OLD's `answerAt` is a number AND
+ *          (NEW's is not a number OR OLD's is STRICTLY GREATER) — so a larger
+ *          stamp wins, an unstamped/non-numeric side loses to a stamped one,
+ *          and a TIE (or neither side stamped) goes to NEW, matching the
+ *          coverLook/heroConfig tie rule.
+ *    `answer` is never inspected (it may legitimately be `""` — an empty
+ *    answer is a real edit, unlike coverLook's `""`). A non-object
+ *    `storyPanels` on EITHER side is treated as "no panels", never an error
+ *    (the SQL's key iteration is gated on OLD being an object because
+ *    `jsonb_object_keys()` RAISES on a scalar/array); a non-object per-key
+ *    VALUE simply carries no stamp, so it loses a contested key and still
+ *    grafts back on an uncontested one. The merged map is written back only
+ *    when it is non-empty or NEW carried the key (absent-stays-absent);
  *  - malformed shapes pass NEW through unchanged; the guard never throws.
  *
  * NO `server-only`, NO Next/Supabase imports — unit-testable in the node-only
@@ -192,6 +216,23 @@ export const SAVE_DOC_COVER_LOOK_AT_KEY = "coverLookAt";
 export const SAVE_DOC_HERO_CONFIG_KEY = "heroConfig";
 export const SAVE_DOC_HERO_CONFIG_AT_KEY = "heroConfigAt";
 
+/**
+ * The story-panels map (v5): an OPTIONAL top-level object keyed by stable
+ * question id, each value an inseparable `{ answer, answerAt? }` unit. Unlike
+ * every other protected field this one is BOTH monotonic (in its KEY SET) and
+ * last-write-wins (WITHIN a contested key) — see the CONTRACT above and the
+ * migration's GRAFT D section.
+ */
+export const SAVE_DOC_STORY_PANELS_KEY = "storyPanels";
+
+/**
+ * The per-panel LWW stamp. OPTIONAL: a panel may be unstamped, and an
+ * unstamped side always LOSES to a side carrying a numeric stamp. The sibling
+ * `answer` is deliberately NOT a constant here — the guard never reads it (an
+ * empty answer is a legitimate edit), it only ever moves the whole unit.
+ */
+export const SAVE_DOC_STORY_PANEL_AT_KEY = "answerAt";
+
 /** JSON-object check matching jsonb_typeof(x) = 'object' (arrays excluded). */
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -203,6 +244,38 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
  */
 function hasKey(obj: Record<string, unknown>, key: string): boolean {
   return Object.hasOwn(obj, key);
+}
+
+/**
+ * Write one OWN data entry into a mutable accumulator — the JS equivalent of
+ * jsonb's `map || jsonb_build_object(key, value)`.
+ *
+ * WHY NOT THE OBVIOUS `obj[key] = value`: to Postgres a jsonb key is just a
+ * string, but in JS `__proto__` is not. A bracket ASSIGNMENT on an object that
+ * has no OWN `__proto__` key reaches Object.prototype's inherited `__proto__`
+ * ACCESSOR and REASSIGNS the object's [[Prototype]] instead of storing an
+ * entry — the value then vanishes from `Object.keys()` and
+ * `JSON.stringify()`, which is precisely the silent data loss this guard
+ * exists to prevent. And the key really can arrive off the wire:
+ * `JSON.parse('{"__proto__":{}}')` yields a genuine OWN property, so a
+ * question id of `__proto__` is representable in a stored doc.
+ * `Object.defineProperty` always creates/overwrites an own data property, so
+ * it behaves exactly like the object-literal computed-key form
+ * (`{ ...out, [key]: value }`) every other graft in this file uses — which is
+ * safe for the same reason (a computed key in a literal is a CreateDataProperty,
+ * never a setter call).
+ */
+function setOwnEntry(
+  obj: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  Object.defineProperty(obj, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
 }
 
 /**
@@ -387,6 +460,77 @@ export function guardSaveDocUpdate(oldDoc: unknown, newDoc: unknown): unknown {
           [SAVE_DOC_HERO_CONFIG_KEY]: oldHero,
           [SAVE_DOC_HERO_CONFIG_AT_KEY]: oldHeroAt,
         };
+      }
+    }
+
+    // ── Graft D (v5): storyPanels — key UNION + per-key LAST-WRITE-WINS ─
+    // TWO semantics in one field (see the CONTRACT above):
+    //   (1) the merged key set is OLD ∪ NEW — a key OLD has and NEW omits is
+    //       grafted back VERBATIM, never subtracted (the old-build clobber
+    //       this graft exists to prevent);
+    //   (2) a key present on BOTH sides resolves as an INSEPARABLE UNIT,
+    //       last-write-wins on `answerAt` — the WHOLE value of the winning
+    //       side is taken, never a mix of the two sides' fields.
+    // Orientation matches Grafts B/C (local := NEW, server := OLD): the
+    // accumulator STARTS as NEW's map, so NEW wins by default and OLD only
+    // ever overrides — hence ties, and the both-sides-unstamped case, go to
+    // NEW. `answer` is never inspected (it may legitimately be "").
+    //
+    // GARBAGE SAFETY, mirroring the SQL: a non-object `storyPanels` on either
+    // side is "no panels", never an error (the SQL gates its
+    // jsonb_object_keys() iteration on OLD being an object because that
+    // function RAISES on a scalar/array, which inside the protected region
+    // would discard the WHOLE repair). When OLD is not an object the graft
+    // does nothing at all (NEW's value survives verbatim); when OLD IS an
+    // object and NEW is not, the merged map is built from OLD's keys alone, so
+    // a garbage NEW value cannot erase the kid's answers. A non-object per-key
+    // VALUE carries no stamp (the SQL's `-> 'answerAt'` on a scalar is SQL
+    // NULL, not an error), so it loses a contested key and still grafts back
+    // on an uncontested one.
+    {
+      const oldPanels = oldDoc[SAVE_DOC_STORY_PANELS_KEY];
+      const newPanels = newDoc[SAVE_DOC_STORY_PANELS_KEY];
+      if (isJsonObject(oldPanels)) {
+        const merged: Record<string, unknown> = isJsonObject(newPanels)
+          ? { ...newPanels }
+          : {};
+        for (const key of Object.keys(oldPanels)) {
+          const oldPanel = oldPanels[key];
+          if (!hasKey(merged, key)) {
+            // (1) KEY MONOTONICITY: NEW does not know this key — graft OLD's
+            // whole value back verbatim, whatever its shape. setOwnEntry, not
+            // `merged[key] = ...`: a question id of `__proto__` would otherwise
+            // hit Object.prototype's inherited setter and silently DROP the
+            // panel (see setOwnEntry's note).
+            setOwnEntry(merged, key, oldPanel);
+            continue;
+          }
+          // (2) CONTESTED KEY: resolve the {answer, answerAt} UNIT by LWW.
+          const newPanel = merged[key];
+          const oldAt = isJsonObject(oldPanel)
+            ? oldPanel[SAVE_DOC_STORY_PANEL_AT_KEY]
+            : undefined;
+          const newAt = isJsonObject(newPanel)
+            ? newPanel[SAVE_DOC_STORY_PANEL_AT_KEY]
+            : undefined;
+          const oldPanelOk = typeof oldAt === "number";
+          const newPanelOk = typeof newAt === "number";
+          if (oldPanelOk && (!newPanelOk || (oldAt as number) > (newAt as number))) {
+            // Same reasoning as above. (Here the own key already exists, so a
+            // bracket assignment would happen to work — the helper is used
+            // anyway so the two writes cannot drift apart.)
+            setOwnEntry(merged, key, oldPanel);
+          }
+        }
+        // Written back whenever non-empty OR NEW carried the key; when neither
+        // side has panels the key is not invented (absent-stays-absent), and a
+        // garbage NEW value is thereby CLAMPED to the merged map.
+        if (
+          Object.keys(merged).length > 0 ||
+          hasKey(newDoc, SAVE_DOC_STORY_PANELS_KEY)
+        ) {
+          out = { ...out, [SAVE_DOC_STORY_PANELS_KEY]: merged };
+        }
       }
     }
 

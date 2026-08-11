@@ -1035,3 +1035,291 @@ describe("guardSaveDocUpdate — heroConfig / heroConfigAt LAST-WRITE-WINS (v4)"
     expect(out.heroConfigAt).toBe(5000);
   });
 });
+
+// ── storyPanels (v5): key UNION + per-key LAST-WRITE-WINS ───────────────────
+// TWO semantics in one field, and they are NOT the same rule: the KEY SET is
+// monotonic (OLD ∪ NEW, a key is never subtracted), while a CONTESTED key
+// resolves as an inseparable {answer, answerAt} unit by LWW on answerAt. The
+// tests below are grouped that way on purpose — a regression that collapses
+// the two (e.g. "just LWW the whole map") fails the monotonicity block, and a
+// regression that tears the unit fails the LWW block.
+describe("guardSaveDocUpdate — storyPanels union + per-key LWW (v5)", () => {
+  const panelDoc = (panels: unknown) => ({
+    docVersion: 1,
+    ideas: [],
+    storyPanels: panels,
+  });
+
+  // ---- (1) key-set monotonicity -------------------------------------------
+
+  it("FULL OMISSION: NEW omits storyPanels entirely → OLD's whole map survives", () => {
+    // THE case this graft exists for (an old build that knows nothing of the
+    // field) and the exact shape of the v3 null-propagation P0 in SQL.
+    const oldDoc = panelDoc({ q1: { answer: "a dog", answerAt: 5000 } });
+    const incoming = { docVersion: 1, ideas: [] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.storyPanels).toEqual({ q1: { answer: "a dog", answerAt: 5000 } });
+  });
+
+  it("PARTIAL OMISSION: a key only OLD has is grafted back verbatim beside NEW's edit", () => {
+    const oldDoc = panelDoc({
+      qA: { answer: "old A", answerAt: 1000 },
+      qB: { answer: "old B", answerAt: 1000 },
+    });
+    const incoming = panelDoc({ qB: { answer: "new B", answerAt: 2000 } });
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.storyPanels).toEqual({
+      qA: { answer: "old A", answerAt: 1000 },
+      qB: { answer: "new B", answerAt: 2000 },
+    });
+  });
+
+  it("keeps keys only NEW has (the union is both ways)", () => {
+    const oldDoc = panelDoc({ qA: { answer: "old A", answerAt: 1000 } });
+    const incoming = panelDoc({ qB: { answer: "new B", answerAt: 1000 } });
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(Object.keys(out.storyPanels as object).sort()).toEqual(["qA", "qB"]);
+  });
+
+  it("grafts an OLD-only key back even when its value is junk (key monotonicity ignores shape)", () => {
+    const oldDoc = panelDoc({ qA: "plain string", qB: { answer: "b" } });
+    const incoming = panelDoc({ qC: { answer: "c" } });
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.storyPanels).toEqual({
+      qA: "plain string",
+      qB: { answer: "b" },
+      qC: { answer: "c" },
+    });
+  });
+
+  it("an UNSTAMPED OLD-only key still grafts back (monotonicity does not need a stamp)", () => {
+    const oldDoc = panelDoc({ qA: { answer: "no stamp" } });
+    const incoming = { docVersion: 1, ideas: [] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.storyPanels).toEqual({ qA: { answer: "no stamp" } });
+  });
+
+  // ---- (2) per-key LWW, resolved as an inseparable unit --------------------
+
+  it("LWW: OLD's newer stamp wins the contested key — as a WHOLE unit", () => {
+    const oldDoc = panelDoc({ q1: { answer: "old", answerAt: 5000 } });
+    const incoming = panelDoc({ q1: { answer: "new", answerAt: 1000 } });
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    // The whole point: answer and answerAt move TOGETHER. A merged
+    // { answer: "new", answerAt: 5000 } would be a torn unit.
+    expect(out.storyPanels).toEqual({ q1: { answer: "old", answerAt: 5000 } });
+  });
+
+  it("LWW: NEW's newer stamp wins the contested key — as a WHOLE unit", () => {
+    const oldDoc = panelDoc({ q1: { answer: "old", answerAt: 1000 } });
+    const incoming = panelDoc({ q1: { answer: "new", answerAt: 9000 } });
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.storyPanels).toEqual({ q1: { answer: "new", answerAt: 9000 } });
+  });
+
+  it("LWW: a TIE goes to NEW (the coverLook/heroConfig strict-greater rule)", () => {
+    const oldDoc = panelDoc({ q1: { answer: "old", answerAt: 5000 } });
+    const incoming = panelDoc({ q1: { answer: "new", answerAt: 5000 } });
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.storyPanels).toEqual({ q1: { answer: "new", answerAt: 5000 } });
+  });
+
+  it("LWW: an UNSTAMPED NEW side loses to OLD's stamped unit", () => {
+    const oldDoc = panelDoc({ q1: { answer: "stamped", answerAt: 5000 } });
+    const incoming = panelDoc({ q1: { answer: "unstamped" } });
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.storyPanels).toEqual({ q1: { answer: "stamped", answerAt: 5000 } });
+  });
+
+  it("LWW: an UNSTAMPED OLD side loses to NEW's stamped unit", () => {
+    const oldDoc = panelDoc({ q1: { answer: "unstamped" } });
+    const incoming = panelDoc({ q1: { answer: "stamped", answerAt: 1 } });
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.storyPanels).toEqual({ q1: { answer: "stamped", answerAt: 1 } });
+  });
+
+  it("LWW: when NEITHER side has a usable stamp, NEW wins", () => {
+    const oldDoc = panelDoc({ q1: { answer: "old" } });
+    const incoming = panelDoc({ q1: { answer: "new" } });
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.storyPanels).toEqual({ q1: { answer: "new" } });
+  });
+
+  it.each([
+    ["a string", "5000"],
+    ["a boolean", true],
+    ["null", null],
+    ["an array", [5000]],
+    ["an object", { at: 5000 }],
+  ])("a non-numeric OLD answerAt (%s) never wins a contested key", (_name, bad) => {
+    const oldDoc = panelDoc({ q1: { answer: "old", answerAt: bad } });
+    const incoming = panelDoc({ q1: { answer: "new", answerAt: 1 } });
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.storyPanels).toEqual({ q1: { answer: "new", answerAt: 1 } });
+  });
+
+  it("preserves an EMPTY-STRING answer as a real edit (unlike coverLook's empty look)", () => {
+    // "" is a legitimate cleared answer; the guard never inspects `answer`.
+    const oldDoc = panelDoc({ q1: { answer: "something", answerAt: 1000 } });
+    const incoming = panelDoc({ q1: { answer: "", answerAt: 2000 } });
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.storyPanels).toEqual({ q1: { answer: "", answerAt: 2000 } });
+  });
+
+  // ---- garbage / absent handling ------------------------------------------
+
+  it("a non-object storyPanels on OLD is treated as no panels — NEW's map is untouched", () => {
+    for (const bad of ["nope", 7, true, [1, 2], null]) {
+      const out = guardSaveDocUpdate(
+        panelDoc(bad),
+        panelDoc({ q1: { answer: "new", answerAt: 1 } })
+      ) as Record<string, unknown>;
+      expect(out.storyPanels).toEqual({ q1: { answer: "new", answerAt: 1 } });
+    }
+  });
+
+  it("a non-object storyPanels on NEW never destroys OLD's map (it is clamped to the merged map)", () => {
+    for (const bad of ["nope", 7, true, [1, 2], null]) {
+      const out = guardSaveDocUpdate(
+        panelDoc({ q1: { answer: "old", answerAt: 5000 } }),
+        panelDoc(bad)
+      ) as Record<string, unknown>;
+      expect(out.storyPanels).toEqual({ q1: { answer: "old", answerAt: 5000 } });
+    }
+  });
+
+  it("does not invent the key when neither side has panels (absent-stays-absent)", () => {
+    const out = guardSaveDocUpdate(
+      { docVersion: 1, ideas: [] },
+      { docVersion: 1, ideas: [] }
+    ) as Record<string, unknown>;
+    expect(Object.hasOwn(out, "storyPanels")).toBe(false);
+  });
+
+  it("keeps a present-but-empty NEW map (the key NEW carried is not dropped)", () => {
+    const out = guardSaveDocUpdate(
+      { docVersion: 1, ideas: [] },
+      panelDoc({})
+    ) as Record<string, unknown>;
+    expect(out.storyPanels).toEqual({});
+  });
+
+  it("never mutates the inputs while merging", () => {
+    const oldDoc = panelDoc({ qA: { answer: "old A", answerAt: 1000 } });
+    const incoming = panelDoc({ qB: { answer: "new B", answerAt: 1000 } });
+    guardSaveDocUpdate(oldDoc, incoming);
+    expect(oldDoc.storyPanels).toEqual({ qA: { answer: "old A", answerAt: 1000 } });
+    expect(incoming.storyPanels).toEqual({ qB: { answer: "new B", answerAt: 1000 } });
+  });
+
+  it("runs even when idea handling is skipped (NEW's ideas not an array)", () => {
+    const oldDoc = panelDoc({ q1: { answer: "a dog", answerAt: 5000 } });
+    const incoming = { docVersion: 1, ideas: "junk" };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.storyPanels).toEqual({ q1: { answer: "a dog", answerAt: 5000 } });
+    expect(out.ideas).toBe("junk");
+  });
+
+  it("is skipped entirely when docVersion disagrees (the whole-repair gate)", () => {
+    const oldDoc = panelDoc({ q1: { answer: "a dog", answerAt: 5000 } });
+    const incoming = { docVersion: 2, ideas: [] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(Object.hasOwn(out, "storyPanels")).toBe(false);
+  });
+
+  it("repairs alongside the other grafts in one old-build save", () => {
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [],
+      storyIntroSeen: true,
+      coverLook: "night-hero",
+      coverLookAt: 5000,
+      heroConfig: { skin: "fox" },
+      heroConfigAt: 5000,
+      storyPanels: { q1: { answer: "a dog", answerAt: 5000 } },
+    };
+    const incoming = { docVersion: 1, ideas: [] }; // old build: omits everything
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.storyIntroSeen).toBe(true);
+    expect(out.coverLook).toBe("night-hero");
+    expect(out.heroConfig).toEqual({ skin: "fox" });
+    expect(out.storyPanels).toEqual({ q1: { answer: "a dog", answerAt: 5000 } });
+  });
+
+  // ---- dangerous-looking question ids (JS-vs-jsonb key semantics) ----------
+  // To Postgres a jsonb key is just a string: `__proto__` is an ordinary
+  // question id server-side, and `JSON.parse('{"__proto__":{}}')` yields a
+  // REAL OWN property — so such a doc can genuinely arrive off the wire and
+  // sit in the stored row. In JS it is NOT ordinary: a bracket assignment
+  // (`merged[key] = v`) on an accumulator lacking an own `__proto__` key hits
+  // Object.prototype's inherited setter and REASSIGNS the prototype, so the
+  // panel disappears from Object.keys() and JSON.stringify() — silent loss of
+  // exactly the answer this graft exists to protect. Every input below is
+  // built with JSON.parse on purpose: an object LITERAL `{ __proto__: … }`
+  // sets the prototype and would not produce an own key to test with.
+  const parseDoc = (json: string): unknown => JSON.parse(json);
+  /** The own value at `key`, read without going through the accessor. */
+  const ownValue = (obj: unknown, key: string): unknown =>
+    Object.getOwnPropertyDescriptor(obj as object, key)?.value;
+
+  it("grafts back an OLD-only panel whose question id is `__proto__`, as a real OWN key", () => {
+    const oldDoc = parseDoc(
+      '{"docVersion":1,"ideas":[],"storyPanels":' +
+        '{"__proto__":{"answer":"old proto","answerAt":5000},' +
+        '"q1":{"answer":"a dog","answerAt":1000}}}',
+    );
+    const incoming = parseDoc(
+      '{"docVersion":1,"ideas":[],"storyPanels":{"q1":{"answer":"a dog","answerAt":1000}}}',
+    );
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    const panels = out.storyPanels as Record<string, unknown>;
+    expect(Object.keys(panels).sort()).toEqual(["__proto__", "q1"]);
+    expect(ownValue(panels, "__proto__")).toEqual({ answer: "old proto", answerAt: 5000 });
+    // The accumulator's own prototype must be untouched (the bracket-assignment bug).
+    expect(Object.getPrototypeOf(panels)).toBe(Object.prototype);
+    // And it must survive serialization back into jsonb.
+    expect(JSON.stringify(panels)).toContain('"__proto__"');
+  });
+
+  it("grafts back OLD-only `constructor` / `prototype` question ids too", () => {
+    const oldDoc = parseDoc(
+      '{"docVersion":1,"ideas":[],"storyPanels":' +
+        '{"constructor":{"answer":"ctor","answerAt":1},' +
+        '"prototype":{"answer":"proto","answerAt":2}}}',
+    );
+    const incoming = { docVersion: 1, ideas: [] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    const panels = out.storyPanels as Record<string, unknown>;
+    expect(Object.keys(panels).sort()).toEqual(["constructor", "prototype"]);
+    expect(ownValue(panels, "constructor")).toEqual({ answer: "ctor", answerAt: 1 });
+    expect(ownValue(panels, "prototype")).toEqual({ answer: "proto", answerAt: 2 });
+  });
+
+  it("resolves a CONTESTED `__proto__` key by LWW — OLD's newer stamp wins the whole unit", () => {
+    const oldDoc = parseDoc(
+      '{"docVersion":1,"ideas":[],"storyPanels":{"__proto__":{"answer":"old","answerAt":5000}}}',
+    );
+    const incoming = parseDoc(
+      '{"docVersion":1,"ideas":[],"storyPanels":{"__proto__":{"answer":"new","answerAt":1000}}}',
+    );
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    const panels = out.storyPanels as Record<string, unknown>;
+    expect(Object.keys(panels)).toEqual(["__proto__"]);
+    expect(ownValue(panels, "__proto__")).toEqual({ answer: "old", answerAt: 5000 });
+    expect(Object.getPrototypeOf(panels)).toBe(Object.prototype);
+  });
+
+  it("resolves a CONTESTED `__proto__` key by LWW — NEW's newer stamp wins the whole unit", () => {
+    const oldDoc = parseDoc(
+      '{"docVersion":1,"ideas":[],"storyPanels":{"__proto__":{"answer":"old","answerAt":1000}}}',
+    );
+    const incoming = parseDoc(
+      '{"docVersion":1,"ideas":[],"storyPanels":{"__proto__":{"answer":"new","answerAt":9000}}}',
+    );
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    const panels = out.storyPanels as Record<string, unknown>;
+    expect(Object.keys(panels)).toEqual(["__proto__"]);
+    expect(ownValue(panels, "__proto__")).toEqual({ answer: "new", answerAt: 9000 });
+    expect(Object.getPrototypeOf(panels)).toBe(Object.prototype);
+  });
+});

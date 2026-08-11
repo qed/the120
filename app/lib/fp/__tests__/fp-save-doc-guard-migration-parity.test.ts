@@ -14,6 +14,8 @@ import {
   SAVE_DOC_IDEAS_FUSE_LIMIT,
   SAVE_DOC_MONOTONIC_FLAG_KEYS,
   SAVE_DOC_MONOTONIC_IDEA_KEYS,
+  SAVE_DOC_STORY_PANEL_AT_KEY,
+  SAVE_DOC_STORY_PANELS_KEY,
 } from "../fp-save-doc-guard-rules";
 
 // ── Migration ↔ TS parity (the SQL is a copy the node suite can't run) ──
@@ -35,14 +37,17 @@ import {
 // is applied history and must not be amended in place either). v4 (hero
 // config) REPLACES it whole AGAIN, via
 // 20260923120000_fp_save_doc_guard_hero.sql (20260922 is applied history and
-// must not be amended in place either) — so this parity test parses the v4
-// file: every v1/v2/v3 structural pin below still holds there, plus the new
-// heroConfig LWW pins.
-describe("migration parity: fp_save_doc_guard_hero.sql (guard v4)", () => {
+// must not be amended in place either). v5 (story panels) REPLACES it whole
+// ONCE MORE, via 20260924120000_fp_save_doc_guard_story_panels.sql (20260923
+// was applied to production 2026-08-10 and must not be amended in place
+// either) — so this parity test parses the v5 file: every v1/v2/v3/v4
+// structural pin below still holds there, plus the new storyPanels
+// union+LWW pins.
+describe("migration parity: fp_save_doc_guard_story_panels.sql (guard v5)", () => {
   const raw = readFileSync(
     path.resolve(
       process.cwd(),
-      "supabase/migrations/20260923120000_fp_save_doc_guard_hero.sql"
+      "supabase/migrations/20260924120000_fp_save_doc_guard_story_panels.sql"
     ),
     "utf8"
   );
@@ -424,6 +429,121 @@ describe("migration parity: fp_save_doc_guard_hero.sql (guard v4)", () => {
     expect(heroAt).toBeLessThan(ideasGateAt);
   });
 
+  // ---------------------------------------------- storyPanels union+LWW (v5)
+
+  // ⚠ NULL-SAFETY PINS AGAIN (the v3 P0 in a new costume). An absent
+  // `storyPanels` makes `jsonb_typeof(...)` SQL NULL; a plain `<> 'object'`
+  // on that NULL is NULL, which plpgsql's IF treats as FALSE — the graft
+  // would then NOT fire on the FULL-OMISSION write it exists for, erasing the
+  // kid's answers. Both top-level gates and both per-key stamp gates must use
+  // `is not distinct from`.
+  it("storyPanels: both top-level presence gates are NULL-SAFE object tests", () => {
+    for (const v of ["v_old_panels_ok", "v_new_panels_ok"]) {
+      expect(
+        new RegExp(String.raw`${v}\s*:=[\s\S]{0,200}?is\s+not\s+distinct\s+from\s*'object'`, "i").test(body),
+        `${v} uses a NULL-safe object-shape test`
+      ).toBe(true);
+    }
+    // The NULL-unsafe `<>` shape must never come back on these gates.
+    expect(
+      new RegExp(String.raw`jsonb_typeof\s*\([^)]*${SAVE_DOC_STORY_PANELS_KEY}[^)]*\)\s*<>`, "i").test(body)
+    ).toBe(false);
+    expect(/jsonb_typeof\s*\(\s*v_(old|new)_panels\s*\)\s*<>/i.test(body)).toBe(false);
+  });
+
+  it("storyPanels: key iteration is GATED on OLD being an object (jsonb_object_keys RAISES on a scalar/array)", () => {
+    // A raise inside the protected region discards the ENTIRE repair, not
+    // just this graft — so the gate is load-bearing, and the iteration must
+    // read OLD's map (the side whose keys are at risk of being subtracted).
+    expect(
+      /if\s+v_old_panels_ok\s+then[\s\S]{0,900}?jsonb_object_keys\s*\(\s*v_old_panels\s*\)/i.test(body),
+      "iteration nested under the OLD-is-object gate"
+    ).toBe(true);
+    // jsonb_object_keys is never called on the NEW side or on a raw doc field.
+    expect(/jsonb_object_keys\s*\(\s*(?!v_old_panels\s*\))/i.test(body)).toBe(false);
+  });
+
+  it("storyPanels: the accumulator starts from NEW's map, falling back to {} when NEW's is unusable", () => {
+    // local := NEW, server := OLD (the Graft B/C orientation): NEW wins by
+    // default and OLD only ever overrides — which is what makes ties, and the
+    // neither-side-stamped case, go to NEW. The `{}` fallback is what stops a
+    // garbage/absent NEW value from erasing OLD's whole map.
+    expect(
+      /v_panels\s*:=\s*case\s+when\s+v_new_panels_ok\s+then\s+v_new_panels\s+else\s+'\{\}'::jsonb\s+end/i.test(body)
+    ).toBe(true);
+  });
+
+  it("storyPanels: KEY MONOTONICITY — a key absent from NEW is grafted back VERBATIM (never subtracted)", () => {
+    expect(
+      /if\s+not\s*\(\s*v_panels\s+\?\s+v_panel_key\s*\)\s+then\s+v_panels\s*:=\s*jsonb_set\s*\(\s*v_panels\s*,\s*array\[v_panel_key\]\s*,\s*v_old_panel\s*,\s*true\s*\)/i.test(body)
+    ).toBe(true);
+  });
+
+  it("storyPanels: both per-key stamp gates are NULL-SAFE number tests on answerAt", () => {
+    for (const v of ["v_old_panel_ok", "v_new_panel_ok"]) {
+      expect(
+        new RegExp(
+          String.raw`${v}\s*:=\s*jsonb_typeof\s*\(\s*v_(old|new)_panel\s*->\s*'${SAVE_DOC_STORY_PANEL_AT_KEY}'\s*\)\s+is\s+not\s+distinct\s+from\s*'number'`,
+          "i"
+        ).test(body),
+        `${v} uses a NULL-safe number test on ${SAVE_DOC_STORY_PANEL_AT_KEY}`
+      ).toBe(true);
+    }
+  });
+
+  it("storyPanels: the ::numeric comparison is UNREACHABLE unless BOTH sides carry numeric stamps", () => {
+    // Same nesting shape as coverLook/heroConfig: the strict-greater compare
+    // lives in an `elsif` under `if v_old_panel_ok` + `if not v_new_panel_ok`.
+    expect(
+      new RegExp(
+        String.raw`if\s+v_old_panel_ok\s+then[\s\S]{0,600}?if\s+not\s+v_new_panel_ok\s+then[\s\S]{0,600}?elsif\s*\(\s*v_old_panel\s*->>\s*'${SAVE_DOC_STORY_PANEL_AT_KEY}'\s*\)::numeric\s*>\s*\(\s*v_new_panel\s*->>\s*'${SAVE_DOC_STORY_PANEL_AT_KEY}'\s*\)::numeric`,
+        "i"
+      ).test(body)
+    ).toBe(true);
+  });
+
+  it("storyPanels: the {answer, answerAt} UNIT is never torn — every write into the map sets OLD's WHOLE value", () => {
+    // The crux of this graft: an `answer` from one side must never be paired
+    // with an `answerAt` from the other. The only way that can happen is a
+    // jsonb_set that reaches INTO a panel, so pin that every write into
+    // v_panels writes v_old_panel whole, and that no write ever targets a
+    // per-field path.
+    const writes = [...body.matchAll(/v_panels\s*:=\s*jsonb_set\s*\(([^;]*?)\)\s*;/gi)];
+    expect(writes.length).toBeGreaterThan(0);
+    for (const w of writes) {
+      expect(
+        /^\s*v_panels\s*,\s*array\[v_panel_key\]\s*,\s*v_old_panel\s*,\s*true\s*$/i.test(w[1]!),
+        `whole-unit write, got: ${w[1]}`
+      ).toBe(true);
+    }
+    // No two-element path into a panel anywhere (e.g. {storyPanels,answer} or
+    // array[v_panel_key, 'answerAt']).
+    expect(
+      new RegExp(String.raw`array\[\s*v_panel_key\s*,`, "i").test(body),
+      "no per-field path into a panel"
+    ).toBe(false);
+  });
+
+  it("storyPanels: writes the merged map back only when non-empty OR NEW carried the key (absent-stays-absent)", () => {
+    const writeBack = new RegExp(
+      String.raw`if\s+v_panels\s*<>\s*'\{\}'::jsonb\s+or\s+NEW\.doc\s+\?\s+'${SAVE_DOC_STORY_PANELS_KEY}'\s+then\s+v_doc\s*:=\s*jsonb_set\s*\(\s*v_doc\s*,\s*'\{${SAVE_DOC_STORY_PANELS_KEY}\}'\s*,\s*v_panels\s*\)`,
+      "i"
+    );
+    expect(writeBack.test(body)).toBe(true);
+  });
+
+  it("runs the storyPanels graft INSIDE the protected region, after the heroConfig graft and before the ideas gate", () => {
+    const heroAt = body.search(/v_old_hero\s*:=\s*OLD\.doc\s*->\s*'heroConfig'/i);
+    const panelsAt = body.search(
+      new RegExp(String.raw`v_old_panels\s*:=\s*OLD\.doc\s*->\s*'${SAVE_DOC_STORY_PANELS_KEY}'`, "i")
+    );
+    const ideasGateAt = body.search(
+      /if\s+jsonb_typeof\s*\(\s*v_old_ideas\s*\)\s*=\s*'array'\s+and\s+jsonb_typeof\s*\(\s*v_new_ideas\s*\)\s*=\s*'array'\s+then/i
+    );
+    expect(panelsAt).toBeGreaterThan(heroAt);
+    expect(panelsAt).toBeLessThan(ideasGateAt);
+  });
+
   // -------------------------------------------------- defensive shape gates
 
   it("passes through when either doc is null or not a JSON object", () => {
@@ -481,5 +601,24 @@ describe("migration parity: fp_save_doc_guard_hero.sql (guard v4)", () => {
     expect(raw).toMatch(/20260910/);
     expect(raw).toMatch(/docVersion is NOT bumped/i);
     expect(raw).toMatch(/PROJECTION UNCHANGED/i);
+  });
+
+  it("the header keeps the v5 storyPanels probes, including the FULL-OMISSION and DELETE+INSERT ones", () => {
+    // DOC pins (no parser can verify a runbook), but each names a probe that
+    // has already cost someone real time when it was missing.
+    const prose = raw.replace(/\s*--\s*/g, " ");
+    // The null-propagation probe — the one that catches the v3 P0 shape.
+    expect(prose).toMatch(/FULL-OMISSION probe/i);
+    expect(prose).toMatch(/MUST NEVER BE REMOVED|Never remove this probe/i);
+    // Key-set monotonicity, both LWW directions, unstamped, ties, garbage.
+    expect(prose).toMatch(/PARTIAL-OMISSION probe/i);
+    expect(prose).toMatch(/LWW probe, BOTH DIRECTIONS/i);
+    expect(prose).toMatch(/UNSTAMPED-LOSES probe/i);
+    expect(prose).toMatch(/TIE probe/i);
+    expect(prose).toMatch(/GARBAGE probe/i);
+    // The harness gotcha v4 recorded: an UPDATE reset is itself triggered.
+    expect(prose).toMatch(/DELETE \+ INSERT, NEVER with UPDATE/i);
+    // storyPanels gets the strict (heroConfig-style) deploy ordering.
+    expect(prose).toMatch(/LIVE IN\s+PRODUCTION BEFORE any first-profit build that writes `storyPanels`/i);
   });
 });

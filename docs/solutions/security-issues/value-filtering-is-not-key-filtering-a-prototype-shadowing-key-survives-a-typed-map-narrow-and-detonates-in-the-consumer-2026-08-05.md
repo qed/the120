@@ -1,7 +1,7 @@
 ---
 title: "Value filtering is not key filtering — a prototype-shadowing key survives a typed map narrow and detonates in the consumer"
 date: 2026-08-05
-last_updated: 2026-08-05
+last_updated: 2026-08-11
 category: security-issues
 module: fp-progress-rules
 problem_type: security_issue
@@ -372,6 +372,19 @@ were dangerous by *name*; here they are dangerous by *position*.
 
 ## Related Issues
 
+- **first-profit** `docs/solutions/logic-errors/a-bracket-assignment-with-a-proto-key-destroys-the-entry-use-a-null-prototype-accumulator-and-own-property-reads-2026-08-11.md`
+  — the MIRROR IMAGE of this doc, and it reaches the opposite conclusion about
+  `Object.create(null)`, so read them together. There the `__proto__` key is real
+  user data (a story-panel question id) that must be PRESERVED, and the map has
+  no method-calling consumers; a bracket assignment onto a plain `{}` silently
+  destroys the entry, and `"__proto__" in map` is true via the prototype chain
+  and drops a genuine incoming one. Its fix reaches into THIS repo: the save-doc
+  guard's TS mirror (`app/lib/fp/fp-save-doc-guard-rules.ts`) grafts entries
+  through an `Object.defineProperty` helper (`setOwnEntry`) for exactly that
+  reason — and the SQL↔TS parity test could not have caught it, because jsonb
+  has no prototype concept, so only the JS copy was ever wrong. Decide between
+  "skip the key" (here) and "keep it on a null-prototype map" (there) by auditing
+  the map's readers.
 - `docs/solutions/test-failures/a-mutation-that-reddens-nothing-means-the-test-is-vacuous-not-that-the-code-is-safe-2026-07-29.md`
   — the general form of the testing corollary. There the vacuity came from a
   source scan that could not fail; here it comes from a fixture that does not

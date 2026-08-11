@@ -9,6 +9,7 @@ import {
   type DashboardGateChildRow,
   type DashboardGateDeps,
 } from "@/app/lib/funnel/dashboard-gate-core";
+import { parentOwesConsentDecision } from "@/app/lib/funnel/consent-wall-rules";
 import type { RemapContext } from "@/app/lib/v3-signup/remap-rules";
 
 /** The all-false remap context every fail-open shape carries: no session or no
@@ -51,11 +52,16 @@ function fakeDeps(opts: {
   countsThrow?: boolean;
   /** null = the consent read failed; undefined = nobody has consented. */
   consentChildIds?: string[] | null;
+  /** The CONSENT WALL's raw fact: child id -> active policy versions. null =
+   *  the read failed; undefined = every child asked about comes back with an
+   *  empty list, i.e. NOBODY has a consent record (the six-family cohort). */
+  activeConsentVersions?: Record<string, string[]> | null;
 }) {
   const calls: string[] = [];
   const projectQueries: string[][] = [];
   const countQueries: string[][] = [];
   const consentQueries: string[][] = [];
+  const wallQueries: string[][] = [];
   const deps: DashboardGateDeps = {
     getUser: async () => {
       calls.push("getUser");
@@ -87,8 +93,14 @@ function fakeDeps(opts: {
       if (opts.consentChildIds === null) return null;
       return new Set(opts.consentChildIds ?? []);
     },
+    loadActiveConsentVersions: async (childIds) => {
+      calls.push("loadActiveConsentVersions");
+      wallQueries.push([...childIds]);
+      if (opts.activeConsentVersions === null) return null;
+      return new Map(Object.entries(opts.activeConsentVersions ?? {}));
+    },
   };
-  return { deps, calls, projectQueries, countQueries, consentQueries };
+  return { deps, calls, projectQueries, countQueries, consentQueries, wallQueries };
 }
 
 describe("loadDashboardGateFactsCore — the fail-open shapes", () => {
@@ -100,6 +112,7 @@ describe("loadDashboardGateFactsCore — the fail-open shapes", () => {
       children: null,
       verifiedTaskCounts: null,
       photoConsentChildIds: null,
+      consentWallChildren: null,
       remapCtx: NO_REMAP_CTX,
     });
     expect(calls).toEqual(["getUser"]);
@@ -113,6 +126,7 @@ describe("loadDashboardGateFactsCore — the fail-open shapes", () => {
       children: null,
       verifiedTaskCounts: null,
       photoConsentChildIds: null,
+      consentWallChildren: null,
       remapCtx: NO_REMAP_CTX,
     });
   });
@@ -125,6 +139,7 @@ describe("loadDashboardGateFactsCore — the fail-open shapes", () => {
       children: null,
       verifiedTaskCounts: null,
       photoConsentChildIds: null,
+      consentWallChildren: null,
       remapCtx: NO_REMAP_CTX,
     });
   });
@@ -142,6 +157,7 @@ describe("loadDashboardGateFactsCore — the fail-open shapes", () => {
       children: null,
       verifiedTaskCounts: null,
       photoConsentChildIds: null,
+      consentWallChildren: null,
       remapCtx: NO_REMAP_CTX,
     });
   });
@@ -167,7 +183,12 @@ describe("loadDashboardGateFactsCore — the owingIds filter", () => {
       childRows: [row({ id: "a", applicant_state: "added" }), row({ id: "b", applicant_state: "submitted" })],
     });
     const facts = await loadDashboardGateFactsCore(deps);
-    expect(calls).toEqual(["getUser", "loadChildRows", "loadPhotoConsentChildIds"]);
+    expect(calls).toEqual([
+      "getUser",
+      "loadChildRows",
+      "loadPhotoConsentChildIds",
+      "loadActiveConsentVersions",
+    ]);
     expect(facts.children?.map((c) => c.hasComposedProject)).toEqual([false, false]);
   });
 });
@@ -216,6 +237,7 @@ describe("loadDashboardGateFactsCore — the verified-count read (screen 16)", (
       children: null,
       verifiedTaskCounts: null,
       photoConsentChildIds: null,
+      consentWallChildren: null,
       remapCtx: NO_REMAP_CTX,
     });
   });
@@ -300,11 +322,38 @@ describe("loadDashboardGateFactsCore — happy path", () => {
       ],
       verifiedTaskCounts: null, // nobody arrived — the counts read never ran
       photoConsentChildIds: [],
+      // The CONSENT WALL's facts, keyed over the ROSTER: neither child has a
+      // consent row, which is the six-family cohort's exact shape and the state
+      // the wall fires on. A map-keyed shape would have shown them as absent.
+      consentWallChildren: [
+        { childId: "a", activePolicyVersions: [] },
+        { childId: "b", activePolicyVersions: [] },
+      ],
       // v3 Unit 8 review (FIX 1): the remap override facts, derived ONCE here
       // from this family's metadata + roster and handed to both destination
       // producers the page drives (the gate's redirect and every card's CTA).
       remapCtx: { funnelStamped: true, passwordChosen: false, hasFpChild: false },
     });
+  });
+
+  it("a FAILED wall read is `consentWallChildren: null` even with a full roster — the wall's own fail-open path at this layer", async () => {
+    // The testing gap the review found. `null` here is "we could not find out",
+    // and `parentOwesConsentDecision` reads exactly that as "owes nothing" — a
+    // wrongly-rendered dashboard strands nobody, a wrongly-erected wall strands
+    // everybody. The non-empty roster is the point: it proves the null comes
+    // from the READ and is not an artefact of having no children to ask about.
+    const { deps, wallQueries } = fakeDeps({
+      childRows: [row({ id: "c1" }), row({ id: "c2" })],
+      activeConsentVersions: null,
+    });
+    const facts = await loadDashboardGateFactsCore(deps);
+    expect(facts.children).toHaveLength(2);
+    expect(facts.consentWallChildren).toBeNull();
+    // It really was ASKED about both children — this is a failed read, not a
+    // skipped one.
+    expect(wallQueries).toEqual([["c1", "c2"]]);
+    // And the pure predicate downstream reads that null as "owes nothing".
+    expect(parentOwesConsentDecision({ children: facts.consentWallChildren })).toBe(false);
   });
 
   it("a password family (no funnel metadata) carries hasPassword: true", async () => {

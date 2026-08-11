@@ -31,6 +31,10 @@ export default defineConfig({
       // completed-parent redirect). Added in the same commit as the first test
       // under app/start, per the allowlist tripwire's rule.
       "app/start/**/__tests__/**/*.test.{ts,tsx}",
+      // The consent wall's interstitial (founder, 2026-08-10). Added in the
+      // same commit as the first test under app/consent, per the allowlist
+      // tripwire's rule.
+      "app/consent/**/__tests__/**/*.test.{ts,tsx}",
       // Machine-bound scripts (R28 erase-entrypoint Unit). Added in the same
       // commit as the first scripts/ test so the allowlist tripwire
       // (app/lib/__tests__/vitest-include-coverage.test.ts) stays green.

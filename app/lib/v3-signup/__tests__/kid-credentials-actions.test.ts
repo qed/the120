@@ -286,7 +286,13 @@ describe("rate-limit keying", () => {
   });
 
   it("every scope encodes the parent id (delimiter collisions cannot merge buckets)", () => {
-    const scopes: V3KidActionScope[] = ["password", "consent", "revoke", "set-parent-password"];
+    const scopes: V3KidActionScope[] = [
+      "password",
+      "consent",
+      "revoke",
+      "set-parent-password",
+      "consent-wall",
+    ];
     const keys = scopes.map((s) => deriveV3KidResetRateLimitKey("a:b c", s));
     expect(new Set(keys).size).toBe(scopes.length);
     for (const k of keys) expect(k).toContain(encodeURIComponent("a:b c"));

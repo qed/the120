@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   captureLegacyChildConsent,
+  PHOTO_WITHDRAWAL_REASON,
   resetKidPassword,
   revokeChildPhotoConsent,
   type KidCredentialsDeps,
 } from "@/app/lib/v3-signup/kid-credentials-core";
+import { parentOwesConsentDecision } from "@/app/lib/funnel/consent-wall-rules";
 import {
   currentPolicyHash,
   FP_CONSENT_POLICY,
@@ -317,14 +319,24 @@ describe("captureLegacyChildConsent — child-bound, attempt-less, bind-to-rende
 
 /* ───────────────────────────── revocation ───────────────────────────── */
 
-describe("revokeChildPhotoConsent — sweeps ALL active rows and leaves a tombstone", () => {
+describe("revokeChildPhotoConsent — PURPOSE-SCOPED: tombstone + photo mark, never a revocation", () => {
   const activeRows = () => [
-    { id: "c1", child_id: "kid-1", parent_id: PARENT, policy_version: FP_CONSENT_POLICY.version, accepted_at: "2026-08-05T11:00:00.000Z", revoked_at: null },
-    { id: "c2", child_id: "kid-1", parent_id: PARENT, policy_version: FP_CONSENT_POLICY.version, accepted_at: "2026-08-05T11:30:00.000Z", revoked_at: null },
-    { id: "c3", child_id: "kid-9", parent_id: PARENT, policy_version: FP_CONSENT_POLICY.version, accepted_at: "2026-08-05T11:30:00.000Z", revoked_at: null },
+    { id: "c1", child_id: "kid-1", parent_id: PARENT, policy_version: FP_CONSENT_POLICY.version, accepted_at: "2026-08-05T11:00:00.000Z", revoked_at: null, evidence: { source: "signup" } },
+    { id: "c2", child_id: "kid-1", parent_id: PARENT, policy_version: FP_CONSENT_POLICY.version, accepted_at: "2026-08-05T11:30:00.000Z", revoked_at: null, evidence: { source: "signup" } },
+    { id: "c3", child_id: "kid-9", parent_id: PARENT, policy_version: FP_CONSENT_POLICY.version, accepted_at: "2026-08-05T11:30:00.000Z", revoked_at: null, evidence: { source: "signup" } },
   ];
 
-  it("stamps every active row for THIS child, leaves other children alone, and closes the gate", async () => {
+  const asPhotoRows = (consents: Row[], childId: string) =>
+    consents
+      .filter((c) => c.child_id === childId)
+      .map((c) => ({
+        policyVersion: c.policy_version as string,
+        acceptedAt: c.accepted_at as string,
+        revokedAt: c.revoked_at as string | null,
+        evidence: c.evidence,
+      }));
+
+  it("marks every active row for THIS child, leaves other children alone, and closes the gate", async () => {
     const consents = activeRows();
     const children = [fpChild(), fpChild({ id: "kid-9" })];
     const { deps } = makeDeps({ children, fp_parental_consent: consents });
@@ -333,32 +345,71 @@ describe("revokeChildPhotoConsent — sweeps ALL active rows and leaves a tombst
       revokeChildPhotoConsent(deps, { childId: "kid-1" }, { parentId: PARENT })
     ).resolves.toBe("revoked");
 
-    // ALL of this child's rows, not one — anything less leaves the gate open.
-    expect(consents.filter((c) => c.child_id === "kid-1").every((c) => c.revoked_at !== null)).toBe(
-      true
-    );
-    // A sibling's consent is untouched.
+    const stamp = new Date(NOW).toISOString();
+    for (const c of consents.filter((c) => c.child_id === "kid-1")) {
+      expect(c.evidence).toMatchObject({
+        photo_declined: true,
+        photo_withdrawn_at: stamp,
+        withdrawal_reason: PHOTO_WITHDRAWAL_REASON,
+        // READ-MODIFY-WRITE: the key that was already there survives.
+        source: "signup",
+      });
+    }
+    // A sibling's consent is untouched, in every respect.
+    expect(consents.find((c) => c.child_id === "kid-9")!.evidence).toEqual({ source: "signup" });
     expect(consents.find((c) => c.child_id === "kid-9")!.revoked_at).toBeNull();
     // And the tombstone landed.
     const tomb = children[0].photo_consent_revoked_at as string;
-    expect(tomb).toBe(new Date(NOW).toISOString());
+    expect(tomb).toBe(stamp);
 
     // THE OBSERVABLE THAT MATTERS: the shared pure gate now refuses.
-    expect(
-      photoConsentVerdict({
-        rows: consents
-          .filter((c) => c.child_id === "kid-1")
-          .map((c) => ({
-            policyVersion: c.policy_version,
-            acceptedAt: c.accepted_at,
-            revokedAt: c.revoked_at,
-          })),
-        revokedAt: tomb,
-      }).ok
-    ).toBe(false);
+    const verdict = photoConsentVerdict({
+      rows: asPhotoRows(consents, "kid-1"),
+      revokedAt: tomb,
+    });
+    expect(verdict.ok).toBe(false);
   });
 
-  it("the TOMBSTONE is written FIRST, so a capture racing the sweep cannot re-open the gate", async () => {
+  it("⚠ DOES NOT RE-ARM THE CONSENT WALL — the row is a general consent, not a photo permission (review P1-a)", async () => {
+    // THE BUG. This used to stamp `revoked_at` on every active row, which is the
+    // family's ONE general parental consent — to the account existing at all.
+    // The wall clears a child on ANY active row at/after the anchor, so a photo
+    // withdrawal bounced the whole family back to /consent and made every gated
+    // action refuse them. A parent who withdraws photo permission has withdrawn
+    // photo permission.
+    const consents = activeRows();
+    const children = [fpChild()];
+    const { deps } = makeDeps({ children, fp_parental_consent: consents });
+
+    await expect(
+      revokeChildPhotoConsent(deps, { childId: "kid-1" }, { parentId: PARENT })
+    ).resolves.toBe("revoked");
+
+    // 1. THE WALL IS STILL DOWN. Not one row was revoked, so the live set the
+    //    wall reads is unchanged.
+    const stillActive = consents
+      .filter((c) => c.child_id === "kid-1" && c.revoked_at == null)
+      .map((c) => String(c.policy_version));
+    expect(stillActive.length).toBe(2);
+    expect(
+      parentOwesConsentDecision({
+        children: [{ childId: "kid-1", activePolicyVersions: stillActive }],
+      })
+    ).toBe(false);
+
+    // 2. AND THE PHOTO PERMISSION IS GENUINELY GONE — both ways, independently.
+    const tomb = children[0].photo_consent_revoked_at as string;
+    expect(tomb).toBe(new Date(NOW).toISOString());
+    //    a) the tombstone alone closes it (strictly-after filter)
+    expect(photoConsentVerdict({ rows: asPhotoRows(consents, "kid-1"), revokedAt: tomb }))
+      .toMatchObject({ ok: false, reason: "pre_tombstone" });
+    //    b) and so does the evidence mark, with the tombstone taken away —
+    //       which is what keeps the closure true if a later row post-dates it.
+    expect(photoConsentVerdict({ rows: asPhotoRows(consents, "kid-1"), revokedAt: null }))
+      .toMatchObject({ ok: false, reason: "declined" });
+  });
+
+  it("the TOMBSTONE is written FIRST, so a capture racing the mark cannot re-open the gate", async () => {
     const consents = activeRows();
     const children = [fpChild()];
     const { deps, seen } = makeDeps({ children, fp_parental_consent: consents });
@@ -382,7 +433,7 @@ describe("revokeChildPhotoConsent — sweeps ALL active rows and leaves a tombst
     ).toBe(false);
   });
 
-  it("REFUSES a child the caller does not own — no tombstone, no sweep", async () => {
+  it("REFUSES a child the caller does not own — no tombstone, no mark", async () => {
     const consents = activeRows();
     const children = [fpChild({ parent_id: OTHER_PARENT })];
     const { deps } = makeDeps({ children, fp_parental_consent: consents });
@@ -391,6 +442,31 @@ describe("revokeChildPhotoConsent — sweeps ALL active rows and leaves a tombst
     ).resolves.toBe("not_owned");
     expect(children[0].photo_consent_revoked_at).toBeNull();
     expect(consents.every((c) => c.revoked_at === null)).toBe(true);
+    expect(consents.every((c) => (c.evidence as Record<string, unknown>).photo_declined === undefined)).toBe(true);
+  });
+
+  it("NEVER writes revoked_at — the one writer of that column is the wall's dedupe sweep (review P1-b)", async () => {
+    const consents = activeRows();
+    const { deps } = makeDeps({ children: [fpChild()], fp_parental_consent: consents });
+    await revokeChildPhotoConsent(deps, { childId: "kid-1" }, { parentId: PARENT });
+    expect(consents.every((c) => c.revoked_at === null)).toBe(true);
+  });
+
+  it("a failed evidence write reports `outage`, but the tombstone has already closed the gate", async () => {
+    const consents = activeRows();
+    const children = [fpChild()];
+    const { deps, failing } = makeDeps({ children, fp_parental_consent: consents });
+    failing.add("fp_parental_consent:update");
+    await expect(
+      revokeChildPhotoConsent(deps, { childId: "kid-1" }, { parentId: PARENT })
+    ).resolves.toBe("outage");
+    expect(children[0].photo_consent_revoked_at).toBe(new Date(NOW).toISOString());
+    expect(
+      photoConsentVerdict({
+        rows: asPhotoRows(consents, "kid-1"),
+        revokedAt: children[0].photo_consent_revoked_at as string,
+      }).ok
+    ).toBe(false);
   });
 
   it("a later, deliberate re-capture post-dates the tombstone and re-opens the gate", async () => {

@@ -309,7 +309,16 @@ export function deriveV3KidResetRateLimitKey(
  * second namespace) so the shared config, the shared docblock and the shared
  * derivation stay one thing.
  */
-export type V3KidActionScope = "password" | "consent" | "revoke" | "set-parent-password";
+export type V3KidActionScope =
+  | "password"
+  | "consent"
+  | "revoke"
+  | "set-parent-password"
+  // The consent WALL's accept/decline (founder, 2026-08-10). Its own bucket for
+  // the same reason as the rest: the wall blocks a family's whole dashboard, so
+  // answering it must not be refused because the per-kid consent budget was
+  // spent on an unrelated screen.
+  | "consent-wall";
 
 /* ------------------------------------------------------------- the mail */
 

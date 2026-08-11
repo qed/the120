@@ -361,26 +361,73 @@ export const refundsKidCredentialsStrike = (outcome: KidCredentialsOutcome): boo
   KID_CREDENTIALS_REFUNDED_OUTCOMES.includes(outcome);
 
 /**
- * REVOCATION SWEEPS EVERYTHING AND LEAVES A TOMBSTONE.
+ * The `evidence` marker a PHOTO withdrawal writes. A named constant so the
+ * writer and every test/audit query read the same string.
  *
- * ── WHY A SWEEP AND NOT A SINGLE UPDATE ──
- * A child legitimately has MANY active consent rows: per-attempt uniqueness,
- * the add-another-kid loop, and this module's attempt-less legacy captures.
- * Revoking "the" consent would leave siblings unrevoked and the photo gate wide
- * open — the parent would have asked us to stop and nothing would have stopped.
+ * ⚠ NOT `revoked_reason`. That key is reserved for rows that actually carry
+ * `revoked_at` (see `CONSENT_REVOKED_REASON_DEDUPE` in consent-wall-core): a
+ * photo withdrawal deliberately does NOT revoke the row, so labelling it as a
+ * revocation reason would be a lie in the legal record.
+ */
+export const PHOTO_WITHDRAWAL_REASON = "parent_withdrawal";
+
+/** Merge new evidence keys onto whatever the row already carries. READ-MODIFY-
+ *  WRITE, never a clobber: `evidence` is the legal blob and it accretes. */
+function mergeEvidence(existing: unknown, patch: Record<string, unknown>): Record<string, unknown> {
+  const base =
+    existing && typeof existing === "object" && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : {};
+  return { ...base, ...patch };
+}
+
+/**
+ * WITHDRAW PHOTO PERMISSION — PURPOSE-SCOPED, AND THAT SCOPING IS THE FIX
+ * (review 2026-08-10, P1-a).
  *
- * ── WHY THE TOMBSTONE IS WRITTEN FIRST ──
- * The sweep can only stamp rows it can SEE. A capture that inserts after the
- * sweep's read lands unrevoked, and `photoConsentVerdict` would then find it and
- * re-open the gate against an explicit instruction to close it. The per-child
- * tombstone (`children.photo_consent_revoked_at`) is a high-water mark the gate
- * checks with a STRICT `accepted_at > tombstone`, so stamping it BEFORE the
- * sweep means any row racing the sweep is already excluded by time — there is no
- * window in which an insert can slip under. Ordering them the other way would
- * leave exactly the race the tombstone exists to close.
+ * ── THE BUG THIS SHAPE EXISTS TO PREVENT ──
+ * This used to stamp `revoked_at` on EVERY active `fp_parental_consent` row for
+ * the child, unscoped by purpose. But that row is not a photo permission. It is
+ * the family's ONE general parental consent — to creating the account at all, to
+ * storing the child's information, and (since 2026-08-08.1) to the public site —
+ * with the photo/AI sentence as one purpose among several. Revoking it whole for
+ * a photo-only withdrawal:
+ *   - RE-ARMED THE CONSENT WALL. `childHasQualifyingConsent` clears a child on
+ *     ANY active row at/after `FP_CONSENT_MIN_VERSION`. Destroying the last one
+ *     bounced the entire family back to /consent and made every gated action
+ *     refuse them — for tapping a button whose UI says "Photo permission
+ *     withdrawn."
+ *   - RETRO-INVALIDATED THE MINT GATE. `consentGate` inside `createChild` reads
+ *     the same anchor, so the family could no longer add a kid either.
+ * A parent who withdraws photo permission has withdrawn photo permission. They
+ * have not asked us to un-create their child's account.
+ *
+ * ── WHAT CLOSES THE PHOTO GATE INSTEAD ──
+ * The PER-CHILD TOMBSTONE, `children.photo_consent_revoked_at` — which is the
+ * purpose-scoped instrument, added by migration 20260914120000 for exactly this
+ * job, and which `photoConsentVerdict` already honours with a STRICT
+ * `accepted_at > tombstone` filter. Every row that exists when the tombstone
+ * lands is excluded (`pre_tombstone`), and so is any row racing the write, which
+ * is precisely the race the row sweep could never close. The tombstone was
+ * already doing all the work; the sweep was collateral damage layered on top.
+ *
+ * ── AND A SECOND, INDEPENDENT MARK, SO THE CLOSURE SURVIVES THE TOMBSTONE ──
+ * Step 2 stamps `photo_declined: true` into each active row's `evidence`, the
+ * same signal the S04 signup decline writes and the same one
+ * `photoConsentVerdict` reads to answer `declined`. Two independent closures,
+ * neither of which touches `revoked_at`: if a later re-capture post-dates the
+ * tombstone, the mark on the older rows still records what the parent asked for,
+ * and the withdrawal is queryable as evidence rather than inferred from a
+ * missing row.
+ *
+ * ── WHY THE TOMBSTONE IS STILL WRITTEN FIRST ──
+ * Step 2 can only mark rows it can SEE. A capture that inserts after its read
+ * lands unmarked. The tombstone is a high-water mark no in-flight insert can
+ * slip under, so stamping it first means the gate is already closed before a
+ * single row is touched — and it doubles as the ownership predicate.
  *
  * A later, deliberate re-capture post-dates the tombstone and is admitted
- * normally: revocation closes the gate, it does not brick it.
+ * normally: withdrawal closes the gate, it does not brick it.
  */
 export async function revokeChildPhotoConsent(
   deps: KidCredentialsDeps,
@@ -413,22 +460,47 @@ export async function revokeChildPhotoConsent(
   }
   if (((tomb.data as unknown[] | null) ?? []).length !== 1) return "not_owned";
 
-  // 2. THE SWEEP — every active row for this child, not one.
-  const swept = await db
+  // 2. THE PHOTO MARK on every active row for this child — evidence, not
+  //    revocation. READ-MODIFY-WRITE so `source`, `echoed_hash` and every other
+  //    key already in the blob survive.
+  const rows = await db
     .from("fp_parental_consent")
-    .update({ revoked_at: stamp })
+    .select("id, evidence")
     .eq("child_id", childId)
     .eq("parent_id", ctx.parentId)
-    .is("revoked_at", null)
-    .select("id");
-  if (swept.error) {
+    .is("revoked_at", null);
+  if (rows.error) {
     // The tombstone already landed, so the GATE IS ALREADY CLOSED (every
     // surviving row predates it). Report the outage so the parent can retry and
-    // the rows get their own stamps, but do not pretend the photo gate is open.
+    // the rows get their marks, but do not pretend the photo gate is open.
     deps.log(
-      `[fp/consent-revoke] sweep failed for child ${childId} after the tombstone landed: ${swept.error.message} — the photo gate is closed by the tombstone; rows still need revoked_at`
+      `[fp/consent-revoke] evidence read failed for child ${childId} after the tombstone landed: ${rows.error.message} — the photo gate is closed by the tombstone; rows still need photo_declined`
     );
     return "outage";
   }
+
+  let failed = false;
+  for (const row of ((rows.data as Array<Record<string, unknown>> | null) ?? [])) {
+    const marked = await db
+      .from("fp_parental_consent")
+      .update({
+        evidence: mergeEvidence(row.evidence, {
+          photo_declined: true,
+          photo_withdrawn_at: stamp,
+          withdrawal_reason: PHOTO_WITHDRAWAL_REASON,
+        }),
+      })
+      .eq("id", String(row.id))
+      // The session-derived parent id rides in the WHERE clause here too — the
+      // id came from a read this parent already scoped, and it stays scoped.
+      .eq("parent_id", ctx.parentId);
+    if (marked.error) {
+      failed = true;
+      deps.log(
+        `[fp/consent-revoke] evidence mark failed for consent row ${String(row.id)}: ${marked.error.message} — the photo gate is closed by the tombstone`
+      );
+    }
+  }
+  if (failed) return "outage";
   return "revoked";
 }

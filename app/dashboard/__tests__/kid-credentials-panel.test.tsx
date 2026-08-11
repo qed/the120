@@ -37,6 +37,10 @@ import KidCredentials, {
   ageBandFor,
   photoAffordance,
 } from "@/app/dashboard/KidCredentials";
+// CROSS-IMPORTED on purpose (review P2-e): the server-side mirror of
+// `ageBandFor`, so the claim that the two agree is an assertion and not a
+// comment. Same convention as flow-rules.test.ts's `normalizeKidNamePart` pin.
+import { ageBandForGrade } from "@/app/lib/funnel/consent-wall-rules";
 import { SetPasswordForm } from "@/app/set-password/SetPasswordForm";
 import { emptyChild, type Child } from "@/app/dashboard/data";
 
@@ -90,6 +94,31 @@ describe("ageBandFor — the consent record's band, from a v2 roster row's grade
     // Over-protecting a 16-year-old costs nothing; under-protecting a
     // 10-year-old is a compliance failure.
     expect(ageBandFor(kid({ grade: "" }))).toBe("under_13");
+  });
+
+  it("⚠ AGREES WITH `ageBandForGrade` FOR EVERY GRADE (review P2-e)", () => {
+    // The docblocks on both sides used to CLAIM this and nothing pinned it —
+    // and they had already diverged. Cross-imported and compared, the same way
+    // flow-rules.test.ts pins `normalizeKidNamePart` against
+    // `normalizeStudentName`. The two write the same NOT NULL column of the
+    // same legal-evidence table from the same signal; disagreeing means the
+    // band on a child's record depends on which screen the parent used.
+    for (let grade = -3; grade <= 20; grade++) {
+      expect(ageBandFor(kid({ grade }))).toBe(ageBandForGrade(grade));
+    }
+  });
+
+  it("⚠ AGREES ON THE DEGENERATE INPUTS TOO, and the CONSERVATIVE answer wins", () => {
+    // THE DIVERGENCE THIS TEST WAS WRITTEN FOR: `NaN` is a `number`, and
+    // `NaN + 5 < 13` and `NaN <= 15` are both false — so the naive
+    // `typeof === "number"` guard fell through to `16_plus`, the LEAST
+    // protective band, for the one input that means "we do not know".
+    expect(ageBandFor(kid({ grade: Number.NaN }))).toBe("under_13");
+    expect(ageBandForGrade(Number.NaN)).toBe("under_13");
+    expect(ageBandFor(kid({ grade: Number.POSITIVE_INFINITY }))).toBe("under_13");
+    expect(ageBandForGrade(Number.POSITIVE_INFINITY)).toBe("under_13");
+    expect(ageBandFor(kid({ grade: "" }))).toBe(ageBandForGrade(null));
+    expect(ageBandForGrade(undefined)).toBe("under_13");
   });
 });
 

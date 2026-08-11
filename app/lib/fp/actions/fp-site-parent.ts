@@ -38,8 +38,19 @@ import {
   setSitePublishedForParent,
 } from "@/app/lib/fp/fp-site-parent-core";
 import type { ParentSiteRow } from "@/app/lib/fp/fp-public-site-rules";
+import { consentClearance } from "@/app/lib/funnel/consent-wall-core";
 
 const REFUSAL = "We could not change that just now. Refresh the page and try again.";
+
+/**
+ * IS THIS CALL TRYING TO PUT A CHILD'S PAGE ONLINE?
+ *
+ * Only the `published === true` direction is gated (review 2026-08-10, P2-b).
+ * Anything else — `false`, a malformed body, a missing field — is not a publish,
+ * and the core's own parser refuses the malformed cases a moment later.
+ */
+const isPublishDirection = (input: unknown): boolean =>
+  !!input && typeof input === "object" && (input as { published?: unknown }).published === true;
 
 export async function setFpSitePublishedAction(
   input: unknown
@@ -47,6 +58,38 @@ export async function setFpSitePublishedAction(
   try {
     const who = await parentCallerFromSession();
     if (!who) return { ok: false, message: REFUSAL };
+    // ── THE CONSENT WALL (founder, 2026-08-10), AFTER the session check and
+    // before anything is written. Publishing a child's first name to the open
+    // internet is the single most consequential control on this dashboard, so
+    // it is the last one that should stay reachable while its parent owes us a
+    // consent decision.
+    //
+    // ⚠ ONE DIRECTION ONLY (review 2026-08-10, P2-b). UNPUBLISH IS EXEMPT, for
+    // exactly the reason `revokeChildConsentAction` is exempt: a walled parent
+    // who urgently wants their child's page OFF the internet must not be told
+    // "first agree to our notice". Withdrawal must be as easy as giving
+    // (GDPR Art. 7(3)), and the blast radius of the exemption is bounded to the
+    // safe direction by construction — `published: false` can only ever make us
+    // publish LESS. There is no input to the unpublish path that grants
+    // anything.
+    //
+    // ⚠ AND IT FAILS CLOSED ON A READ ERROR (review 2026-08-10, P2-a). Every
+    // other consumer of this control fails open, because a Postgres hiccup must
+    // not blockade a family out of their dashboard. Not this one: an outage
+    // must not be the thing that puts a minor's page on the open internet.
+    // cover-core.ts states the precedent — an unreadable tombstone is not an
+    // absent tombstone. The cost here is a retry; failing open is irreversible.
+    if (isPublishDirection(input)) {
+      const clearance = await consentClearance(who.parentId);
+      if (clearance !== "clear") {
+        if (clearance === "error") {
+          console.error(
+            `[fp/site-parent] ⚠ FAILING CLOSED on publish for parent ${who.parentId}: the consent read did not answer`
+          );
+        }
+        return { ok: false, message: REFUSAL };
+      }
+    }
     const result = await setSitePublishedForParent(realParentSiteDeps(), input, who);
     if (!result.ok) return { ok: false, message: REFUSAL };
     return { ok: true, site: result.site };

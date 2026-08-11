@@ -39,6 +39,23 @@ vi.mock("@/app/lib/email", () => ({ sendEmail: vi.fn() }));
 
 vi.mock("@/app/api/fp/handoff/handoff-core", () => ({ mintHandoffCode }));
 
+/**
+ * THE CONSENT WALL, mocked to "clear" so this file keeps testing what it is
+ * about: the session guard and the far-side interlock.
+ *
+ * ⚠ IT MUST BE MOCKED, not left to fall through. Since review P2-a this action
+ * FAILS CLOSED on a consent-read ERROR, and this suite's `supabaseAdmin` stub is
+ * a shell whose `from()` returns `{}` — an unmockable read that throws, which
+ * the real control now correctly reads as "refuse". The wall's own behaviour on
+ * this action (clear / owes / read error / the shared-budget refund) is driven
+ * in ./mint-action-consent-wall.test.ts, which exists precisely because this
+ * file's stub cannot serve it.
+ */
+vi.mock("@/app/lib/funnel/consent-wall-core", () => ({
+  requireConsentClear: async () => true,
+  consentClearance: async () => "clear",
+}));
+
 const NO_SESSION = { data: { user: null }, error: null };
 const SESSION = { data: { user: { id: "parent-1", email: "alex@example.com" } }, error: null };
 

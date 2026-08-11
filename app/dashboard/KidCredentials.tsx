@@ -258,9 +258,23 @@ export default function KidCredentials({
  * Deliberately conservative: an unknown grade records `under_13`, the band with
  * the STRICTEST obligations, because over-protecting a 16-year-old costs nothing
  * and under-protecting a 10-year-old is a compliance failure.
+ *
+ * ⚠ MUST AGREE WITH `ageBandForGrade` in app/lib/funnel/consent-wall-rules.ts
+ * for EVERY grade — not "roughly", exactly. The two write the same NOT NULL
+ * column of the same legal-evidence table from the same signal, and a
+ * disagreement means the band on a child's record depends on which screen the
+ * parent happened to consent from. They are two functions rather than one
+ * because that module is server-side and this one is `"use client"`; the
+ * equality is PINNED by a cross-importing test (funnel-consent-wall-rules.test),
+ * the same convention `normalizeKidNamePart` follows in flow-rules.test.ts.
+ *
+ * ⚠ `Number.isFinite`, NOT `typeof === "number"` (review 2026-08-10, P2-e).
+ * `NaN` is a number, and `NaN + 5 < 13` is false, and `NaN <= 15` is false — so
+ * the naive check fell through to `16_plus`, the LEAST protective band, for the
+ * one input that means "we do not know". The conservative answer wins.
  */
 export function ageBandFor(child: Child): "under_13" | "13_to_15" | "16_plus" {
-  if (typeof child.grade !== "number") return "under_13";
+  if (typeof child.grade !== "number" || !Number.isFinite(child.grade)) return "under_13";
   // Canadian grade → typical age is grade + 5.
   const age = child.grade + 5;
   if (age < 13) return "under_13";

@@ -861,6 +861,29 @@ describe("eraseFamily — resumability strand guard (FIX 1)", () => {
     expect(out.scrubbedReleasedClaims).toBe(0);
   });
 
+  it("⚠ a STRANDED child keeps its CONSENT EVIDENCE — step 8 is gated like step 9 (review P2-d)", async () => {
+    // THE BUG. The family-scoped `fp_parental_consent` delete ran
+    // unconditionally while the parent auth delete skipped itself whenever
+    // anything was stranded. So a partial erasure left childB alive and STILL
+    // USING THE PRODUCT with its parental-consent record already destroyed —
+    // the one state this table must never be in.
+    const { db, t } = makeDb(seedPathBOnly());
+    const { deps } = makeDeps(t, { workspaceConfigured: true, authFails: true, suspendResult: "error" });
+    deps.db = db;
+
+    const out = await eraseFamily(deps, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+
+    expect(out.stranded.length).toBeGreaterThan(0);
+    // The child is still there...
+    expect((t.children as { id: string }[]).map((c) => c.id)).toEqual(["childB"]);
+    // ...so its consent evidence is still there too, and the step says so.
+    expect((t.fp_parental_consent as { id: string }[]).map((c) => c.id)).toEqual(["c2"]);
+    expect(out.deleted.fp_parental_consent).toBe(0);
+    expect(out.order).toContain("fp_parental_consent:deferred(parentU)");
+    // Deferred, exactly like the parent account — the same condition, same run.
+    expect(out.parentAccountDeleted).toBe(false);
+  });
+
   it("run 2 (now healthy) recovers the auth id from the claim, completes teardown, clears stranded → ok:true", async () => {
     const { db, t } = makeDb(seedPathBOnly());
     // Run 1 strands.

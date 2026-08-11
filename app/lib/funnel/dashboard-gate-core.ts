@@ -35,6 +35,11 @@ import "server-only";
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseServer } from "@/app/lib/supabase/server";
+import {
+  loadActiveConsentVersionsByChild,
+  realConsentWallDeps,
+} from "@/app/lib/funnel/consent-wall-core";
+import type { ConsentWallChildFacts } from "@/app/lib/funnel/consent-wall-rules";
 import { VERIFIED_TASK_STATE } from "@/app/lib/fp/progress-core";
 import {
   photoConsentVerdict,
@@ -119,6 +124,26 @@ export type DashboardGateDeps = {
   loadPhotoConsentChildIds: (
     childIds: readonly string[]
   ) => Promise<ReadonlySet<string> | null>;
+  /**
+   * THE CONSENT WALL's facts (founder, 2026-08-10): child id → the
+   * `policy_version` of each of that child's ACTIVE (`revoked_at IS NULL`)
+   * `fp_parental_consent` rows. A child with no active row is present with an
+   * EMPTY list, which is precisely the state the wall fires on — so the map is
+   * keyed over every child asked about, never only the ones with rows.
+   *
+   * Separate from `loadPhotoConsentChildIds` even though both read the same
+   * table: that one answers a CAPABILITY question (photo anchor, tombstone,
+   * decline evidence) and this one answers an EXISTENCE question. Folding them
+   * would make a change to either gate silently move the other.
+   *
+   * Service-role by necessity (`fp_parental_consent` is RLS-on with zero
+   * policies); the only inputs are child ids already returned by THIS request's
+   * RLS'd children read. null = the read failed, and the wall predicate reads
+   * null as "owes nothing" — a wall must never be erected on a hiccup.
+   */
+  loadActiveConsentVersions: (
+    childIds: readonly string[]
+  ) => Promise<ReadonlyMap<string, string[]> | null>;
 };
 
 function realDeps(): DashboardGateDeps {
@@ -249,6 +274,16 @@ function realDeps(): DashboardGateDeps {
         return null;
       }
     },
+    loadActiveConsentVersions: async (childIds) => {
+      // The SAME read the shared `requireConsentClear` control makes, through
+      // the same core — so the page redirect and the action refusal can never
+      // disagree about who owes a decision.
+      try {
+        return await loadActiveConsentVersionsByChild(realConsentWallDeps(), childIds);
+      } catch {
+        return null;
+      }
+    },
   };
 }
 
@@ -266,6 +301,13 @@ export type DashboardGateFacts = {
    *  null = not loaded (signed out / read failed) — the dashboard then offers
    *  neither consent affordance rather than guessing. */
   photoConsentChildIds: string[] | null;
+  /**
+   * THE CONSENT WALL's facts (founder, 2026-08-10), one entry per child with
+   * that child's ACTIVE consent versions. Fed straight to the pure
+   * `parentOwesConsentDecision`; null = signed out / read failed, which that
+   * predicate reads as "owes nothing" (fail open — a wall is total).
+   */
+  consentWallChildren: ConsentWallChildFacts[] | null;
   /** The v2→v3 remap's contextual override facts for this family (v3 Unit 8
    *  review, FIX 1). Consumed by `dashboardGateVerdict` and by every card's
    *  `cardVerdict`, so the page has ONE answer per child. */
@@ -284,7 +326,7 @@ export async function loadDashboardGateFactsCore(
   try {
     const user = await deps.getUser();
     if (!user)
-      return { hasSession: false, hasPassword: false, children: null, verifiedTaskCounts: null, photoConsentChildIds: null, remapCtx: NO_REMAP_CONTEXT };
+      return { hasSession: false, hasPassword: false, children: null, verifiedTaskCounts: null, photoConsentChildIds: null, consentWallChildren: null, remapCtx: NO_REMAP_CONTEXT };
 
     const childRows = await deps.loadChildRows();
     if (!childRows) {
@@ -294,7 +336,7 @@ export async function loadDashboardGateFactsCore(
       // fails open and renders regardless — a wrongly rendered dashboard
       // strands nobody.
       const hasPassword = deriveHasPassword({ appMetadata: user.appMetadata, children: null });
-      return { hasSession: true, hasPassword, children: null, verifiedTaskCounts: null, photoConsentChildIds: null, remapCtx: NO_REMAP_CONTEXT };
+      return { hasSession: true, hasPassword, children: null, verifiedTaskCounts: null, photoConsentChildIds: null, consentWallChildren: null, remapCtx: NO_REMAP_CONTEXT };
     }
     // The FP discriminator is per CHILD, so `hasPassword` can only be derived
     // once the roster is in hand (plan Unit 8).
@@ -316,7 +358,7 @@ export async function loadDashboardGateFactsCore(
       // A failed projects read must NOT default toward the mini-app for a
       // family who really composed — fail the whole gate open instead.
       if (loaded === null)
-        return { hasSession: true, hasPassword, children: null, verifiedTaskCounts: null, photoConsentChildIds: null, remapCtx: NO_REMAP_CONTEXT };
+        return { hasSession: true, hasPassword, children: null, verifiedTaskCounts: null, photoConsentChildIds: null, consentWallChildren: null, remapCtx: NO_REMAP_CONTEXT };
       composed = loaded;
     }
 
@@ -359,11 +401,26 @@ export async function loadDashboardGateFactsCore(
     // and the panel simply offers no consent affordance this page load.
     const consentOpen = await deps.loadPhotoConsentChildIds(children.map((c) => c.id));
 
+    // THE CONSENT WALL's facts. Asked for EVERY child, and — critically — the
+    // shape below is keyed over the ROSTER, not over the map: a child with no
+    // consent rows at all is exactly the cohort this wall exists for, and they
+    // come back ABSENT from the map. Iterating the map instead of the roster
+    // would make the missing-record case invisible, which is the whole bug.
+    const activeConsent = await deps.loadActiveConsentVersions(children.map((c) => c.id));
+    const consentWallChildren: ConsentWallChildFacts[] | null =
+      activeConsent === null
+        ? null
+        : children.map((c) => ({
+            childId: c.id,
+            activePolicyVersions: activeConsent.get(c.id) ?? [],
+          }));
+
     return {
       hasSession: true,
       hasPassword,
       verifiedTaskCounts,
       photoConsentChildIds: consentOpen === null ? null : [...consentOpen],
+      consentWallChildren,
       children,
       // The remap override facts, derived from the SAME roster the verdict and
       // the cards read (v3 Unit 8 review, FIX 1).
@@ -375,6 +432,6 @@ export async function loadDashboardGateFactsCore(
     };
   } catch {
     // Fail open: a wrongly rendered dashboard strands nobody.
-    return { hasSession: false, hasPassword: false, children: null, verifiedTaskCounts: null, photoConsentChildIds: null, remapCtx: NO_REMAP_CONTEXT };
+    return { hasSession: false, hasPassword: false, children: null, verifiedTaskCounts: null, photoConsentChildIds: null, consentWallChildren: null, remapCtx: NO_REMAP_CONTEXT };
   }
 }

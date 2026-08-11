@@ -4,6 +4,10 @@ import { cache } from "react";
 import ParentDashboard from "./ParentDashboard";
 import { dashboardGateVerdict } from "@/app/lib/funnel/session-rules";
 import { loadDashboardGateFactsCore } from "@/app/lib/funnel/dashboard-gate-core";
+import {
+  CONSENT_WALL_HREF,
+  parentOwesConsentDecision,
+} from "@/app/lib/funnel/consent-wall-rules";
 
 export const metadata: Metadata = {
   title: "Your dashboard — The 120",
@@ -44,6 +48,19 @@ export default async function DashboardPage({
   // redirect() throws NEXT_REDIRECT by design and must stay OUTSIDE a try —
   // a caught one reports failure on success, which this repo has shipped once.
   if (verdict.action === "redirect") redirect(verdict.route);
+
+  // THE CONSENT WALL (founder, 2026-08-10). Part of THIS page's own gate block,
+  // deliberately not hoisted into app/dashboard/layout.tsx — that file's docblock
+  // explains why every page runs its own gate: a gate next to the data it
+  // protects cannot be inherited-and-forgotten by a new route under the segment.
+  // It reads the SAME facts the redirect above already awaited, so it costs no
+  // extra round trip, and it runs AFTER that redirect so a signed-out or
+  // unqualified request is routed for the reason it actually has.
+  // The page redirect is a courtesy, not the control: `requireConsentClear`
+  // inside each consequential Server Action is what actually refuses.
+  if (parentOwesConsentDecision({ children: facts.consentWallChildren })) {
+    redirect(CONSENT_WALL_HREF);
+  }
 
   // DashboardProvider is mounted once by app/dashboard/layout.tsx, so hopping
   // to a kid's portal and back does not remount the store or refetch the family.

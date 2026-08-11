@@ -51,6 +51,7 @@ import {
   V3_VERIFY_RATE_LIMIT,
 } from "@/app/lib/fp/rate-limit-rules";
 import { extractClientIp } from "@/app/api/fp/signup/signup-rules";
+import { consentClearance } from "@/app/lib/funnel/consent-wall-core";
 import { supabaseParentToken } from "@/app/lib/supabase/parent-token";
 import { buildStudentCreateUserPayload } from "@/app/lib/fp/provision-rules";
 import { createChild } from "@/app/api/fp/signup/child-core";
@@ -564,6 +565,40 @@ export async function v3MintHandoffAction(
     if (!isHandoffLandingLive(process.env.FP_HANDOFF_LANDING_LIVE)) {
       releaseRateLimitEvent(budget.key);
       return { kind: "fallback", destination: FIRST_PROFIT_SIGN_IN_URL };
+    }
+    // THE CONSENT WALL (founder, 2026-08-10). A handoff code is a BEARER
+    // CREDENTIAL for a child's session, so minting one is exactly the kind of
+    // consequential act that must stop while its parent owes a consent
+    // decision — and this is the control, not the /dashboard redirect (the
+    // page-vs-action gating learning).
+    //
+    // ORDER: after the session check, and deliberately after the far-side
+    // interlock above, which is a cheaper, purely-local check that constructs
+    // no privileged client. `failed`, not `fallback`: there is no honest
+    // destination to offer someone we are refusing.
+    //
+    // ⚠ IT FAILS CLOSED ON A READ ERROR (review 2026-08-10, P2-a). Alone with
+    // the publish toggle, among every consumer of this control. A handoff code
+    // is a bearer credential for a child's session; an outage must not be the
+    // thing that mints one. cover-core.ts states the precedent — an unreadable
+    // tombstone is not an absent tombstone.
+    //
+    // ⚠ AND THE SHARED STRIKE IS HANDED BACK (review 2026-08-10, P2-c).
+    // `onboardingBudget` is SHARED with `v3ProvisionAction` (adding a child).
+    // Not refunding here meant a walled parent tapping "Open App" a few times
+    // locked themselves out of adding a kid for fifteen minutes — the wall
+    // spending a budget that belongs to a different, unrelated action. The
+    // wall's own throttling is the /consent action's separate `consent-wall`
+    // scope; this budget is not it.
+    const clearance = await consentClearance(ctx.parentId);
+    if (clearance !== "clear") {
+      if (clearance === "error") {
+        console.error(
+          `[fp/v3-onboarding] ⚠ FAILING CLOSED on handoff mint for parent ${ctx.parentId}: the consent read did not answer`
+        );
+      }
+      releaseRateLimitEvent(budget.key);
+      return { kind: "failed" };
     }
     const result = await mintHandoffCode(
       {

@@ -67,6 +67,7 @@ import {
   type KidCredentialsDeps,
 } from "@/app/lib/v3-signup/kid-credentials-core";
 import { validateStudentPassword } from "@/app/lib/fp/provision-rules";
+import { requireConsentClear } from "@/app/lib/funnel/consent-wall-core";
 
 function buildDeps(): KidCredentialsDeps {
   return {
@@ -103,6 +104,12 @@ export async function resetKidPasswordAction(
     if (!who) return refusal;
     const key = deriveV3KidResetRateLimitKey(who.parentId, "password");
     if (!checkAndRecordRateLimit(key, V3_KID_RESET_RATE_LIMIT).allowed) return refusal;
+    // THE CONSENT WALL, and this — not the /dashboard redirect — is the control
+    // (the page-vs-action gating learning, 2026-08-05). After the session check
+    // (there must be an identity to ask about) and after the rate limit (so an
+    // authenticated flood cannot buy unlimited reads). Fails OPEN on any read
+    // failure: see requireConsentClear.
+    if (!(await requireConsentClear(who.parentId))) return refusal;
 
     const outcome = await resetKidPassword(buildDeps(), input, { parentId: who.parentId });
     if (refundsKidCredentialsStrike(outcome)) releaseRateLimitEvent(key);
@@ -145,6 +152,11 @@ export async function captureChildConsentAction(
     if (!who) return refusal;
     const key = deriveV3KidResetRateLimitKey(who.parentId, "consent");
     if (!checkAndRecordRateLimit(key, V3_KID_RESET_RATE_LIMIT).allowed) return refusal;
+    // THE CONSENT WALL. Note this is the PER-KID photo-consent capture on the
+    // kid's account page, NOT the wall's own accept — a parent who owes the
+    // whole-family decision answers it at /consent, where the two wall actions
+    // deliberately do not call this control.
+    if (!(await requireConsentClear(who.parentId))) return refusal;
 
     const body = (input ?? {}) as Record<string, unknown>;
     const childId = body.childId;
@@ -193,6 +205,37 @@ export async function captureChildConsentAction(
   }
 }
 
+/**
+ * ⚠ DELIBERATELY EXEMPT FROM `requireConsentClear` (founder call, 2026-08-10).
+ *
+ * Every other consequential parent action on this dashboard gained the consent
+ * wall. This one did not, and the omission is the decision, not an oversight.
+ *
+ * THE REASONING. This action is how a parent WITHDRAWS consent for their child's
+ * photo. Refusing a withdrawal because the parent owes us a DIFFERENT consent
+ * decision inverts the entire point of the wall: we would be holding a privacy
+ * right hostage to a privacy formality. It is user-hostile on its face — "you
+ * may not tell us to stop using your child's photo until you first agree to our
+ * notice" is a sentence no one should have to read — and it is arguably
+ * unlawful: withdrawal of consent must be as easy as giving it (GDPR Art. 7(3),
+ * and the same principle sits under COPPA's parental-revocation duty). A wall
+ * that can block a withdrawal is a wall that manufactures consent by attrition.
+ *
+ * It is also the exact pairing the rate-limit scopes were already split apart
+ * for (review FIX 6, `V3KidActionScope`): WITHDRAWING CONSENT IS A PRIVACY
+ * RIGHT, and it must not be refused because of unrelated state on the account.
+ * The wall is "unrelated state" in precisely that sense.
+ *
+ * THE RISK ACCEPTED. A walled parent can still reach one mutating endpoint. The
+ * blast radius is bounded to the safe direction by construction: this action
+ * only ever stamps `revoked_at` and a tombstone, i.e. it can only ever REDUCE
+ * what we are permitted to do with a child's data. There is no input to it that
+ * grants anything. An endpoint whose worst case is "we process less" does not
+ * need a consent gate.
+ *
+ * If this is ever revisited, the question to answer is not "is it consistent?"
+ * (it is not, on purpose) but "has revoking become able to grant something?".
+ */
 export async function revokeChildConsentAction(
   input: unknown
 ): Promise<{ ok: true } | { ok: false; message: string }> {

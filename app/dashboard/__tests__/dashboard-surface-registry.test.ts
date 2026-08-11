@@ -117,6 +117,10 @@ describe("the derived subsets stay derived", () => {
         SURFACE.kidPortal,
         SURFACE.kidRouteShell,
         SURFACE.parentDashboard,
+        // Brought under the sweeps 2026-08-11, once its em dashes were fixed.
+        // It was exempt for a reason that turned out to be hiding a real
+        // violation of the standing no-em-dash copy rule.
+        SURFACE.signIn,
       ].sort()
     );
     for (const f of SWEEP_EXEMPT) expect(DASHBOARD_SWEEP_SURFACES).not.toContain(f);

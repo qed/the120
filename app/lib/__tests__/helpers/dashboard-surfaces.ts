@@ -76,8 +76,14 @@ export const DASHBOARD_CLIENT_SURFACES: readonly string[] = Object.values(SURFAC
  *    KidAccount. They are arguably part of the swept surface and the omission
  *    looks incidental rather than principled — flagged for a follow-up that can
  *    own whatever it turns red.
- *  - signIn: the signed-OUT surface. It is not a dashboard view a signed-in
- *    parent ever sees, and it legitimately talks about accounts and resets.
+ *  (signIn WAS exempt here, on the reasoning that a signed-out surface which
+ *  legitimately talks about accounts and resets should not face sweeps written
+ *  for signed-in dashboard copy. That reasoning was sound for the payment and
+ *  register rules but it also, silently, exempted it from the no-em-dash COPY
+ *  rule — which it was violating in three live parent-facing strings. The copy
+ *  is fixed and signIn is now swept like everything else. The lesson kept here
+ *  deliberately: an exemption justified by ONE rule quietly buys exemption from
+ *  ALL of them, so scope an exemption to the rule it is actually about.)
  *  - store: the Supabase data layer, not a rendering surface. It names tables
  *    and columns (including payment-adjacent ones), so string sweeps written
  *    for rendered copy do not mean the same thing here. Tests that care about
@@ -88,7 +94,6 @@ export const DASHBOARD_CLIENT_SURFACES: readonly string[] = Object.values(SURFAC
 export const SWEEP_EXEMPT: readonly string[] = [
   SURFACE.kidCredentials,
   SURFACE.kidSite,
-  SURFACE.signIn,
   SURFACE.store,
   SURFACE.ui,
 ];

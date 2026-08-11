@@ -46,9 +46,9 @@ export default function SignIn() {
     if (error) {
       setError(
         /invalid login credentials/i.test(error.message)
-          ? "Email or password doesn't match — try again."
+          ? "Email or password doesn't match. Try again."
           : /email not confirmed/i.test(error.message)
-            ? "Confirm your email first — check your inbox for the link we sent."
+            ? "Confirm your email first. Check your inbox for the link we sent."
             : error.message
       );
       setBusy(false);
@@ -202,8 +202,8 @@ export default function SignIn() {
                 role="status"
                 className="rounded-xl border border-line bg-paper-2 p-3 text-xs leading-5 text-ink"
               >
-                If that address has an account, a reset link is on its way — check the inbox and
-                follow the link.
+                If that address has an account, a reset link is on its way. Check the inbox
+                and follow the link.
               </p>
             )}
 

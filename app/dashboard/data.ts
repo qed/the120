@@ -1237,20 +1237,3 @@ export function pathBarWidthPct(verified: number, total: number): number {
   if (!(total > 0) || !Number.isFinite(verified) || verified <= 0) return 2;
   return Math.max(2, Math.min(100, (verified / total) * 100));
 }
-
-/**
- * The hero stat box's family total: the verified counts summed across the
- * given children. Absent key = a child with no fp profile yet = a true 0;
- * a null map (counts read failed, or not in the path register) sums to the
- * 0 floor — the box renders either way.
- */
-export function sumVerifiedTaskCounts(
-  counts: Record<string, number> | null,
-  childIds: readonly string[]
-): number {
-  if (!counts) return 0;
-  return childIds.reduce((sum, id) => {
-    const n = counts[id];
-    return sum + (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0);
-  }, 0);
-}

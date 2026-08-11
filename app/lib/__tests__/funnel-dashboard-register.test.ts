@@ -13,7 +13,7 @@ import {
   dashboardRegister,
   type DashboardGateChild,
 } from "@/app/lib/funnel/session-rules";
-import { PATH_TASK_TOTAL, pathBarWidthPct, sumVerifiedTaskCounts } from "@/app/dashboard/data";
+import { PATH_TASK_TOTAL, pathBarWidthPct } from "@/app/dashboard/data";
 import { MANIFEST_2026_27 } from "@/app/lib/fp/content/manifest";
 import { VERIFIED_TASK_STATE } from "@/app/lib/fp/progress-core";
 import { TASK_STATES } from "@/app/lib/fp/transition-table";
@@ -438,21 +438,6 @@ describe("pathBarWidthPct — phase-coloured width with the honest floor sliver"
     expect(pathBarWidthPct(3, 0)).toBe(2);
     expect(pathBarWidthPct(Number.NaN, 125)).toBe(2);
     expect(pathBarWidthPct(-4, 125)).toBe(2);
-  });
-});
-
-describe("sumVerifiedTaskCounts — the hero stat box's family total", () => {
-  it("sums across the given children; an absent key is a true 0 (no fp profile yet)", () => {
-    expect(sumVerifiedTaskCounts({ a: 17, b: 4 }, ["a", "b", "c"])).toBe(21);
-  });
-
-  it("a null map (read failed / application register) sums to the 0 floor", () => {
-    expect(sumVerifiedTaskCounts(null, ["a", "b"])).toBe(0);
-  });
-
-  it("ignores counts for children not on this dashboard, and junk values", () => {
-    expect(sumVerifiedTaskCounts({ a: 5, zombie: 40 }, ["a"])).toBe(5);
-    expect(sumVerifiedTaskCounts({ a: Number.NaN, b: -3, c: 2 }, ["a", "b", "c"])).toBe(2);
   });
 });
 

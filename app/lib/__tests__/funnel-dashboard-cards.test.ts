@@ -633,6 +633,7 @@ describe("wiring — the verdict is a pure module, no longer consumed by the app
     const src =
       read("app/dashboard/ParentDashboard.tsx") +
       read("app/dashboard/kids/[id]/KidPortal.tsx") +
+      read("app/dashboard/kids/[id]/KidRouteShell.tsx") +
       read("app/dashboard/kids/[id]/account/KidAccount.tsx") +
       read("app/dashboard/FirstProfitCard.tsx");
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");

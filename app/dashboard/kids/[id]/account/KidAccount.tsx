@@ -10,22 +10,22 @@
  * components reused verbatim, scoped to THIS one kid.
  *
  * ── OWNERSHIP / NOT FOUND ──
- * Identical to the portal's: the client store loads `children` RLS-scoped (only
- * the signed-in parent's kids), so the child is picked by id from the store. No
- * match (a stranger's id, or a bad one) renders a clean "Kid not found" and
- * reaches for nothing. RLS already prevents loading another family's row; this
- * is the UI fallback on top of that.
+ * Not merely "identical to the portal's" any more: it IS the portal's. Both
+ * per-kid routes mount the shared KidRouteShell, which does the client auth gate
+ * and picks the child by id out of the RLS-scoped store, so a stranger's id
+ * renders "Kid not found" and the body below never runs. See KidRouteShell.tsx.
+ *
+ * The `surface="parent"` treatment (white, no grain) is what marks this as the
+ * parent's space against the kid's cream portal.
  *
  * Mobile-first: base is the ~390px phone. No em dashes in parent-facing copy.
  */
 
 import Link from "next/link";
-import { useDashboard } from "../../../store";
-import { ACCOUNT_MENU, AppHeader } from "../../../ui";
-import SignIn from "../../../SignIn";
 import KidCredentials, { type ConsentPolicyBundle } from "../../../KidCredentials";
 import KidSite from "../../../KidSite";
 import { childName, type Child } from "../../../data";
+import KidRouteShell from "../KidRouteShell";
 import type { ParentSiteRow } from "@/app/lib/fp/fp-public-site-rules";
 
 export default function KidAccount({
@@ -44,17 +44,13 @@ export default function KidAccount({
   /** Each child's public page + state, parent-scoped; null = the read failed. */
   fpSites?: ParentSiteRow[] | null;
 }) {
-  const { ready, session, children } = useDashboard();
-
-  // Auth gate: signed out always shows the SignIn swap (client-side), exactly
-  // as its sibling routes do.
-  if (ready && !session) return <SignIn />;
-
-  const child = children.find((c) => c.id === childId) ?? null;
-
   const consentFor = (id: string): boolean | null =>
     photoConsentChildIds === null ? null : photoConsentChildIds.includes(id);
 
+  /* The shell's body render prop. NO HOOKS IN HERE: the shell calls this as a
+     plain function inside a conditional branch, so a hook would run on the
+     shell's fiber and crash the route the moment the child stops matching. Need
+     state? Mount a module-scope component as JSX instead. See KidRouteShell.tsx. */
   const body = (c: Child) => {
     const site = fpSites?.find((s) => s.childId === c.id) ?? null;
     return (
@@ -88,37 +84,5 @@ export default function KidAccount({
     );
   };
 
-  return (
-    <div className="min-h-screen bg-white text-v3-ink">
-      <AppHeader items={ACCOUNT_MENU} />
-
-      <main className="mx-auto w-full max-w-5xl px-5 py-8 sm:px-6 sm:py-12">
-        <Link
-          href="/dashboard"
-          className="inline-flex min-h-[44px] items-center gap-1.5 font-path-mono text-xs font-bold uppercase tracking-[0.12em] text-v3-profit transition-colors hover:text-v3-profit-dark"
-        >
-          <span aria-hidden>&lsaquo;</span> All kids
-        </Link>
-
-        {!ready ? (
-          <p className="mt-6 v3-label text-v3-stone">Loading...</p>
-        ) : !child ? (
-          <div className="mt-6 rounded-3xl border border-dashed border-v3-ink/20 bg-white p-10 text-center">
-            <h1 className="font-path-display text-3xl font-black text-v3-ink">Kid not found</h1>
-            <p className="mt-3 text-base leading-relaxed text-v3-stone">
-              We could not find that kid on your account.
-            </p>
-            <Link
-              href="/dashboard"
-              className="mt-6 inline-flex min-h-[44px] items-center justify-center rounded-full bg-v3-profit px-8 py-3 font-path-display text-base font-semibold text-white shadow-[0_4px_0_0_#0f4227] transition hover:-translate-y-0.5 hover:bg-v3-profit-dark"
-            >
-              Back to all kids
-            </Link>
-          </div>
-        ) : (
-          body(child)
-        )}
-      </main>
-    </div>
-  );
+  return <KidRouteShell childId={childId} surface="parent" body={body} />;
 }

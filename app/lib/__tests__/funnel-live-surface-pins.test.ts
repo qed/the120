@@ -106,6 +106,7 @@ describe("the dashboard's own chrome (per-kid apps launcher)", () => {
   // portal plus that card together, which is the launcher surface a parent sees.
   const app = stripComments(
     read("app/dashboard/kids/[id]/KidPortal.tsx") +
+      read("app/dashboard/kids/[id]/KidRouteShell.tsx") +
       read("app/dashboard/kids/[id]/account/KidAccount.tsx") +
       read("app/dashboard/FirstProfitCard.tsx")
   );

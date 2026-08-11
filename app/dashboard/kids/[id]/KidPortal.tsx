@@ -17,22 +17,22 @@
  * That is also why this page loads no consent/site facts any more.
  *
  * ── OWNERSHIP / NOT FOUND ──
- * The client store loads `children` RLS-scoped (only the signed-in parent's
- * kids), so the child is picked by id from the store. If no child matches (a
- * stranger's id, or a bad one), we render a clean "Kid not found" state and never
- * reach for any other family's data. RLS already prevents loading another
- * family's row; this is the UI fallback on top of that.
+ * Owned by the shared KidRouteShell, which both per-kid routes mount: it does
+ * the client auth gate and picks the child by id out of the RLS-scoped store,
+ * so a stranger's id renders "Kid not found" and the body below never runs.
+ * One implementation, one thing to review. See KidRouteShell.tsx.
+ *
+ * The `surface="kid"` treatment (cream + grain) is what makes this the kid's
+ * space, against the account page's white.
  *
  * Mobile-first: base is the ~390px phone; `lg:` layers the two-column app rows
  * on. No em dashes in parent-facing copy.
  */
 
 import Link from "next/link";
-import { useDashboard } from "../../store";
-import { ACCOUNT_MENU, AppHeader } from "../../ui";
-import SignIn from "../../SignIn";
 import FirstProfitCard from "../../FirstProfitCard";
 import { type Child } from "../../data";
+import KidRouteShell from "./KidRouteShell";
 
 const GAUNTLET_BLURB =
   "Cover grades 3-12 math facts (including Calculus), making them effortless so you can focus your mental energy on complex problem solving, the underlying basic calculations.";
@@ -73,110 +73,69 @@ function AppRow({ label, children }: { label: string; children: React.ReactNode 
   );
 }
 
+/** The shell's body render prop. NO HOOKS IN HERE: the shell calls this as a
+ *  plain function inside a conditional branch, so a hook would run on the
+ *  shell's fiber and crash the route the moment the child stops matching. Need
+ *  state? Mount a module-scope component as JSX instead. See KidRouteShell.tsx. */
+const kidBody = (c: Child) => {
+  return (
+    <>
+      <h1 className="mt-6 font-path-display text-4xl font-black leading-none tracking-tight text-v3-ink sm:text-5xl">
+        {(c.firstName || "Your kid")}&rsquo;s Dashboard
+      </h1>
+
+      {/* The apps launcher for THIS kid. */}
+      <div className="mt-8 space-y-6">
+        <AppRow label="Build a real Business">
+          <FirstProfitCard child={c} />
+        </AppRow>
+
+        <AppRow label="Fast Math">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <GauntletWordmark />
+              <p className="mt-3 text-sm leading-relaxed text-v3-stone">{GAUNTLET_BLURB}</p>
+            </div>
+            <ComingSoon />
+          </div>
+        </AppRow>
+
+        <AppRow label="Math">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex min-w-0 gap-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/math-academy-long-logo.jpg"
+                alt="Math Academy"
+                className="h-10 w-auto flex-none"
+              />
+              <p className="text-sm leading-relaxed text-v3-stone">{MATH_ACADEMY_BLURB}</p>
+            </div>
+            <ComingSoon />
+          </div>
+        </AppRow>
+      </div>
+
+      {/* The parent's controls for this kid are NOT on this page (it is the
+          kid's). This is the one quiet way across to them. */}
+      <Link
+        href={`/dashboard/kids/${c.id}/account`}
+        className="mt-10 inline-flex min-h-[44px] items-center gap-1.5 font-path-mono text-xs font-bold uppercase tracking-[0.12em] text-v3-stone transition-colors hover:text-v3-ink"
+      >
+        Account details
+        <span aria-hidden className="text-base leading-none">
+          &rsaquo;
+        </span>
+      </Link>
+    </>
+  );
+};
+
 export default function KidPortal({
   childId,
 }: {
   /** The child id from the route (`/dashboard/kids/<childId>`). */
   childId: string;
 }) {
-  const { ready, session, children } = useDashboard();
-
-  // Auth gate: signed out always shows the SignIn swap (client-side), exactly as
-  // the parent dashboard does — the server gate computed "render" for a
-  // session-less request too.
-  if (ready && !session) return <SignIn />;
-
-  const child = children.find((c) => c.id === childId) ?? null;
-
-  const backLink = (
-    <Link
-      href="/dashboard"
-      className="inline-flex min-h-[44px] items-center gap-1.5 font-path-mono text-xs font-bold uppercase tracking-[0.12em] text-v3-profit transition-colors hover:text-v3-profit-dark"
-    >
-      <span aria-hidden>&lsaquo;</span> All kids
-    </Link>
-  );
-
-  const kidBody = (c: Child) => {
-    return (
-      <>
-        <h1 className="mt-6 font-path-display text-4xl font-black leading-none tracking-tight text-v3-ink sm:text-5xl">
-          {(c.firstName || "Your kid")}&rsquo;s Dashboard
-        </h1>
-
-        {/* The apps launcher for THIS kid. */}
-        <div className="mt-8 space-y-6">
-          <AppRow label="Build a real Business">
-            <FirstProfitCard child={c} />
-          </AppRow>
-
-          <AppRow label="Fast Math">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <GauntletWordmark />
-                <p className="mt-3 text-sm leading-relaxed text-v3-stone">{GAUNTLET_BLURB}</p>
-              </div>
-              <ComingSoon />
-            </div>
-          </AppRow>
-
-          <AppRow label="Math">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div className="flex min-w-0 gap-4">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src="/math-academy-long-logo.jpg"
-                  alt="Math Academy"
-                  className="h-10 w-auto flex-none"
-                />
-                <p className="text-sm leading-relaxed text-v3-stone">{MATH_ACADEMY_BLURB}</p>
-              </div>
-              <ComingSoon />
-            </div>
-          </AppRow>
-        </div>
-
-        {/* The parent's controls for this kid are NOT on this page (it is the
-            kid's). This is the one quiet way across to them. */}
-        <Link
-          href={`/dashboard/kids/${c.id}/account`}
-          className="mt-10 inline-flex min-h-[44px] items-center gap-1.5 font-path-mono text-xs font-bold uppercase tracking-[0.12em] text-v3-stone transition-colors hover:text-v3-ink"
-        >
-          Account details
-          <span aria-hidden className="text-base leading-none">
-            &rsaquo;
-          </span>
-        </Link>
-      </>
-    );
-  };
-
-  return (
-    <div className="v3-grain min-h-screen bg-v3-cream text-v3-ink">
-      <AppHeader items={ACCOUNT_MENU} />
-
-      <main className="mx-auto w-full max-w-5xl px-5 py-8 sm:px-6 sm:py-12">
-        {backLink}
-
-        {!ready ? (
-          <p className="mt-6 v3-label text-v3-stone">Loading...</p>
-        ) : !child ? (
-          <div className="mt-6 rounded-3xl border border-dashed border-v3-ink/20 bg-white p-10 text-center">
-            <h1 className="font-path-display text-3xl font-black text-v3-ink">Kid not found</h1>
-            <p className="mt-3 text-base leading-relaxed text-v3-stone">
-              We could not find that kid on your account.
-            </p>
-            <Link
-              href="/dashboard"
-              className="mt-6 inline-flex min-h-[44px] items-center justify-center rounded-full bg-v3-profit px-8 py-3 font-path-display text-base font-semibold text-white shadow-[0_4px_0_0_#0f4227] transition hover:-translate-y-0.5 hover:bg-v3-profit-dark"
-            >
-              Back to all kids
-            </Link>
-          </div>
-        ) : (
-          kidBody(child)
-        )}
-      </main>
-    </div>
-  );
+  return <KidRouteShell childId={childId} surface="kid" body={kidBody} />;
 }

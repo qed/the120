@@ -107,6 +107,7 @@ describe("no surface retypes the deadline", () => {
     const src = stripComments(
       readSource("app/dashboard/ParentDashboard.tsx") +
         readSource("app/dashboard/kids/[id]/KidPortal.tsx") +
+        readSource("app/dashboard/kids/[id]/KidRouteShell.tsx") +
         readSource("app/dashboard/kids/[id]/account/KidAccount.tsx") +
         readSource("app/dashboard/FirstProfitCard.tsx")
     );

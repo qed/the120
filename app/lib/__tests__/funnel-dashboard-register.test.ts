@@ -254,11 +254,12 @@ describe("the parent dashboard — a kid list + per-kid portals (payment removed
   // longer bind. Add the file here the day you add the route.
   const parent = read("app/dashboard/ParentDashboard.tsx");
   const portal = read("app/dashboard/kids/[id]/KidPortal.tsx");
+  const shell = read("app/dashboard/kids/[id]/KidRouteShell.tsx");
   const account = read("app/dashboard/kids/[id]/account/KidAccount.tsx");
   const fpCard = read("app/dashboard/FirstProfitCard.tsx");
   const strip = (s: string) =>
     s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
-  const allCode = strip(parent + portal + account + fpCard);
+  const allCode = strip(parent + portal + shell + account + fpCard);
 
   it("has no register swap left — no path/application skins, no DashHeader", () => {
     expect(allCode).not.toContain("isPath");
@@ -320,9 +321,11 @@ describe("the parent dashboard — a kid list + per-kid portals (payment removed
     // re-declare it — which is what actually keeps the two headers identical.
     const ui = read("app/dashboard/ui.tsx");
     expect(ui).toContain('ACCOUNT_MENU: AccountMenuItem[] = [{ label: "My Kids", href: "/dashboard" }]');
+    // The per-kid surface is the shared KidRouteShell now (both per-kid routes
+    // mount it), so IT is the consumer to pin — same rule, one header.
     for (const [name, src] of [
       ["parent list", parent],
-      ["per-kid portal", portal],
+      ["per-kid route shell", shell],
     ] as const) {
       expect(strip(src), name).toContain("ACCOUNT_MENU");
       expect(strip(src), name).toContain("items={ACCOUNT_MENU}");

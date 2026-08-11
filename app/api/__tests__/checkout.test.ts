@@ -133,6 +133,7 @@ describe("R51a — the policy record", () => {
     const ui =
       read("app/dashboard/ParentDashboard.tsx") +
       read("app/dashboard/kids/[id]/KidPortal.tsx") +
+      read("app/dashboard/kids/[id]/KidRouteShell.tsx") +
       read("app/dashboard/kids/[id]/account/KidAccount.tsx") +
       read("app/dashboard/FirstProfitCard.tsx");
     expect(ui).not.toContain("policyAccepted");

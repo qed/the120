@@ -258,9 +258,21 @@ export default function KidCredentials({
  * Deliberately conservative: an unknown grade records `under_13`, the band with
  * the STRICTEST obligations, because over-protecting a 16-year-old costs nothing
  * and under-protecting a 10-year-old is a compliance failure.
+ *
+ * ⚠ IF A SECOND WRITER OF `fp_parental_consent.child_age_band` IS EVER ADDED,
+ * it must agree with this function for EVERY grade — not "roughly", exactly.
+ * Two writers of the same NOT NULL column of the same legal-evidence table
+ * that disagree mean the band on a child's record depends on which screen the
+ * parent happened to consent from. Pin the equality with a cross-importing
+ * test, the convention `normalizeKidNamePart` follows in flow-rules.test.ts.
+ *
+ * ⚠ `Number.isFinite`, NOT `typeof === "number"` (review 2026-08-10, P2-e).
+ * `NaN` is a number, and `NaN + 5 < 13` is false, and `NaN <= 15` is false — so
+ * the naive check fell through to `16_plus`, the LEAST protective band, for the
+ * one input that means "we do not know". The conservative answer wins.
  */
 export function ageBandFor(child: Child): "under_13" | "13_to_15" | "16_plus" {
-  if (typeof child.grade !== "number") return "under_13";
+  if (typeof child.grade !== "number" || !Number.isFinite(child.grade)) return "under_13";
   // Canadian grade → typical age is grade + 5.
   const age = child.grade + 5;
   if (age < 13) return "under_13";

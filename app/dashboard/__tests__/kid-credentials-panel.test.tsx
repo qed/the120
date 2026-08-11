@@ -91,6 +91,20 @@ describe("ageBandFor — the consent record's band, from a v2 roster row's grade
     // 10-year-old is a compliance failure.
     expect(ageBandFor(kid({ grade: "" }))).toBe("under_13");
   });
+
+  it("⚠ ON A DEGENERATE GRADE THE CONSERVATIVE ANSWER WINS (review P2-e)", () => {
+    // THE BUG THIS TEST WAS WRITTEN FOR: `NaN` is a `number`, and both
+    // `NaN + 5 < 13` and `NaN <= 15` are false — so the naive
+    // `typeof === "number"` guard fell straight through to `16_plus`, the
+    // LEAST protective band, for the one input that means "we do not know".
+    // This value is written to `fp_parental_consent.child_age_band`, a NOT NULL
+    // column of a legal-evidence table, so "unknown" must land on the most
+    // protective band, never the least.
+    expect(ageBandFor(kid({ grade: Number.NaN }))).toBe("under_13");
+    expect(ageBandFor(kid({ grade: Number.POSITIVE_INFINITY }))).toBe("under_13");
+    expect(ageBandFor(kid({ grade: Number.NEGATIVE_INFINITY }))).toBe("under_13");
+    expect(ageBandFor(kid({ grade: "" }))).toBe("under_13");
+  });
 });
 
 /* ───────────────────────────── the render itself ───────────────────────────── */

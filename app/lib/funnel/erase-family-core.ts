@@ -1067,7 +1067,24 @@ export async function eraseFamily(
 
       // 8: consent evidence — the EXPLICIT, deliberate final removal (see
       //    erase-family-rules.ts). fp_parental_consent by parent_id.
-      summary.deleted.fp_parental_consent += await del(db, "fp_parental_consent", "parent_id", input.parentUserId, summary, "family");
+      //
+      //    ⚠ GATED ON THE SAME `stranded` CONDITION AS THE PARENT DELETE BELOW
+      //    (review 2026-08-10, P2-d). This used to run unconditionally while
+      //    step 9 skipped itself whenever anything was stranded — so a partial
+      //    erasure left a STILL-LIVE child, still using the product, whose
+      //    parental-consent evidence had already been destroyed. That is the
+      //    one combination this table must never be in: a child we are
+      //    processing data for with no record of the permission to do it.
+      //    Deferring is free — this delete is idempotent and the re-run reaches
+      //    it once the children are finished.
+      if (summary.stranded.length > 0) {
+        console.error(
+          `[erase] fp_parental_consent for parent ${input.parentUserId} NOT deleted — ${summary.stranded.length} stranded item(s) mean a child may still exist, and a live child must never outlive its consent evidence; re-run after triage`
+        );
+        summary.order.push(`fp_parental_consent:deferred(${input.parentUserId})`);
+      } else {
+        summary.deleted.fp_parental_consent += await del(db, "fp_parental_consent", "parent_id", input.parentUserId, summary, "family");
+      }
 
       // FIX 3 (security): fp_signup_attempts is deleted by parent_id — the
       // principal-scoped key. The parent_email scope is a FALLBACK used ONLY when

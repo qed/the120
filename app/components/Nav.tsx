@@ -58,6 +58,18 @@ export default function Nav() {
   // null and the CTA hides.
   useEffect(() => {
     if (!signedIn) {
+      // ⚠ KNOWN LINT EXCEPTION, deliberately not "fixed" in the commit that
+      // turned lint into a gate. `react-hooks/set-state-in-effect` is right in
+      // general — a synchronous setState in an effect can cascade renders —
+      // but this particular pair IS the fail-safe described above: signed out
+      // must reset the rows to null so a paid-parent CTA can never linger for
+      // a signed-out visitor. Rewriting it (deriving the CTA instead of
+      // storing rows, or moving the reset into the auth-change handler, which
+      // would miss the on-navigation re-run) changes auth-visible nav
+      // behaviour, which is not something to do as a side effect of plumbing
+      // eslint into `npm run ship`. Suppressed HERE, narrowly, with the real
+      // fix tracked as its own change so it gets its own review.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setReserveChildren(null);
       setReserveDeposits(null);
       return;

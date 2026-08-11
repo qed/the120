@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "ship": "vitest run && next build",
+    "ship": "npm run lint && vitest run && next build",
     "verify:gauntlet": "node scripts/verify-gauntlet.mjs",
     "seed:staff": "tsx scripts/seed-staff.ts",
     "seed:path-content": "tsx scripts/seed-path-content.ts",

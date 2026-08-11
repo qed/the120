@@ -195,7 +195,7 @@ function arc(cx: number, cy: number, r: number, a0: number, a1: number): Shape {
   return (x, y) => {
     const px = x - cx;
     const py = y - cy;
-    let a = Math.atan2(py, px);
+    const a = Math.atan2(py, px);
     // Bring the angle into [a0, a0 + TAU) so the span test is a plain compare.
     let rel = a - a0;
     rel -= Math.floor(rel / TAU) * TAU;

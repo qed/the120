@@ -136,16 +136,20 @@ export function isTestSignup(email: string, env: SignupGateEnv): boolean {
 export type LaunchGateVerdict = { allowed: boolean; isTest: boolean; testOnly: boolean };
 
 /**
- * The code-level launch gate. `testOnly` defaults to ON: only an explicit
- * `off`/`false`/`0` disables it, so a missing or typo'd env keeps the gate
- * CLOSED (fail-closed — a public launch must be a deliberate act). While
- * test-only is on, a signup is allowed iff it is a test-family signup; with the
- * gate lifted, every signup is allowed but test families are still tagged.
+ * The code-level launch gate — INVERTED to PUBLIC-OPEN at the fpv04 U4 launch
+ * (founder decision 2026-08-12: "deploy to production live for all users. I
+ * don't want to have to set routes. I don't want allowlists."). `testOnly` is
+ * now OFF by default: the signup doors serve everyone with no env required.
+ * Only an EXPLICIT `on`/`true`/`1`/`yes` closes them again (the emergency
+ * kill-switch back to test-only). NOTE the inversion deliberately reverses
+ * the original fail-closed default; any stale legacy value other than the
+ * four close words now reads OPEN. Test families are still tagged is_test
+ * either way (CRM visibility, never a consent/verification bypass).
  */
 export function launchGateVerdict(email: string, env: SignupGateEnv): LaunchGateVerdict {
   const isTest = isTestSignup(email, env);
   const raw = (env.FP_SIGNUP_TEST_ONLY ?? "").trim().toLowerCase();
-  const testOnly = !["off", "false", "0"].includes(raw);
+  const testOnly = ["on", "true", "1", "yes"].includes(raw);
   return { allowed: testOnly ? isTest : true, isTest, testOnly };
 }
 

@@ -107,32 +107,32 @@ describe("isTestSignup (server-side only)", () => {
   });
 });
 
-describe("launchGateVerdict", () => {
-  it("defaults test-only ON: a non-test email is refused, a test email allowed", () => {
+describe("launchGateVerdict (PUBLIC-OPEN default, fpv04 U4 founder decision 2026-08-12)", () => {
+  it("defaults OPEN: everyone is allowed with no env set; test families still tagged", () => {
     expect(launchGateVerdict("dana@example.com", {})).toEqual({
-      allowed: false,
+      allowed: true,
       isTest: false,
-      testOnly: true,
+      testOnly: false,
     });
     expect(launchGateVerdict("f@test.the120.invalid", {})).toEqual({
       allowed: true,
       isTest: true,
-      testOnly: true,
+      testOnly: false,
     });
   });
 
-  it("keeps the gate closed for a typo'd flag value (fail-closed)", () => {
-    // Only an explicit off/false/0 lifts it; anything else means ON.
-    expect(launchGateVerdict("dana@example.com", { FP_SIGNUP_TEST_ONLY: "yes" }).allowed).toBe(false);
-    expect(launchGateVerdict("dana@example.com", { FP_SIGNUP_TEST_ONLY: "" }).allowed).toBe(false);
+  it("stays OPEN for empty/legacy/typo'd values (only the four close words close it)", () => {
+    expect(launchGateVerdict("dana@example.com", { FP_SIGNUP_TEST_ONLY: "" }).allowed).toBe(true);
+    expect(launchGateVerdict("dana@example.com", { FP_SIGNUP_TEST_ONLY: "off" }).allowed).toBe(true);
+    expect(launchGateVerdict("dana@example.com", { FP_SIGNUP_TEST_ONLY: "banana" }).allowed).toBe(true);
   });
 
-  it("lifts the gate on off/false/0 but still tags test families", () => {
-    for (const off of ["off", "false", "0", "OFF"]) {
-      const v = launchGateVerdict("dana@example.com", { FP_SIGNUP_TEST_ONLY: off });
-      expect(v.allowed).toBe(true);
-      expect(v.isTest).toBe(false);
-      const t = launchGateVerdict("f@test.the120.invalid", { FP_SIGNUP_TEST_ONLY: off });
+  it("the kill-switch (on/true/1/yes) returns to test-only: strangers refused, test emails pass", () => {
+    for (const on of ["on", "true", "1", "yes", "ON"]) {
+      const v = launchGateVerdict("dana@example.com", { FP_SIGNUP_TEST_ONLY: on });
+      expect(v.allowed).toBe(false);
+      expect(v.testOnly).toBe(true);
+      const t = launchGateVerdict("f@test.the120.invalid", { FP_SIGNUP_TEST_ONLY: on });
       expect(t.allowed).toBe(true);
       expect(t.isTest).toBe(true);
     }

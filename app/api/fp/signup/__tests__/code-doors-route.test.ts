@@ -5,11 +5,12 @@
  *   POST /api/fp/signup/resend   (code rotate)
  *
  * What only the wires can prove, pinned here:
- *   - THE LAUNCH GATE IS FAIL-CLOSED AND ASSERTED AT EVERY DOOR: with
- *     FP_SIGNUP_TEST_ONLY unset (the default) a fully VALID flow from a
- *     non-allowlisted caller is refused with the one byte-identical 401 at
- *     start AND verify AND resend, while a founder-allowlisted caller passes
- *     end-to-end (identity-scoped test path, attempts marked is_test).
+ *   - THE LAUNCH GATE IS PUBLIC-OPEN BY DEFAULT (fpv04 U4 founder decision
+ *     2026-08-12) AND STILL ASSERTED AT EVERY DOOR: with FP_SIGNUP_TEST_ONLY
+ *     unset, everyone passes; with the kill-switch ON (on/true/1/yes) a fully
+ *     VALID flow from a non-allowlisted caller is refused with the one
+ *     byte-identical 401 at start AND verify AND resend, while an allowlisted
+ *     caller passes end-to-end (attempts marked is_test).
  *   - THE VERIFY/RESEND DOORS TAKE THE V3_VERIFY_* BUDGETS (deliverable 2),
  *     not the 5/15min start limits; start keeps SIGNUP_RATE_LIMIT.
  *   - NO DOOR MAILS A LINK: the start mail carries a 6-digit code and no URL
@@ -172,7 +173,8 @@ beforeEach(() => {
   rateRef.released = [];
   mailRef.sent = [];
   provisionRef.seq = 0;
-  // Fail-closed default: NOTHING set. Tests that open the gate stub env.
+  // PUBLIC-OPEN default: nothing set. Tests that CLOSE the gate stub the
+  // kill-switch (FP_SIGNUP_TEST_ONLY=on) themselves.
   vi.stubEnv("FP_SIGNUP_TEST_ONLY", "");
   vi.stubEnv("FP_SIGNUP_TEST_ALLOWLIST", "");
 });
@@ -181,8 +183,9 @@ afterEach(() => {
   vi.resetModules();
 });
 
-describe("the fail-closed launch gate, asserted at EVERY code door (fpv04 U3)", () => {
-  it("gate closed (default env) + fully valid input → the one byte-identical 401 at start, verify AND resend", async () => {
+describe("the kill-switch launch gate, asserted at EVERY code door (fpv04 U3, inverted U4)", () => {
+  it("kill-switch ON + fully valid input → the one byte-identical 401 at start, verify AND resend", async () => {
+    vi.stubEnv("FP_SIGNUP_TEST_ONLY", "on");
     await expectGenericRefusal(await post("/api/fp/signup", startBody("stranger@example.com")));
     await expectGenericRefusal(
       await post("/api/fp/signup/verify", {

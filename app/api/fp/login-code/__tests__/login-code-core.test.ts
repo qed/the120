@@ -188,6 +188,72 @@ describe("request — mint + mail, hash at rest, uniform internal vocabulary", (
     expect(h.codeRows()).toHaveLength(2);
   });
 
+  it("resolves the fpv04 D7 DOMAIN-SWAP alias (stem@the120.school), and gives gmail-shaped names nothing", async () => {
+    const h = harness();
+    seedKid(h.store); // fp_username: remi.newal@firstprofit.school
+
+    // The swapped spelling reaches the same child through the pre-filter +
+    // shared matcher…
+    expect(await requestLoginCode(h.requestDeps, { username: "remi.newal@the120.school" })).toBe(
+      "sent"
+    );
+    expect(h.codeRows()).toHaveLength(1);
+    // …but a wrong stem, and a the120 spelling of a NON-firstprofit username,
+    // resolve nothing.
+    expect(await requestLoginCode(h.requestDeps, { username: "maya@the120.school" })).toBe(
+      "no_child"
+    );
+    const h2 = harness();
+    seedKid(h2.store, { username: "kid@gmail.com" });
+    expect(await requestLoginCode(h2.requestDeps, { username: "kid@the120.school" })).toBe(
+      "no_child"
+    );
+  });
+
+  it("D7 COLLISION: a LITERAL stem@the120.school username beats the alias-matched stem@firstprofit.school child, regardless of row order", async () => {
+    const h = harness();
+    // Seed the ALIAS-reachable child FIRST (so a first-match-in-array resolver
+    // would wrongly pick it), then the child whose fp_username literally IS the
+    // typed string, under a DIFFERENT parent.
+    seedKid(h.store, { username: "remi.newal@firstprofit.school", firstName: "AliasKid" });
+    const literal = seedKid(h.store, { username: "remi.newal@the120.school", firstName: "LiteralKid" });
+    const literalRow = h.store.children.find((r) => r.id === literal.childId)!;
+    literalRow.parent_id = "parent-literal";
+
+    expect(await requestLoginCode(h.requestDeps, { username: "remi.newal@the120.school" })).toBe(
+      "sent"
+    );
+    // The code went to the LITERAL child's parent — the typed string's owner —
+    // never to the alias family. Row order must not decide who gets mailed.
+    expect(h.mails).toEqual([
+      { parentId: "parent-literal", childFirstName: "LiteralKid", code: h.codes[0] },
+    ]);
+    expect(h.codeRows()).toHaveLength(1);
+    expect(h.codeRows()[0].child_id).toBe(literal.childId);
+  });
+
+  it("D7 PRECEDENCE RULE, documented: literal fp_username/legacy equality outranks an alias match; the alias resolves only when no literal owner exists", async () => {
+    // With ONLY the alias-reachable child present, the swapped spelling is the
+    // designed fallback and resolves them…
+    const h = harness();
+    const kid = seedKid(h.store, { username: "remi.newal@firstprofit.school" });
+    expect(await requestLoginCode(h.requestDeps, { username: "remi.newal@the120.school" })).toBe(
+      "sent"
+    );
+    expect(h.codeRows()[0].child_id).toBe(kid.childId);
+    // …and a LEGACY handle that literally equals the typed string outranks an
+    // alias match the same way the primary column does.
+    const h2 = harness();
+    seedKid(h2.store, { username: "maya@firstprofit.school", firstName: "AliasKid" });
+    const legacyKid = seedKid(h2.store, {
+      username: "other@firstprofit.school",
+      usernameLegacy: "maya@the120.school",
+      firstName: "LegacyKid",
+    });
+    expect(await requestLoginCode(h2.requestDeps, { username: "maya@the120.school" })).toBe("sent");
+    expect(h2.codeRows()[0].child_id).toBe(legacyKid.childId);
+  });
+
   it("unknown username: mints nothing, mails nobody — the route still answers uniformly", async () => {
     const h = harness();
     seedKid(h.store);

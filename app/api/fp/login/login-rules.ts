@@ -44,7 +44,10 @@ import {
   statusImpliesCoverBlob,
   isCoverStatus,
 } from "@/app/lib/fp/cover-store-rules";
-import { SIGN_IN_FAILED_MESSAGE } from "@/app/lib/fp/provision-rules";
+import {
+  canonicalUsernameForRateLimit,
+  SIGN_IN_FAILED_MESSAGE,
+} from "@/app/lib/fp/provision-rules";
 
 /* ----------------------------------------------------------- request parse */
 
@@ -396,6 +399,12 @@ export function extractClientIp(headers: HeaderReader): string {
  * ambiguous (ip='2001:db8', name=':x' and ip='2001:db8:', name='x' would
  * collide into one bucket, letting a chosen name alias onto another IP's
  * bucket). Encoding turns every `:` into `%3A`, making the key injective.
+ *
+ * fpv04 U3: the name segment is CANONICALIZED first
+ * (`canonicalUsernameForRateLimit`) so the two D7 alias spellings of one
+ * child's username share ONE (ip,name) guess budget — alternating
+ * `stem@firstprofit.school` / `stem@the120.school` must never double the 5
+ * tries per window. Non-alias identifiers pass through byte-identical.
  */
 export function deriveRateLimitKeys(
   ip: string,
@@ -403,7 +412,7 @@ export function deriveRateLimitKeys(
 ): { nameKey: string; ipKey: string } {
   const ipEnc = encodeURIComponent(ip);
   return {
-    nameKey: `fp-login:${ipEnc}:${encodeURIComponent(normalizedName)}`,
+    nameKey: `fp-login:${ipEnc}:${encodeURIComponent(canonicalUsernameForRateLimit(normalizedName))}`,
     ipKey: `fp-login-ip:${ipEnc}`,
   };
 }

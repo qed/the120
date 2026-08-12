@@ -43,6 +43,7 @@ import {
   encodeRateLimitSegment,
 } from "@/app/lib/fp/rate-limit-rules";
 import { FP_SIGN_IN_REFUSAL_BODY } from "../login/login-rules";
+import { canonicalUsernameForRateLimit } from "@/app/lib/fp/provision-rules";
 
 /* ─────────────────────────────────────────────── the code + its bounds ──── */
 
@@ -165,13 +166,18 @@ export const isLoginCodeInfraFailure = (reason: LoginCodeRefusalReason): boolean
  * is mail volume to one family, which an IP-scoped bucket would let a
  * distributed caller multiply) + the per-IP aggregate. Segments are
  * totally-escaped per the house IPv6/lone-surrogate learnings.
+ *
+ * fpv04 U3: the username segment is CANONICALIZED first
+ * (`canonicalUsernameForRateLimit`), so the two D7 alias spellings of one
+ * child share ONE mail budget — alternating domains must never double it.
  */
 export function deriveCodeRequestRateLimitKeys(
   ip: string,
   normalizedUsername: string
 ): { usernameKey: string; ipKey: string } {
+  const canonical = canonicalUsernameForRateLimit(normalizedUsername);
   return {
-    usernameKey: `${FP_LOGIN_CODE_REQUEST_NAMESPACE}:${encodeRateLimitSegment(normalizedUsername)}`,
+    usernameKey: `${FP_LOGIN_CODE_REQUEST_NAMESPACE}:${encodeRateLimitSegment(canonical)}`,
     ipKey: `${FP_LOGIN_CODE_REQUEST_IP_NAMESPACE}:${encodeRateLimitSegment(ip)}`,
   };
 }
@@ -198,14 +204,21 @@ export function deriveCodeRedeemIpKey(ip: string): string {
 }
 
 /** Redeem keys: (ip, username) + the per-IP aggregate — the login route's key
- *  discipline in this surface's own namespace. */
+ *  discipline in this surface's own namespace.
+ *
+ *  fpv04 U3: the username segment is CANONICALIZED
+ *  (`canonicalUsernameForRateLimit`) so both D7 alias spellings draw on ONE
+ *  guess budget. This matters MOST here: redeem has NO durable per-row guess
+ *  counter (a durable lock on a guessable public username is a self-DoS
+ *  vector), so this limiter IS the brute-force control — a spelling that
+ *  doubled it would double an attacker's tries against a live 6-digit code. */
 export function deriveCodeRedeemRateLimitKeys(
   ip: string,
   normalizedUsername: string
 ): { usernameKey: string; ipKey: string } {
   const ipEnc = encodeRateLimitSegment(ip);
   return {
-    usernameKey: `${FP_LOGIN_CODE_REDEEM_NAMESPACE}:${ipEnc}:${encodeRateLimitSegment(normalizedUsername)}`,
+    usernameKey: `${FP_LOGIN_CODE_REDEEM_NAMESPACE}:${ipEnc}:${encodeRateLimitSegment(canonicalUsernameForRateLimit(normalizedUsername))}`,
     ipKey: `${FP_LOGIN_CODE_REDEEM_IP_NAMESPACE}:${ipEnc}`,
   };
 }

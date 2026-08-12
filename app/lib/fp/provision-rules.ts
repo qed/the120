@@ -25,6 +25,7 @@
 
 import type { RoleGrant } from "./access-rules";
 import { asStoredCoverDataUrl } from "./cover-store-rules";
+import { FP_USERNAME_DOMAIN } from "./fp-username-rules";
 
 /* ------------------------------------------------------------ system email */
 
@@ -132,21 +133,82 @@ export function childUsernameMatches(
 }
 
 /**
- * fpv03 U3c: whether the typed (already-normalized) identifier resolves this
- * child by EITHER their current `fp_username` OR their pre-migration
- * `fp_username_legacy` alias — the same exact, case-folded comparison for
- * both columns (one function, so the login route and the login-code request
- * resolver can never disagree on what "matches" means). FAILS CLOSED on
- * null/empty stored values via childUsernameMatches.
+ * fpv04 U3 (plan D7): the DOMAIN-SWAP alias domain. A child whose minted
+ * `fp_username` is `stem@firstprofit.school` may also type
+ * `stem@the120.school` — same stem, EXACTLY, case-folded — and be resolved.
+ * The equivalence is deliberately one narrow shape:
+ *   - it applies ONLY to a stored username under `FP_USERNAME_DOMAIN`
+ *     (`@firstprofit.school`). A legacy plain handle (`fp_username_legacy`)
+ *     gains nothing, and an email-shaped username under any OTHER domain
+ *     (`kid@gmail.com`) gains NO new spellings — the swap is computed FROM the
+ *     typed `@the120.school` identifier TO the one minted domain, never the
+ *     reverse and never generically.
+ *   - the stem is compared exactly (no prefix/fuzzy match), lowercase-folded
+ *     the same way every username comparison here folds.
+ * No new lookup shape is introduced by the matcher itself: the login route's
+ * candidate scan already walks every row and this stays a pure per-row
+ * comparison, so the uniform-refusal / equalized-work posture of the doors is
+ * untouched.
+ */
+export const FP_USERNAME_ALIAS_DOMAIN = "the120.school";
+
+/**
+ * The stored `fp_username` a typed `@the120.school` identifier is equivalent
+ * to, or null when the identifier is not alias-shaped (wrong/absent domain, or
+ * an empty stem). Exposed so a door that PRE-FILTERS by exact stored value
+ * (the login-code resolver's `eq` reads) can add the swapped spelling to its
+ * lookup set and still re-verify through `childLoginUsernameMatches` — one
+ * definition of the equivalence, derived in one place.
+ */
+export function fpUsernameAliasTarget(normalizedIdentifier: string): string | null {
+  const suffix = `@${FP_USERNAME_ALIAS_DOMAIN}`;
+  if (!normalizedIdentifier.endsWith(suffix)) return null;
+  const stem = normalizedIdentifier.slice(0, -suffix.length);
+  if (!stem) return null;
+  // A stem that itself contains `@` is not a plain local part; a minted
+  // username never has one, so refuse rather than manufacture a double-@.
+  if (stem.includes("@")) return null;
+  return `${stem}@${FP_USERNAME_DOMAIN}`;
+}
+
+/**
+ * The CANONICAL identifier a rate-limit bucket must key on (fpv04 U3 review).
+ * The D7 alias folds two spellings onto one child at RESOLUTION; if the
+ * rate-limit keys did not fold the same way, alternating
+ * `stem@firstprofit.school` / `stem@the120.school` from one IP would buy an
+ * attacker DOUBLE the per-(ip,username) budget at every child door — and the
+ * login-code REDEEM has no durable guess counter, so its limiter is the only
+ * brute-force control there. Both spellings therefore collapse toward the one
+ * minted domain (`fpUsernameAliasTarget`'s swap) BEFORE key encoding; every
+ * non-alias identifier passes through unchanged, so existing bucket keys are
+ * byte-identical.
+ */
+export function canonicalUsernameForRateLimit(normalizedIdentifier: string): string {
+  return fpUsernameAliasTarget(normalizedIdentifier) ?? normalizedIdentifier;
+}
+
+/**
+ * fpv03 U3c (+ fpv04 D7): whether the typed (already-normalized) identifier
+ * resolves this child by EITHER their current `fp_username`, OR their
+ * pre-migration `fp_username_legacy` alias, OR the fpv04 domain-swap alias
+ * (`stem@the120.school` for a stored `stem@firstprofit.school`) — the same
+ * exact, case-folded comparison throughout (one function, so the login route
+ * and the login-code request resolver can never disagree on what "matches"
+ * means). FAILS CLOSED on null/empty stored values via childUsernameMatches.
  */
 export function childLoginUsernameMatches(
   child: { username: string | null; usernameLegacy?: string | null },
   normalizedIdentifier: string
 ): boolean {
-  return (
+  if (
     childUsernameMatches(child.username, normalizedIdentifier) ||
     childUsernameMatches(child.usernameLegacy ?? null, normalizedIdentifier)
-  );
+  ) {
+    return true;
+  }
+  // D7 domain-swap alias — applies to the PRIMARY username column only.
+  const aliasTarget = fpUsernameAliasTarget(normalizedIdentifier);
+  return aliasTarget !== null && childUsernameMatches(child.username, aliasTarget);
 }
 
 /* -------------------------------------------------------- password strength */

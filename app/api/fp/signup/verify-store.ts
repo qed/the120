@@ -432,6 +432,12 @@ export async function redeemVerificationCode(
   if (attempt.verifiedAt) {
     // See the docblock: `already` authorizes, so it must cost the caller the
     // code (or be the auto-confirmed test cohort), never just an attempt id.
+    // ⚠ The is_test grant means ANY typed code (and an attacker-chosen new
+    // password) completes a live is_test attempt — the accepted, guarded
+    // capability scoped to `@test.the120.invalid` + FP_SIGNUP_TEST_ALLOWLIST.
+    // The allowlist must therefore NEVER contain a real production identity:
+    // knowing an allowlisted email = account takeover of that test account
+    // while an attempt is live.
     if (attempt.isTest || (attempt.codeHash !== null && attempt.codeHash === input.codeHash)) {
       return { status: "already", attempt };
     }

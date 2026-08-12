@@ -45,7 +45,12 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { childLoginUsernameMatches, deriveStudentEmail } from "@/app/lib/fp/provision-rules";
+import {
+  childLoginUsernameMatches,
+  childUsernameMatches,
+  deriveStudentEmail,
+  fpUsernameAliasTarget,
+} from "@/app/lib/fp/provision-rules";
 import { resolveChildGrade } from "../grade/grade-rules";
 import { sha256Hex } from "../handoff/handoff-rules";
 import {
@@ -81,14 +86,36 @@ type ResolvedChild = { childId: string; firstName: string; parentId: string };
  * `eq` reads against lowercase-stored values) so a hit and a miss cost the
  * same I/O; if both columns somehow matched different children, the PRIMARY
  * handle wins deterministically.
+ *
+ * fpv04 D7: a typed `stem@the120.school` identifier is ALSO equivalent to the
+ * minted `stem@firstprofit.school` username. Because this resolver pre-filters
+ * by exact stored value (unlike the login route's full scan), the swapped
+ * spelling — derived by the SAME pure helper the matcher uses
+ * (`fpUsernameAliasTarget`) — is added to the primary-column lookup when the
+ * identifier is alias-shaped; every hit is still re-verified through
+ * `childLoginUsernameMatches`, so the two doors keep one definition.
+ *
+ * ── DETERMINISTIC PRECEDENCE: A LITERAL MATCH ALWAYS BEATS AN ALIAS MATCH ──
+ * The alias widening means the lookup can legitimately return TWO children for
+ * one typed identifier: one whose `fp_username` (or legacy handle) IS the
+ * typed string, and one it reaches only through the domain swap. Row order
+ * from the DB must never decide which family's parent gets mailed a login
+ * code, so selection is explicit: the child the caller literally typed —
+ * exact `fp_username`/`fp_username_legacy` equality with the normalized
+ * identifier — wins; a child reached only via the alias is the fallback. (A
+ * literal winner is unique by the columns' unique indexes; a mint never
+ * produces an `@the120.school` username, so the collision is theoretical —
+ * but "theoretical" is not "impossible", and precedence costs one comparison.)
  */
 async function resolveChildByUsername(
   db: SupabaseClient,
   normalized: string
 ): Promise<{ ok: true; child: ResolvedChild | null } | { ok: false }> {
   const cols = "id, first_name, parent_id, fp_username, fp_username_legacy";
+  const aliasTarget = fpUsernameAliasTarget(normalized);
+  const usernameValues = aliasTarget === null ? [normalized] : [normalized, aliasTarget];
   const [byUsername, byLegacy] = [
-    await db.from("children").select(cols).eq("fp_username", normalized).limit(2),
+    await db.from("children").select(cols).in("fp_username", usernameValues).limit(2),
     await db.from("children").select(cols).eq("fp_username_legacy", normalized).limit(2),
   ];
   if (byUsername.error || byLegacy.error) {
@@ -101,6 +128,8 @@ async function resolveChildByUsername(
     ...(((byUsername.data as Array<Record<string, unknown>> | null) ?? [])),
     ...(((byLegacy.data as Array<Record<string, unknown>> | null) ?? [])),
   ];
+  let literalWinner: ResolvedChild | null = null;
+  let aliasWinner: ResolvedChild | null = null;
   for (const row of rows) {
     if (typeof row.id !== "string" || typeof row.parent_id !== "string") continue;
     const candidate = {
@@ -110,16 +139,23 @@ async function resolveChildByUsername(
     // Re-verify in JS with the shared matcher (symmetric case folding) rather
     // than trusting the eq alone — one definition of "matches", everywhere.
     if (!childLoginUsernameMatches(candidate, normalized)) continue;
-    return {
-      ok: true,
-      child: {
-        childId: row.id,
-        firstName: typeof row.first_name === "string" ? row.first_name : "",
-        parentId: row.parent_id,
-      },
+    const resolved: ResolvedChild = {
+      childId: row.id,
+      firstName: typeof row.first_name === "string" ? row.first_name : "",
+      parentId: row.parent_id,
     };
+    // Explicit precedence, never array order (docblock): the row whose stored
+    // handle IS the typed string outranks a row reached only via the D7 alias.
+    const literal =
+      childUsernameMatches(candidate.username, normalized) ||
+      childUsernameMatches(candidate.usernameLegacy, normalized);
+    if (literal) {
+      if (literalWinner === null) literalWinner = resolved;
+    } else if (aliasWinner === null) {
+      aliasWinner = resolved;
+    }
   }
-  return { ok: true, child: null };
+  return { ok: true, child: literalWinner ?? aliasWinner };
 }
 
 /* ═══════════════════════════════════════════════════════════════ request ══ */

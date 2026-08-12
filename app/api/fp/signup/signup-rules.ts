@@ -79,6 +79,10 @@ export type SignupInput = z.infer<typeof signupSchema>;
 
 export type ParsedSignupRequest = { ok: true; data: SignupInput } | { ok: false };
 
+/** ⚠ DEAD since fpv04 U3: the start route now parses the CODE-mode step-1
+ *  schema (`parseV3Start` in app/lib/v3-signup/v3-signup-rules.ts). Kept, not
+ *  deleted, as part of the tracked LINK-mode dead-code sweep — its tests pin
+ *  the retired wire shape until that sweep lands. */
 export function parseSignupRequest(body: unknown): ParsedSignupRequest {
   const parsed = signupSchema.safeParse(body);
   if (!parsed.success) return { ok: false };

@@ -346,6 +346,29 @@ export const FP_LOGIN_CODE_REDEEM_IP_RATE_LIMIT: RateLimitConfig = {
   limit: 40,
 };
 
+/* ─────────────── fpv04 U3: cross-origin PARENT login door ────────────────── */
+
+/**
+ * `POST /api/fp/parent-login` — the parent twin of `/api/fp/login`: anonymous,
+ * cross-origin, hostile-facing, answers with session tokens on success. Its OWN
+ * namespaces so a flood at the parent door never spends (or is spent by) the
+ * child door's budget — the s02 client will try the child door first and the
+ * parent door second, and one shared bucket would make every mistyped kid
+ * password cost the parent a strike too.
+ *
+ * Same budgets as the child door: (ip,email) 5/15min bounds guessing one
+ * account from one source; the per-IP 40/15min backstop bounds the
+ * vary-the-email flood. ⚠ VOLUMETRIC ONLY (in-memory, per-instance, empty on
+ * cold start) — the constant-work single /token round-trip and Supabase's own
+ * limits are what this backstops, exactly as at the child door.
+ */
+export const FP_PARENT_LOGIN_NAMESPACE = "fp-parent-login";
+export const FP_PARENT_LOGIN_IP_NAMESPACE = "fp-parent-login-ip";
+
+export const FP_PARENT_LOGIN_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 5 };
+
+export const FP_PARENT_LOGIN_IP_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 40 };
+
 /** Events still inside the window (future-stamped ones included). Non-mutating. */
 export function pruneEvents(events: readonly number[], now: number, windowMs: number): number[] {
   return events.filter((t) => now - t < windowMs);

@@ -40,6 +40,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { sendEmail } from "@/app/lib/email";
 import { escapeHtml } from "@/app/crm/lib/library-rules";
 import {
+  bumpCodeGuessCount,
+  loadCodeAttemptForVerifyByEmail,
   loadPendingCodeAttemptByEmail,
   loadPendingRealAttemptByEmail,
   loadVerifiedTestAttemptByEmail,
@@ -53,7 +55,7 @@ import {
   VERIFICATION_TTL_MS,
 } from "./verify-store";
 import { authMailVerdict } from "@/app/lib/auth-mail-guard";
-import { buildCodeEmail } from "@/app/lib/v3-signup/v3-signup-rules";
+import { buildCodeEmail, normalizeTypedCode } from "@/app/lib/v3-signup/v3-signup-rules";
 
 /* ------------------------------------------------------------------- deps */
 
@@ -120,6 +122,11 @@ export type StartSignupInput = {
    * attempt at each front door without either clobbering the other's secret
    * (migration 20260914120000's header is the authority). Resume dispatches on
    * the mode too — see tryResumePending.
+   *
+   * ⚠ As of fpv04 U3 NO live route can originate or complete a LINK-mode
+   * signup (both startSignup callers pass mode:"code"; the verify door only
+   * redeems codes); the LINK halves remain ONLY to resolve legacy pending
+   * rows and are a tracked dead-code sweep.
    */
   mode?: "link" | "code";
 };
@@ -658,6 +665,136 @@ async function setPasswordAndSignIn(
   if (!pw.ok) return { ok: false, reason: "outage" };
   const signed = await deps.signInParent(email, password);
   if (!signed.ok) return { ok: false, reason: signed.outage ? "outage" : "invalid" };
+  return { ok: true, accessToken: signed.accessToken, refreshToken: signed.refreshToken };
+}
+
+/* ----------------------------------------- CODE-MODE VERIFY (fpv04 U3) --- */
+
+export type VerifyCodeCompletionInput = {
+  email: string;
+  password: string;
+  /** The typed 6-digit code, raw — normalized (digits-only) here. */
+  code: string;
+};
+
+export type VerifyCodeCompletionResult =
+  /** Inbox proved, chosen password set, PARENT SESSION TOKENS minted. */
+  | { ok: true; accessToken: string; refreshToken: string }
+  /** A wrong guess, durably counted. The strike stands at the route. */
+  | { ok: false; reason: "invalid_code"; guessesRemaining: number }
+  | { ok: false; reason: "expired" }
+  | { ok: false; reason: "locked" }
+  /** The redeem CAS SUCCEEDED — the single-use code is spent — but a step
+   *  after it (set password / sign-in) did not. Re-submitting the SAME code
+   *  recovers via the redeem's `already` branch, so the client must keep the
+   *  typed code (the v3 core's review FIX 5, carried over verbatim). */
+  | { ok: false; reason: "post_verify_failed" }
+  /** A DB/auth fault before anything irreversible — release the strike. */
+  | { ok: false; reason: "outage" };
+
+/**
+ * The CODE-mode verify-completion for the cross-origin HTTP door (fpv04 U3) —
+ * the tokens-in-JSON twin of app/lib/v3-signup/v3-signup-core.ts `v3VerifyCode`
+ * (which mints a COOKIE session for /start). Same substrate, same order, same
+ * review fixes:
+ *
+ *   - THE ATTEMPT IS RE-DERIVED FROM THE EMAIL (v3 review FIX 1, design A):
+ *     no attempt id ever crossed to the client, so there is nothing to steal.
+ *     The typed CODE is the only secret in the exchange.
+ *   - An address with NO live code attempt is answered as an ordinary wrong
+ *     guess — same shape, same cost — so this door is not an "is a signup in
+ *     flight?" oracle. Nothing is written for that case.
+ *   - A wrong guess is DURABLY counted (bumpCodeGuessCount) before answering;
+ *     CAS-retry exhaustion fails closed as `locked` (v3 review FIX 3).
+ *   - The chosen password is set ONLY after the redeem proves inbox control
+ *     (the no-session-before-inbox-proof invariant in this module's header);
+ *     `already` re-authorizes a post-redeem retry, including the auto-confirmed
+ *     is_test cohort which never has a code to type.
+ *   - No cookie probe: this path mints JSON tokens via `signInParent`, so there
+ *     is no cookie store to prove writable before the irreversible redeem.
+ *
+ * RE-AUDITED fpv04 U3, accepted: the durable 6-guess lock (MAX_CODE_GUESSES)
+ * now rides a PUBLIC door keyed on the parent's email. This is not the
+ * self-DoS vector of the durable-lock learning — a parent email is not
+ * derivable/enumerable the way the school handles there were, and the lock is
+ * scoped to one 10-minute attempt, recoverable via a fresh start.
+ *
+ * TRACKED FOLLOW-UP: extract the shared redeem/guess/lock sequence into one
+ * core; until then any fix here MUST be mirrored in the twin (`v3VerifyCode`).
+ */
+export async function verifyCodeCompletion(
+  deps: SignupCoreDeps,
+  input: VerifyCodeCompletionInput
+): Promise<VerifyCodeCompletionResult> {
+  const { db } = deps;
+  const email = input.email.trim().toLowerCase();
+  const code = normalizeTypedCode(input.code);
+  const stampNow = (): string => new Date(deps.now()).toISOString();
+
+  const found = await loadCodeAttemptForVerifyByEmail(db, email);
+  if (!found.ok) return { ok: false, reason: "outage" };
+  if (!found.attempt) {
+    return { ok: false, reason: "invalid_code", guessesRemaining: MAX_CODE_GUESSES - 1 };
+  }
+  const attemptId = found.attempt.id;
+
+  const redeemed = await redeemVerificationCode(db, {
+    attemptId,
+    codeHash: sha256Hex(code),
+    nowIso: stampNow(),
+  });
+
+  switch (redeemed.status) {
+    case "error":
+      return { ok: false, reason: "outage" };
+    case "locked":
+      return { ok: false, reason: "locked" };
+    case "expired":
+      return { ok: false, reason: "expired" };
+    case "invalid": {
+      const bumped = await bumpCodeGuessCount(db, { attemptId, nowIso: stampNow() });
+      if (!bumped.ok) {
+        // Exhaustion = concurrent guessing; the store has locked the row. The
+        // `locked` answer (not `outage`) also keeps the strike at the route.
+        return bumped.reason === "exhausted"
+          ? { ok: false, reason: "locked" }
+          : { ok: false, reason: "outage" };
+      }
+      const remaining = Math.max(MAX_CODE_GUESSES - bumped.count, 0);
+      return remaining === 0
+        ? { ok: false, reason: "locked" }
+        : { ok: false, reason: "invalid_code", guessesRemaining: remaining };
+    }
+    case "verified":
+    case "already":
+      break;
+  }
+
+  const attempt = redeemed.attempt;
+  // Belt-and-braces: the resolver selected this row BY this email, so a
+  // mismatch means the row changed underneath us; `parentId` is the real check.
+  if (!attempt || attempt.parentEmail.trim().toLowerCase() !== email || !attempt.parentId) {
+    console.error("[fp/signup] code-verify email/attempt mismatch or missing parent_id");
+    return { ok: false, reason: "outage" };
+  }
+
+  // Everything from here is POST-REDEEM: the code is spent, so a failure must
+  // NOT look like a wrong code (v3 review FIX 5).
+  const pw = await deps.setParentPassword(attempt.parentId, input.password);
+  if (!pw.ok) {
+    console.error(
+      `[fp/signup] POST-REDEEM FAILURE (set password) for attempt ${attemptId} — the code is spent; re-submitting it recovers via the redeem's 'already' branch`
+    );
+    return { ok: false, reason: "post_verify_failed" };
+  }
+
+  const signed = await deps.signInParent(email, input.password);
+  if (!signed.ok) {
+    console.error(
+      `[fp/signup] POST-REDEEM FAILURE (token sign-in) for attempt ${attemptId} — the code is spent; re-submitting it recovers via the redeem's 'already' branch`
+    );
+    return { ok: false, reason: "post_verify_failed" };
+  }
   return { ok: true, accessToken: signed.accessToken, refreshToken: signed.refreshToken };
 }
 

@@ -4,6 +4,7 @@ import {
   buildStudentCreateUserPayload,
   buildStudentGrants,
   childLoginUsernameMatches,
+  fpUsernameAliasTarget,
   childUsernameMatches,
   deriveStudentEmail,
   isParentOfFamily,
@@ -466,6 +467,58 @@ describe("childLoginUsernameMatches — fp_username OR the legacy alias (fpv03 U
     expect(childLoginUsernameMatches({ username: null, usernameLegacy: null }, "remi")).toBe(false);
     expect(childLoginUsernameMatches({ username: null }, "remi")).toBe(false);
     expect(childLoginUsernameMatches({ username: null, usernameLegacy: "" }, "")).toBe(false);
+  });
+});
+
+describe("the fpv04 D7 domain-swap alias — stem@the120.school ≡ stem@firstprofit.school", () => {
+  const child = { username: "remi.newal@firstprofit.school", usernameLegacy: null };
+
+  it("POSITIVE: the @the120.school spelling resolves the minted @firstprofit.school username", () => {
+    expect(childLoginUsernameMatches(child, "remi.newal@the120.school")).toBe(true);
+  });
+
+  it("case-folds the STORED side like every username comparison (identifier arrives pre-normalized)", () => {
+    expect(
+      childLoginUsernameMatches(
+        { username: "Remi.Newal@FirstProfit.School" },
+        "remi.newal@the120.school"
+      )
+    ).toBe(true);
+  });
+
+  it("NEGATIVE: an email-shaped username under any OTHER domain gains no equivalences", () => {
+    // kid@gmail.com is only ever kid@gmail.com…
+    expect(childLoginUsernameMatches({ username: "kid@gmail.com" }, "kid@gmail.com")).toBe(true);
+    // …the the120 spelling does not reach it…
+    expect(childLoginUsernameMatches({ username: "kid@gmail.com" }, "kid@the120.school")).toBe(false);
+    // …and no reverse/generic swap exists (typing the gmail shape never
+    // resolves a firstprofit-domain child, and vice versa).
+    expect(childLoginUsernameMatches(child, "remi.newal@gmail.com")).toBe(false);
+  });
+
+  it("NEGATIVE: the stem must match EXACTLY — wrong stem, prefix, or empty stem never resolves", () => {
+    expect(childLoginUsernameMatches(child, "maya@the120.school")).toBe(false);
+    expect(childLoginUsernameMatches(child, "remi@the120.school")).toBe(false); // prefix ≠ stem
+    expect(childLoginUsernameMatches(child, "@the120.school")).toBe(false);
+  });
+
+  it("the LEGACY column gains nothing: a plain handle has no alias spellings", () => {
+    expect(
+      childLoginUsernameMatches({ username: null, usernameLegacy: "remi" }, "remi@the120.school")
+    ).toBe(false);
+    // and the legacy handle itself still works, unchanged.
+    expect(childLoginUsernameMatches({ username: null, usernameLegacy: "remi" }, "remi")).toBe(true);
+  });
+
+  it("fpUsernameAliasTarget derives the one swapped spelling, or null for anything else", () => {
+    expect(fpUsernameAliasTarget("remi.newal@the120.school")).toBe(
+      "remi.newal@firstprofit.school"
+    );
+    expect(fpUsernameAliasTarget("remi.newal@firstprofit.school")).toBeNull();
+    expect(fpUsernameAliasTarget("kid@gmail.com")).toBeNull();
+    expect(fpUsernameAliasTarget("@the120.school")).toBeNull(); // empty stem
+    expect(fpUsernameAliasTarget("remi")).toBeNull();
+    expect(fpUsernameAliasTarget("a@b@the120.school")).toBeNull(); // no double-@ manufacture
   });
 });
 

@@ -1,23 +1,56 @@
 /**
- * /api/fp/signup — the First Profit SPA's cross-origin PARENT SIGNUP start
- * (Slice B Unit 2; R9, R10, R11, R16, R17). A hostile-facing public POST, and a
- * heavier one than /api/fp/login: it mints a real parent auth account, tags a
- * CRM family, and sends mail. It is a CORS MIRROR of app/api/fp/login/route.ts —
+ * /api/fp/signup — the First Profit SPA's cross-origin PARENT SIGNUP start,
+ * CODE MODE since fpv04 Unit 3 (plan: first-profit
+ * docs/plans/2026-08-12-001-feat-fpv04-onboarding-rebuild-plan.md).
+ *
+ * This door used to run LINK mode: it emailed a link to
+ * firstprofit.school/signup/verify — a screen the fpv03 retirement removed, so
+ * every such mail was a dead link. The LINK mail path is KILLED at this wire:
+ * the door now runs the SAME code-mode substrate the /start Server Actions run
+ * (app/start/actions.ts → v3StartSignup → startSignup mode:"code"), against the
+ * SAME `fp_signup_attempts` verify-store (hashed 6-digit code, 10-min TTL,
+ * durable 6-guess CAS cap, 60s resend cooldown). One substrate, two wires — the
+ * Server Actions are untouched and keep working unchanged.
+ *
+ * A hostile-facing public POST, CORS MIRROR of app/api/fp/login/route.ts —
  * OPTIONS 204 with the echoed origin, no-store, one generic 401 for every
  * refusal, 403 for a bad Origin, an atomic rate-limit strike BEFORE any DB I/O
- * with release-on-outage — plus this surface's own launch gate.
+ * with release-on-outage — plus this surface's launch gate.
  *
- * Two response shapes leave here, and only two: the one generic refusal, and —
- * deliberately, for R10 — the `existing_account` signal that routes a returning
- * parent to login/attach (the accepted, rate-limited enumeration tradeoff). The
- * CODE-LEVEL LAUNCH GATE (Rev 3) collapses a non-test signup into the SAME
- * generic refusal while test-only mode is on, so the gate is invisible on the
- * wire. NEVER log passwords or tokens.
+ * ── WHAT LEAVES THIS DOOR (every branch a deliberate disclosure, mirroring
+ *    the v3 start union documented in app/lib/v3-signup/v3-signup-rules.ts) ──
+ *   200 {ok:true,  status:"code_sent"}          — a code is on its way. NO
+ *       attempt id: the verify/resend doors are EMAIL-KEYED (v3 review FIX 1,
+ *       design A) — the server re-derives the attempt from the typed address,
+ *       and the typed CODE is the only secret in the exchange. This replaces
+ *       the link door's attemptId disclosure.
+ *   200 {ok:false, status:"existing_account"}   — the documented R10 signal,
+ *       byte-identical to what this door has always shipped: a returning
+ *       parent is routed to sign-in, never dead-ended (accepted, rate-limited
+ *       enumeration tradeoff).
+ *   200 {ok:false, status:"locked"}             — a prior attempt burned its
+ *       durable guess budget; the account holder must learn this or retries
+ *       forever.
+ *   200 {ok:false, status:"pending_elsewhere"}  — a live LINK attempt from the
+ *       pre-fpv04 door still holds this address: check the inbox, don't
+ *       sign in (v3 review FIX 4).
+ *   200 {ok:false, status:"retryable"}          — a re-issue onto an existing
+ *       attempt failed; "try again", never "go sign in" (v3 review FIX 2).
+ *   401 (one byte-identical body)               — everything else: malformed
+ *       input, launch-gate refusal, rate limit, outage.
  *
- * The verify-completion half (which returns the parent session tokens) is a
- * sibling route: ./verify/route.ts.
+ * ── THE LAUNCH GATE (fail-closed, FOUNDER-SCOPED test path) ──
+ * `FP_SIGNUP_TEST_ONLY` unset/anything-but-off means the gate is CLOSED to the
+ * public: only a caller whose parent email is on `FP_SIGNUP_TEST_ALLOWLIST`
+ * (or under the guarded `@test.the120.invalid` domain) passes, and their
+ * attempts ride the existing `is_test` plumbing. Every other caller gets the
+ * SAME generic 401 even with a fully valid flow — the gate is IDENTITY-scoped,
+ * never a global test mode, and invisible on the wire. The verify and resend
+ * sibling doors assert the SAME verdict (a flag that gates one endpoint gates
+ * nothing). NEVER log passwords or codes.
  */
 
+import { randomInt } from "node:crypto";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { provisionOrRecognizeAccount } from "@/app/lib/funnel/account";
 import {
@@ -30,15 +63,18 @@ import {
   deriveSignupRateLimitKeys,
   extractClientIp,
   launchGateVerdict,
-  parseSignupRequest,
   shapeSignupRefusal,
   splitParentName,
   SIGNUP_IP_RATE_LIMIT,
   SIGNUP_RATE_LIMIT,
   type SignupRefusalReason,
 } from "./signup-rules";
+import {
+  formatVerificationCode,
+  parseV3Start,
+  VERIFICATION_CODE_SPACE,
+} from "@/app/lib/v3-signup/v3-signup-rules";
 import { startSignup, type SignupCoreDeps } from "./signup-core";
-import { randomBytes } from "node:crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -102,6 +138,8 @@ export async function POST(req: Request): Promise<Response> {
     const shaped = shapeSignupRefusal(reason);
     return new Response(shaped.body, { status: shaped.status, headers });
   };
+  const answer = (body: Record<string, unknown>): Response =>
+    new Response(JSON.stringify(body), { status: 200, headers });
 
   try {
     let body: unknown;
@@ -110,7 +148,10 @@ export async function POST(req: Request): Promise<Response> {
     } catch {
       return refuse("malformed_request");
     }
-    const parsed = parseSignupRequest(body);
+    // The SAME step-1 schema the /start Server Actions parse (parentName,
+    // parentEmail, parentPassword, consentAccepted:true — strict): one shape
+    // for one flow, and the terms affirmation is a PARSE failure, not a branch.
+    const parsed = parseV3Start(body);
     if (!parsed.ok) return refuse("malformed_request");
     const data = parsed.data;
 
@@ -135,10 +176,11 @@ export async function POST(req: Request): Promise<Response> {
       return refuse("rate_limited");
     }
 
-    // CODE-LEVEL LAUNCH GATE (Rev 3, P0). A refused non-test signup is the SAME
-    // generic refusal as any other — no gate oracle. The strike above stands
-    // (gate-refused is a real, bounded attempt). is_test rides through to the
-    // attempt row (server-side determination, never client input).
+    // CODE-LEVEL LAUNCH GATE (Rev 3, P0; fpv04 U3 founder-scoped test path). A
+    // refused non-test signup is the SAME generic refusal as any other — no
+    // gate oracle. The strike above stands (gate-refused is a real, bounded
+    // attempt). is_test rides through to the attempt row (server-side
+    // determination, never client input).
     const gate = launchGateVerdict(data.parentEmail, {
       FP_SIGNUP_TEST_ONLY: process.env.FP_SIGNUP_TEST_ONLY,
       FP_SIGNUP_TEST_ALLOWLIST: process.env.FP_SIGNUP_TEST_ALLOWLIST,
@@ -175,10 +217,11 @@ export async function POST(req: Request): Promise<Response> {
       },
       signInParent: async () => ({ ok: false, outage: false }), // unused on the start path
       sendMail: (await import("@/app/lib/email")).sendEmail,
-      mintToken: () => randomBytes(32).toString("base64url"),
-      // Unused on the LINK path — this door always starts in `link` mode. The
-      // 6-digit code belongs to the v3 /start Server Actions.
-      mintCode: () => "",
+      // Unused in CODE mode — no link token is ever minted at this door again.
+      mintToken: () => "",
+      // Uniform over the whole 10^6 space: randomInt is rejection-sampled by
+      // node, and formatVerificationCode zero-pads rather than re-rolling.
+      mintCode: () => formatVerificationCode(randomInt(0, VERIFICATION_CODE_SPACE)),
       now: () => Date.now(),
     };
 
@@ -191,49 +234,32 @@ export async function POST(req: Request): Promise<Response> {
       isTest: gate.isTest,
       ip,
       ua: req.headers.get("user-agent") ?? "",
-      originBase: verdict.origin,
+      // Code mode sends no link, so there is no origin to return the parent to.
+      originBase: "",
+      mode: "code",
     });
 
-    // EXHAUSTIVE over StartSignupResult, ending in assertNever (review FIX 6).
-    // This union is shared with the v3 code-mode door and has grown twice
-    // already; an if-cascade would let the NEXT widening fall through into the
-    // success response — which reads `result.attemptId` and would answer
-    // `verification_pending` for an outcome that never started anything. The
-    // switch makes that a COMPILE error instead.
+    // EXHAUSTIVE over StartSignupResult, ending in assertNever (review FIX 6):
+    // a widened union falls out as a COMPILE error, never a silent success.
     switch (result.kind) {
       case "existing_account":
-        // Deliberate, documented enumeration signal (R10). Distinct from the
-        // generic refusal so the SPA can route to login/attach. 200/no-store.
-        return new Response(JSON.stringify({ ok: false, status: "existing_account" }), {
-          status: 200,
-          headers,
-        });
+        // Deliberate, documented enumeration signal (R10) — byte-identical to
+        // what this door has always shipped. 200/no-store.
+        return answer({ ok: false, status: "existing_account" });
       case "locked":
+        return answer({ ok: false, status: "locked" });
       case "pending_elsewhere":
+        return answer({ ok: false, status: "pending_elsewhere" });
       case "retryable":
-        // All three are CODE-mode outcomes and this route always starts in link
-        // mode, so all three are unreachable here. Mapped explicitly onto the
-        // existing generic refusal, which keeps this door's WIRE CONTRACT
-        // byte-identical to what firstprofit.school ships today.
-        return refuse("outage");
+        return answer({ ok: false, status: "retryable" });
       case "failed":
         // A failure here is our fault, not a bad guess — hand the strikes back.
         releaseStrikes();
         return refuse("outage");
       case "started":
-        // Return the attempt id so the cross-origin SPA can carry it through the
-        // email-verify wait to the authenticated child-mint call (Unit 9); it is
-        // an opaque handle on THIS door (the child-mint route re-checks that the
-        // attempt is 'verified' and owned by the Bearer parent). The v3 door
-        // deliberately does NOT surface it — see v3-signup-core's FIX 1 header.
-        return new Response(
-          JSON.stringify({
-            ok: true,
-            status: "verification_pending",
-            attemptId: result.attemptId,
-          }),
-          { status: 200, headers }
-        );
+        // NO attemptId (v3 review FIX 1, design A): the verify/resend doors are
+        // email-keyed, so nothing that identifies a row crosses to the client.
+        return answer({ ok: true, status: "code_sent" });
       default:
         return assertNever(result);
     }

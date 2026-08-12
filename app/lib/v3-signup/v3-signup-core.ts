@@ -218,6 +218,12 @@ export type V3VerifyResult =
   | { kind: "post_verify_failed" }
   | { kind: "failed" };
 
+/**
+ * TRACKED FOLLOW-UP (fpv04 U3): `verifyCodeCompletion` in
+ * app/api/fp/signup/signup-core.ts is this function's tokens-in-JSON twin —
+ * the shared redeem/guess/lock sequence should be extracted into one core;
+ * until then any fix here MUST be mirrored in the twin.
+ */
 export async function v3VerifyCode(
   deps: V3SignupDeps,
   input: unknown

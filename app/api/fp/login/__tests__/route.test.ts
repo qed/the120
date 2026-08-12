@@ -225,6 +225,27 @@ describe("POST /api/fp/login — username-only resolution (Slice B U13)", () => 
     expect(authRef.calls[0]).toMatchObject({ email: INTERNAL_EMAIL });
   });
 
+  it("resolves the fpv04 D7 DOMAIN-SWAP alias: stem@the120.school signs in the stem@firstprofit.school child", async () => {
+    seedChild("alex.new@firstprofit.school");
+    const res = await post({
+      identifier: "Alex.New@The120.School", // case-folded by classifyIdentifier
+      password: "correct horse tulip",
+    });
+    expect(res.status).toBe(200);
+    expect(authRef.calls).toHaveLength(1);
+    expect(authRef.calls[0]).toEqual({ email: INTERNAL_EMAIL, password: "correct horse tulip" });
+  });
+
+  it("the D7 alias gives a gmail-shaped username NO new spelling (generic 401, one dummy call)", async () => {
+    seedChild("kid@gmail.com");
+    authRef.signIn = signInInvalid();
+    const res = await post({ identifier: "kid@the120.school", password: "correct horse tulip" });
+    expect(res.status).toBe(401);
+    // Constant-work: the miss still pays exactly one (dummy) auth round-trip.
+    expect(authRef.calls).toHaveLength(1);
+    expect((authRef.calls[0] as { email: string }).email).not.toBe(INTERNAL_EMAIL);
+  });
+
   it("a correct username with a WRONG password returns the SAME generic 401 (no oracle)", async () => {
     authRef.signIn = signInInvalid();
     const wrongPw = await post({ identifier: "alex", password: "wrong-guess-here" });

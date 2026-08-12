@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { FP_SIGN_IN_REFUSAL_BODY } from "@/app/api/fp/login/login-rules";
+import {
+  deriveRateLimitKeys as deriveLoginRateLimitKeys,
+  FP_SIGN_IN_REFUSAL_BODY,
+} from "@/app/api/fp/login/login-rules";
 import {
   FP_LOGIN_CODE_REDEEM_RATE_LIMIT,
+  FP_LOGIN_CODE_REQUEST_RATE_LIMIT,
 } from "@/app/lib/fp/rate-limit-rules";
+import { checkAndRecordRateLimit } from "@/app/lib/fp/rate-limit-store";
 import {
   deriveCodeRedeemIpKey,
   deriveCodeRedeemRateLimitKeys,
@@ -170,5 +175,54 @@ describe("rate-limit keys — distinct namespaces, injective segments", () => {
     }
     // And the four are pairwise distinct.
     expect(new Set([req.usernameKey, req.ipKey, red.usernameKey, red.ipKey]).size).toBe(4);
+  });
+});
+
+describe("fpv04 U3: the D7 alias collapses onto ONE rate-limit budget", () => {
+  const A = "remi.newal@firstprofit.school";
+  const B = "remi.newal@the120.school";
+
+  it("request keys: both spellings derive the SAME username bucket", () => {
+    expect(deriveCodeRequestRateLimitKeys("1.2.3.4", B).usernameKey).toBe(
+      deriveCodeRequestRateLimitKeys("1.2.3.4", A).usernameKey
+    );
+  });
+
+  it("redeem keys: both spellings derive the SAME (ip,username) bucket — the redeem limiter is the ONLY brute-force control there", () => {
+    expect(deriveCodeRedeemRateLimitKeys("1.2.3.4", B).usernameKey).toBe(
+      deriveCodeRedeemRateLimitKeys("1.2.3.4", A).usernameKey
+    );
+  });
+
+  it("password-login keys collapse the same way", () => {
+    expect(deriveLoginRateLimitKeys("1.2.3.4", B).nameKey).toBe(
+      deriveLoginRateLimitKeys("1.2.3.4", A).nameKey
+    );
+  });
+
+  it("non-alias identifiers are byte-identical to the pre-fpv04 keys (no bucket migration)", () => {
+    expect(deriveCodeRequestRateLimitKeys("1.2.3.4", "remi").usernameKey).toBe(
+      "fp-login-code-req:remi"
+    );
+    // A gmail-shaped name keeps its own bucket — no generic domain folding.
+    expect(deriveCodeRequestRateLimitKeys("1.2.3.4", "kid@gmail.com").usernameKey).toBe(
+      "fp-login-code-req:kid%40gmail.com"
+    );
+  });
+
+  it("BEHAVIORAL: exhausting the budget under one spelling leaves the OTHER spelling rate-limited too", () => {
+    // The real in-memory store, on a per-run-unique STEM (the request bucket
+    // is keyed on the username alone) so no other strikes share it. Spend the
+    // whole request budget under the firstprofit spelling…
+    const stem = `alias-collapse-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    const keyA = deriveCodeRequestRateLimitKeys("1.2.3.4", `${stem}@firstprofit.school`)
+      .usernameKey;
+    for (let i = 0; i < FP_LOGIN_CODE_REQUEST_RATE_LIMIT.limit; i++) {
+      expect(checkAndRecordRateLimit(keyA, FP_LOGIN_CODE_REQUEST_RATE_LIMIT).allowed).toBe(true);
+    }
+    // …and the the120 spelling is refused: one child, ONE combined budget.
+    const keyB = deriveCodeRequestRateLimitKeys("1.2.3.4", `${stem}@the120.school`).usernameKey;
+    expect(keyB).toBe(keyA);
+    expect(checkAndRecordRateLimit(keyB, FP_LOGIN_CODE_REQUEST_RATE_LIMIT).allowed).toBe(false);
   });
 });

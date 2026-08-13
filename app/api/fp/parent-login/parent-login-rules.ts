@@ -145,31 +145,45 @@ export function shapeParentLoginRefusal(
 /* ------------------------------------------------- launch gate (fail-closed) */
 
 export type ParentLoginGateEnv = {
-  FP_PARENT_LOGIN_LIVE?: string | undefined;
+  FP_PARENT_LOGIN_TEST_ONLY?: string | undefined;
   FP_SIGNUP_TEST_ALLOWLIST?: string | undefined;
 };
 
-/** Affirmative-only live check — the FP_HANDOFF_LANDING_LIVE spellings: `1`,
- *  `true`, `on` after trim+lowercase. Everything else (unset, empty, `0`,
- *  `false`, a typo) is OFF, because a mis-spelled flag must never open a door. */
-export function isParentLoginLive(raw: string | undefined | null): boolean {
+/**
+ * PUBLIC-OPEN BY DEFAULT since fpv04 U6b-i, matching what the signup doors did
+ * at U4 (t120 cb90cad) under the founder's standing decision: "deploy to
+ * production live for all users. I don't want to have to set routes. I don't
+ * want allowlists." There is no env for anyone to remember to set, so the
+ * parent dashboard cannot ship dark by accident.
+ *
+ * The KILL-SWITCH keeps the affirmative-only spelling in the direction that
+ * still matters: `FP_PARENT_LOGIN_TEST_ONLY` = `1`/`true`/`on`/`yes` closes
+ * the door back to the founder allowlist. Unset, empty, or a typo reads OPEN —
+ * the inversion of the old rule, and deliberate: the risk being defended
+ * against is no longer "a typo opens a door too early" (the client is live)
+ * but "a typo silently locks every parent out of their own dashboard".
+ *
+ * The legacy `FP_PARENT_LOGIN_LIVE` var is no longer read. It was affirmative
+ * -only in the opposite direction, so leaving it wired would mean an unset
+ * env closing the door the moment someone tidied the other flag away.
+ */
+export function isParentLoginTestOnly(raw: string | undefined | null): boolean {
   const v = (raw ?? "").trim().toLowerCase();
-  return v === "1" || v === "true" || v === "on";
+  return v === "1" || v === "true" || v === "on" || v === "yes";
 }
 
 export type ParentLoginGateVerdict = { allowed: boolean; live: boolean; isTest: boolean };
 
 /**
- * The door-level verdict: open to everyone once `FP_PARENT_LOGIN_LIVE` is
- * affirmatively on (Unit 6b ships the client); until then, only the founder
- * allowlist identity passes. The refusal for everyone else is the SAME generic
- * 401 — the gate is invisible on the wire.
+ * The door-level verdict: OPEN to everyone unless the kill-switch is thrown,
+ * in which case only the founder allowlist identity passes. The refusal for
+ * everyone else is the SAME generic 401 — the gate is invisible on the wire.
  */
 export function parentLoginGateVerdict(
   email: string,
   env: ParentLoginGateEnv
 ): ParentLoginGateVerdict {
-  const live = isParentLoginLive(env.FP_PARENT_LOGIN_LIVE);
+  const live = !isParentLoginTestOnly(env.FP_PARENT_LOGIN_TEST_ONLY);
   const isTest = isTestSignup(email, { FP_SIGNUP_TEST_ALLOWLIST: env.FP_SIGNUP_TEST_ALLOWLIST });
   return { allowed: live || isTest, live, isTest };
 }

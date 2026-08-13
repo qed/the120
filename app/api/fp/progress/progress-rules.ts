@@ -1281,7 +1281,13 @@ export type WalkedSaveDoc = {
  * inside, so the module stays pure and the whole cohort is clamped against one
  * instant.
  *
- * @internal Exported as a test seam, not part of the route contract.
+ * Exported as a test seam AND, since the parent dashboard shipped, as the ONE
+ * reader of `fp_player_saves.doc` both feeds share: ../parent/roster/
+ * roster-rules.ts calls it directly (see its header for why it reuses the walk
+ * but not the task-id filter). A second copy of this reasoning — the entry
+ * caps, the key-length caps, the future-stamp clamp — is exactly the drift this
+ * repo has already paid for once, so changes here must be read against BOTH
+ * consumers. It is still not part of either ROUTE's wire contract.
  */
 export function walkSaveDoc(doc: unknown, now: Date): WalkedSaveDoc {
   if (!isJsonObject(doc) || doc.docVersion !== PROGRESS_DOC_VERSION) {

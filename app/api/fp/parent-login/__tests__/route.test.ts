@@ -143,15 +143,29 @@ afterEach(() => {
   vi.resetModules();
 });
 
-describe("the fail-closed gate (FP_PARENT_LOGIN_LIVE)", () => {
-  it("PINNED: gate OFF + fully VALID parent credentials → the uniform 401; no auth call is even made", async () => {
+describe("the launch gate — PUBLIC-OPEN by default (fpv04 U6b-i)", () => {
+  it("NO ENV SET: an ordinary parent signs in; body is exactly FpParentSessionBody, order pinned", async () => {
+    // The unit's whole point: the dashboard cannot ship dark because someone
+    // forgot to set a variable.
+    const res = await post({ email: "Parent@Example.com", password: "parent pw" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Object.keys(body)).toEqual([...FP_PARENT_SESSION_BODY_KEYS]);
+    expect(body.parent).toEqual({ email: "parent@example.com", firstName: "Robin" });
+    // The proven owner's (ip,email) bucket is cleared, mirroring the child door.
+    expect(rateRef.cleared.some((k) => k.startsWith("fp-parent-login:"))).toBe(true);
+  });
+
+  it("PINNED: kill-switch THROWN + fully VALID parent credentials → the uniform 401; no auth call is even made", async () => {
+    vi.stubEnv("FP_PARENT_LOGIN_TEST_ONLY", "1");
     const res = await post({ email: "parent@example.com", password: "parent pw" });
     await expectUniformRefusal(res);
     expect(authRef.calls).toHaveLength(0); // refused before any /token work
     expect(rateRef.released).toEqual([]); // the strike stands
   });
 
-  it("gate OFF: the founder-allowlisted identity passes end-to-end (prod-testing path)", async () => {
+  it("kill-switch THROWN: the founder-allowlisted identity still passes end-to-end", async () => {
+    vi.stubEnv("FP_PARENT_LOGIN_TEST_ONLY", "1");
     vi.stubEnv("FP_SIGNUP_TEST_ALLOWLIST", "parent@example.com");
     const res = await post({ email: "parent@example.com", password: "parent pw" });
     expect(res.status).toBe(200);
@@ -163,15 +177,10 @@ describe("the fail-closed gate (FP_PARENT_LOGIN_LIVE)", () => {
     });
   });
 
-  it("gate ON (FP_PARENT_LOGIN_LIVE=1): any parent signs in; body is exactly FpParentSessionBody, order pinned", async () => {
-    vi.stubEnv("FP_PARENT_LOGIN_LIVE", "1");
-    const res = await post({ email: "Parent@Example.com", password: "parent pw" });
+  it("the LEGACY FP_PARENT_LOGIN_LIVE var no longer closes the door", async () => {
+    vi.stubEnv("FP_PARENT_LOGIN_LIVE", "0");
+    const res = await post({ email: "parent@example.com", password: "parent pw" });
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(Object.keys(body)).toEqual([...FP_PARENT_SESSION_BODY_KEYS]);
-    expect(body.parent).toEqual({ email: "parent@example.com", firstName: "Robin" });
-    // The proven owner's (ip,email) bucket is cleared, mirroring the child door.
-    expect(rateRef.cleared.some((k) => k.startsWith("fp-parent-login:"))).toBe(true);
   });
 });
 

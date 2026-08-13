@@ -12,10 +12,11 @@
  *  1. Origin allowlist (same buildAllowedOrigins as every FP door).
  *  2. Parse {email, password} (strict, bounded).
  *  3. Rate-limit strike (FP_PARENT_LOGIN_* budgets, own namespaces).
- *  4. LAUNCH GATE — fail-closed `FP_PARENT_LOGIN_LIVE` (its client ships in a
- *     later unit and the flag stays OFF until then), with the founder
- *     allowlist identity (`FP_SIGNUP_TEST_ALLOWLIST` / `@test.the120.invalid`)
- *     passing for prod-testing. Refusal is the same generic 401 — invisible.
+ *  4. LAUNCH GATE — PUBLIC-OPEN since fpv04 U6b-i (the client shipped). The
+ *     kill-switch `FP_PARENT_LOGIN_TEST_ONLY` closes it back to the founder
+ *     allowlist (`FP_SIGNUP_TEST_ALLOWLIST` / `@test.the120.invalid`); unset
+ *     means OPEN, so no env has to be remembered for parents to sign in.
+ *     Refusal is the same generic 401 — the gate is invisible on the wire.
  *  5. ONE stateless signInWithPassword (attested IP forwarded). An unknown
  *     email and a wrong password are the same one round-trip and the same
  *     `invalid_credentials` answer — no existence oracle, no dummy needed
@@ -138,7 +139,7 @@ export async function POST(req: Request): Promise<Response> {
     // FAIL-CLOSED LAUNCH GATE, founder-scoped test path (rules docblock). The
     // strike stands; the refusal is the same generic 401.
     const gate = parentLoginGateVerdict(email, {
-      FP_PARENT_LOGIN_LIVE: process.env.FP_PARENT_LOGIN_LIVE,
+      FP_PARENT_LOGIN_TEST_ONLY: process.env.FP_PARENT_LOGIN_TEST_ONLY,
       FP_SIGNUP_TEST_ALLOWLIST: process.env.FP_SIGNUP_TEST_ALLOWLIST,
     });
     if (!gate.allowed) return refuse("gate_refused");

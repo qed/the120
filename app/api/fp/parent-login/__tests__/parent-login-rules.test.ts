@@ -11,7 +11,7 @@ import {
   FP_PARENT_LOGIN_REFUSAL_BODY,
   FP_PARENT_SESSION_BODY_KEYS,
   FP_PARENT_SESSION_PARENT_KEYS,
-  isParentLoginLive,
+  isParentLoginTestOnly,
   parentLoginGateVerdict,
   parseParentLoginRequest,
   shapeParentLoginRefusal,
@@ -38,43 +38,66 @@ describe("parseParentLoginRequest", () => {
   });
 });
 
-describe("isParentLoginLive — affirmative-only, fail-closed", () => {
+describe("isParentLoginTestOnly — affirmative-only KILL-SWITCH (open by default)", () => {
   it("accepts exactly 1/true/on after trim+lowercase", () => {
     for (const v of ["1", "true", "on", " TRUE ", "On"]) {
-      expect(isParentLoginLive(v)).toBe(true);
+      expect(isParentLoginTestOnly(v)).toBe(true);
     }
   });
-  it("everything else is OFF — unset, empty, 0, false, off, typos", () => {
-    for (const v of [undefined, null, "", "0", "false", "off", "yes", "live", "tru e"]) {
-      expect(isParentLoginLive(v)).toBe(false);
+  it("accepts `yes` too (the signup kill-switch spelling this mirrors)", () => {
+    expect(isParentLoginTestOnly("yes")).toBe(true);
+  });
+
+  it("everything else leaves the door OPEN — unset, empty, 0, false, off, typos", () => {
+    // The INVERSION that matters: a mis-spelled flag must not silently lock
+    // every parent out of their own dashboard.
+    for (const v of [undefined, null, "", "0", "false", "off", "live", "tru e"]) {
+      expect(isParentLoginTestOnly(v)).toBe(false);
     }
   });
 });
 
-describe("parentLoginGateVerdict — fail-closed with the founder-scoped test path", () => {
-  it("gate OFF (unset): a plain caller is refused even with valid identity", () => {
+describe("parentLoginGateVerdict — PUBLIC-OPEN by default (fpv04 U6b-i)", () => {
+  it("NO ENV SET: an ordinary parent passes — the dashboard cannot ship dark by accident", () => {
     const v = parentLoginGateVerdict("parent@example.com", {});
+    expect(v).toEqual({ allowed: true, live: true, isTest: false });
+  });
+
+  it("kill-switch THROWN: an ordinary parent is refused", () => {
+    const v = parentLoginGateVerdict("parent@example.com", {
+      FP_PARENT_LOGIN_TEST_ONLY: "on",
+    });
     expect(v).toEqual({ allowed: false, live: false, isTest: false });
   });
 
-  it("gate OFF: the founder allowlist identity passes (comma-separated, normalized)", () => {
+  it("kill-switch THROWN: the founder allowlist identity still passes (comma-separated, normalized)", () => {
     const v = parentLoginGateVerdict("Founder@Example.com", {
+      FP_PARENT_LOGIN_TEST_ONLY: "1",
       FP_SIGNUP_TEST_ALLOWLIST: " other@x.test , founder@example.com ",
     });
     expect(v).toEqual({ allowed: true, live: false, isTest: true });
   });
 
-  it("gate OFF: the guarded @test.the120.invalid domain passes as is_test", () => {
-    const v = parentLoginGateVerdict("fam@test.the120.invalid", {});
+  it("kill-switch THROWN: the guarded @test.the120.invalid domain passes as is_test", () => {
+    const v = parentLoginGateVerdict("fam@test.the120.invalid", {
+      FP_PARENT_LOGIN_TEST_ONLY: "true",
+    });
     expect(v).toEqual({ allowed: true, live: false, isTest: true });
   });
 
-  it("gate ON: everyone passes; test identities stay tagged", () => {
-    expect(parentLoginGateVerdict("parent@example.com", { FP_PARENT_LOGIN_LIVE: "1" })).toEqual({
-      allowed: true,
-      live: true,
-      isTest: false,
-    });
+  it("a TYPO in the kill-switch leaves the door open, deliberately", () => {
+    expect(
+      parentLoginGateVerdict("parent@example.com", { FP_PARENT_LOGIN_TEST_ONLY: "tru e" }).allowed,
+    ).toBe(true);
+  });
+
+  it("the legacy FP_PARENT_LOGIN_LIVE var is no longer consulted", () => {
+    // Leaving it wired would mean an unset legacy env closing the door the
+    // moment someone tidied the new flag away.
+    const v = parentLoginGateVerdict("parent@example.com", {
+      FP_PARENT_LOGIN_LIVE: "0",
+    } as never);
+    expect(v.allowed).toBe(true);
   });
 });
 

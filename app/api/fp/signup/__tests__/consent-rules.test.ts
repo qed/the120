@@ -12,6 +12,8 @@ import {
   FP_CONSENT_MIN_VERSION,
   FP_PHOTO_CONSENT_MIN_VERSION,
   FP_SITE_CONSENT_MIN_VERSION,
+  FP_CONSENT_POLICY_DRAFT_AI,
+  FP_CONSENT_DRAFT_PLACEHOLDER,
 } from "../consent-rules";
 // The anchor-ordering assertions compare versions with the SAME parse-based
 // comparator consent-rules uses, never a lexical compare (".10" < ".2").
@@ -680,5 +682,131 @@ describe("the exported consent-coverage fixtures (consumed by first-profit's U9b
     const versions = CONSENT_COVERAGE_FIXTURES.map((f) => f.policyVersion);
     expect(versions).toContain("2026-08-08.1");
     expect(versions).toContain("2026-08-07.1");
+  });
+});
+
+/* ---------------------------------------------- the AUTHORED, INACTIVE draft */
+
+describe("⚠ FP_CONSENT_POLICY_DRAFT_AI — authored, tested, and NOT the policy", () => {
+  it("is NOT the active policy — the rendered version is still 2026-08-08.1", () => {
+    // The single most important assertion in this block. Publishing the AI
+    // disclosure before the founder confirms the provider's retention terms
+    // would bind parents to a factual claim nobody has verified.
+    expect(FP_CONSENT_POLICY.version).toBe("2026-08-08.1");
+    expect(FP_CONSENT_POLICY.version).not.toBe(FP_CONSENT_POLICY_DRAFT_AI.version);
+    expect(FP_CONSENT_POLICY.text).not.toBe(FP_CONSENT_POLICY_DRAFT_AI.text);
+  });
+
+  it("is NOT a published version — so it can never open the photo gate on its own", () => {
+    // `isPublishedConsentVersion` is the load-bearing guard that stops
+    // photoConsentVerdict inferring consent from a version number alone. A
+    // version nobody has rendered must not satisfy it, even though it ORDERS
+    // past every anchor.
+    expect(isPublishedConsentVersion(FP_CONSENT_POLICY_DRAFT_AI.version)).toBe(false);
+    expect(FP_PARENTAL_CONSENT_VERSIONS).not.toContain(FP_CONSENT_POLICY_DRAFT_AI.version);
+    expect(policyVersionAtLeast(FP_CONSENT_POLICY_DRAFT_AI.version, FP_PHOTO_CONSENT_MIN_VERSION)).toBe(
+      true
+    );
+    const verdict = photoConsentVerdict({
+      rows: [
+        {
+          policyVersion: FP_CONSENT_POLICY_DRAFT_AI.version,
+          acceptedAt: new Date("2026-08-20T00:00:00Z"),
+        },
+      ],
+    });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect(verdict.reason).toBe("unknown_version");
+  });
+
+  it("a client echoing the draft version is refused, not recorded", () => {
+    expect(
+      consentVerdict({
+        echoedVersion: FP_CONSENT_POLICY_DRAFT_AI.version,
+        echoedHash: hashPolicyText(FP_CONSENT_POLICY_DRAFT_AI.text),
+      })
+    ).toBe("version_mismatch");
+  });
+
+  it("orders strictly AFTER the current version, so activation is a forward move", () => {
+    expect(policyVersionAtLeast(FP_CONSENT_POLICY_DRAFT_AI.version, FP_CONSENT_POLICY.version)).toBe(
+      true
+    );
+    expect(FP_CONSENT_POLICY_DRAFT_AI.version).not.toBe(FP_CONSENT_POLICY.version);
+  });
+
+  it("⚠ THE MINT ANCHOR HAS NOT MOVED — moving it for a disclosure bump deletes children", () => {
+    // FP_CONSENT_MIN_VERSION's own docblock forbids this, and the failure is
+    // destructive: advancing it retroactively invalidates every consent captured
+    // before the deploy, so an in-flight signup walks into stale -> compensate
+    // and deletes a correctly-created child.
+    expect(FP_CONSENT_MIN_VERSION).toBe("2026-08-01.1");
+  });
+
+  it("discloses the three facts the current text does not: transmission, provider terms, deletion", () => {
+    const text = FP_CONSENT_POLICY_DRAFT_AI.text;
+    expect(text).toMatch(/sending that photo to a third-party artificial intelligence image service/i);
+    expect(text).toMatch(/leaves The 120's systems/i);
+    expect(text).toMatch(/deletes the photo from its own systems as soon as the artwork has been created/i);
+    expect(text).toMatch(/whether or not the artwork succeeded/i);
+    // The current text says none of that — which is the whole reason for a bump.
+    expect(FP_CONSENT_POLICY.text).not.toMatch(/third-party artificial intelligence/i);
+  });
+
+  it("keeps every disclosure the current version already made", () => {
+    const text = FP_CONSENT_POLICY_DRAFT_AI.text;
+    for (const clause of [
+      "parent or legal guardian",
+      "publishing a public web page",
+      "firstprofit.school/ethan",
+      "ask search engines not to list them",
+      "providing a photo is optional",
+      "revoke it at any time by contacting The 120",
+      "withdraw consent at any time",
+    ]) {
+      expect(text, clause).toContain(clause);
+    }
+  });
+
+  it("keeps repo style: no em dashes", () => {
+    expect(FP_CONSENT_POLICY_DRAFT_AI.text).not.toMatch(/—/);
+  });
+
+  it("⚠ THE FOUNDER TODO IS STILL OPEN, and is what blocks activation", () => {
+    // This test is the TODO. It passes while the placeholder is present and the
+    // draft is inactive; the moment someone tries to publish the draft WITHOUT
+    // resolving the retention wording, the next test fails the build.
+    expect(FP_CONSENT_POLICY_DRAFT_AI.text).toContain(FP_CONSENT_DRAFT_PLACEHOLDER);
+  });
+
+  it("⚠ THE TRIPWIRE: the ACTIVE policy may never contain an unresolved placeholder", () => {
+    // Whichever version is active, it must not ship a bracketed founder TODO to
+    // a parent. This is the assertion that makes step 1 of the activation
+    // checklist unskippable.
+    expect(FP_CONSENT_POLICY.text).not.toContain(FP_CONSENT_DRAFT_PLACEHOLDER);
+    expect(FP_CONSENT_POLICY.text).not.toMatch(/\[FOUNDER|\[TODO|\[TBD/i);
+  });
+});
+
+describe("the AI/photo draft must not activate before the founder confirms it (fpv04 U7a)", () => {
+  it("FP_CONSENT_POLICY is NOT the draft, and the anchors have not moved", () => {
+    // The draft discloses that a child's photograph leaves The 120's systems
+    // for a third-party AI provider. Its retention wording is a FOUNDER INPUT
+    // that has not been supplied, so activating it would put an unconfirmed
+    // claim in front of a parent at the moment they consent. Activation is a
+    // deliberate multi-step edit; this fails the build if any of it happens by
+    // accident.
+    expect(FP_CONSENT_POLICY.version).not.toBe(FP_CONSENT_POLICY_DRAFT_AI.version);
+    expect(FP_CONSENT_POLICY.version).toBe("2026-08-08.1");
+    expect(FP_CONSENT_MIN_VERSION).toBe("2026-08-01.1");
+  });
+
+  it("the draft is not published, so nothing can accept it", () => {
+    expect(FP_PARENTAL_CONSENT_VERSIONS).not.toContain(FP_CONSENT_POLICY_DRAFT_AI.version);
+    expect(isPublishedConsentVersion(FP_CONSENT_POLICY_DRAFT_AI.version)).toBe(false);
+  });
+
+  it("still carries its placeholder, which is what makes it obviously unfinished", () => {
+    expect(FP_CONSENT_POLICY_DRAFT_AI.text).toContain("[FOUNDER TO CONFIRM");
   });
 });

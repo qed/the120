@@ -37,6 +37,8 @@ import { buildWorkspaceJwtConfig } from "@/app/lib/funnel/workspace-auth";
 // bucket id stays a single definition instead of a second string literal here.
 import { IMAGE_LAB_BUCKET } from "@/app/staff/image-lab/lib/image-lab-rules";
 import { PATH_EVIDENCE_BUCKET } from "@/app/lib/funnel/erase-family-rules";
+import { FP_CHILD_MEDIA_BUCKET } from "@/app/lib/fp/child-photo/child-photo-rules";
+import { supabaseObjectEraser } from "@/app/lib/fp/child-photo/child-photo-store";
 import {
   deriveStudentLocalBaseFromFirstName,
   DRIVABLE_PROVISION_STATES,
@@ -965,22 +967,28 @@ export function realEraseFamilyDeps(): EraseFamilyDeps {
   return {
     db,
     workspaceConfigured: saKeyRaw().length > 0,
-    // ── BLOB DELETION: NO ADAPTER EXISTS YET, AND THAT IS DECLARED, NOT HIDDEN ──
-    // The v3 cover pipeline ships TEMPLATE-ONLY: the picture is rendered inline
-    // as a data URL and `cover_blob_key` / `fp_cover_blob_key` are written NULL,
-    // so no object is ever created (verified 2026-08-06 against production: zero
-    // non-null blob keys). The Vercel Blob adapter is still the documented seam
-    // at the bottom of app/lib/fp/cover-store.ts, and until it lands there is
-    // nothing honest to inject here.
+    // ── BLOB DELETION: THE ADAPTER LANDED (child-photo Unit 1) ──
+    // This block used to read "no adapter exists yet, and that is declared, not
+    // hidden", with `blobConfigured: false` and `deleteBlob` absent, because the
+    // v3 cover pipeline shipped TEMPLATE-ONLY (the picture was a data URL and
+    // both key columns were always NULL) and the planned store was `@vercel/blob`
+    // with nothing installed. That alarm did its job: the store now exists, so
+    // the flag flips.
     //
-    // `blobConfigured: false` therefore means "no way to delete an object", and
-    // the core treats that as a STRAND (not a benign skip) the moment it ever
-    // finds a non-null key — which is exactly the alarm we want on the day the
-    // AI path starts writing objects and this factory has not been updated.
-    // WHEN THE ADAPTER LANDS: set `blobConfigured` to whatever gates the store's
-    // token and supply `deleteBlob` mapping already-gone → "missing" (the SDK's
-    // `del()` is URL-addressed — see concern (a) in the cover-store seam note).
-    blobConfigured: false,
+    // The store is SUPABASE STORAGE (`fp-child-media`, migration 20260926120000)
+    // reached through THIS SAME service-role client — the same arrangement as the
+    // two deps below it, and the reason concern (a) in the cover-store seam note
+    // (the SDK is URL-addressed, the eraser has only KEYS in scope) never
+    // materialized: Supabase's storage API is key-addressed end to end.
+    //
+    // ⚠ `blobConfigured` is UNCONDITIONALLY true and must NOT be wired to
+    // `FP_CHILD_PHOTO_LIVE`. Erasure is not a feature and does not get a feature
+    // flag: if the gate is ever switched on and then off again, the objects
+    // written in between still exist and a family asking to be erased must still
+    // be erased. Tying deletion to the flag would silently convert every one of
+    // those into a STRAND on the day someone turned the pipeline off.
+    blobConfigured: true,
+    deleteBlob: supabaseObjectEraser(db, FP_CHILD_MEDIA_BUCKET),
     // ── IMAGE LAB OBJECTS: WIRED FOR REAL, because there is a real store ──
     // Unlike the Vercel Blob seam above, the Image Lab's bucket is Supabase
     // Storage reached through THIS SAME service-role client, so there is no

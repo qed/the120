@@ -1,0 +1,189 @@
+-- Child photo → AI illustration pipeline, Unit 1 — the PRIVATE BUCKET that
+-- holds a minor's source photograph and the artwork derived from it, plus the
+-- one column that points a child row at their photo.
+--
+-- TS mirror: app/lib/fp/child-photo/child-photo-rules.ts
+--   (FP_CHILD_MEDIA_BUCKET, FP_CHILD_MEDIA_MAX_OBJECT_BYTES,
+--    FP_CHILD_MEDIA_ACCEPTED_MIME_TYPES). Parity test:
+--   app/lib/fp/child-photo/__tests__/fp-child-photo-migration-parity.test.ts
+--   (resolves this file by GLOB and parses it as text).
+-- Key scheme: app/lib/fp/cover-store-rules.ts (blobKey / blobPrefix), unchanged.
+--
+-- ⚠ VERSION — AUTHORED, NOT YET APPLIED, AND NOT TO BE APPLIED BY THIS BRANCH.
+--   This slot (20260926120000) assumes the live top of
+--   supabase_migrations.schema_migrations is 20260925120000
+--   (artie_review_decisions, applied 2026-08-13 per MIGRATION-LOCK.md).
+--   RENUMBERED from 20260925120000 during review: that slot was already taken
+--   by artie_review_decisions, and the repo's migration-version tripwire test
+--   caught the collision. The file listing is NOT the truth: an
+--   applied-but-unmerged migration from another lane is invisible here and only
+--   the ledger query catches it (supabase/MIGRATION-LOCK.md).
+--   IMMEDIATELY BEFORE APPLYING, run:
+--     select version, name from supabase_migrations.schema_migrations
+--      order by version desc limit 5;
+--   and if the top is not 20260925120000, RENAME this file to the real
+--   next-free 12:00:00 slot before applying. (The parity test resolves this
+--   file by GLOB, not by hardcoded name, so the rename does not break it.)
+--   Apply via the Management API playbook (docs/solutions/integration-issues/
+--   supabase-cli-stale-db-password-management-api-workaround-2026-07-13.md).
+--   Do NOT write schema_migrations by hand.
+--
+-- AMENDMENT LOG (in-place amendments are allowed ONLY while this file is
+--   branch-only / never applied — the 20260907 convention; once applied,
+--   changes stack as a new migration):
+--   * (none yet — initial authoring.)
+--
+-- ⚠ WHAT LIVES IN THIS BUCKET, STATED PLAINLY: A PHOTOGRAPH OF A CHILD.
+--   Not "user content", not "an image asset". Everything below — the private
+--   flag, the mime allowlist, the size ceiling, the absence of any
+--   storage.objects policy — exists because a leak here is a leak of a minor's
+--   likeness. Two consequences are enforced elsewhere and named here so they
+--   are not lost:
+--     1. THE SOURCE PHOTO IS DELETED IMMEDIATELY AFTER GENERATION, on the
+--        success path AND on every failure path
+--        (app/lib/fp/child-photo/child-photo-generate-core.ts step 4). This
+--        bucket is a staging area measured in seconds, not a photo library.
+--     2. NO METADATA REACHES IT. Every object is written by
+--        app/lib/fp/child-photo/photo-strip.ts, which RE-ENCODES rather than
+--        deleting tags, so EXIF/GPS/XMP/IPTC/MPF cannot survive. That module's
+--        header owns the reasoning; this comment is the reminder that a future
+--        writer bypassing it defeats the whole design.
+--
+-- ⚠ AUTHORIZATION POSTURE — RLS-BACKED SERVICE ROLE ONLY, ZERO STORAGE POLICY.
+--   The120 brokers every read: the First Profit SPA never talks to storage
+--   directly, and no family member holds a JWT that could. So this migration
+--   creates NO storage.objects policy at all — a policy with nothing to
+--   authorize is dead weight that reads as coverage.
+--
+--   DELIBERATE DIVERGENCE from 20260722140000_path_storage.sql, which DOES
+--   carry a storage.objects policy: that bucket serves FAMILY members holding
+--   authenticated JWTs who must read their own evidence. It is the same posture
+--   as 20260919120000_fp_image_lab.sql, for the same reason.
+--
+--   ⚠ THIS HALF IS PROSE, AND PROSE IS NOT A MECHANISM: nothing here can detect
+--   a caller reaching for the anon client. The enforceable guard is that the
+--   only writer is app/lib/fp/child-photo/child-photo-store.ts, which takes a
+--   SupabaseClient as a parameter and is only ever handed supabaseAdmin().
+--
+-- ⚠ R28 / ERASURE — THIS ONE IS NOT INERT ANY MORE.
+--   20260917120000_fp_v3_cover_artifact.sql could honestly say "no object
+--   store, no key, no orphan class, no sweep — there are still no blobs". That
+--   is no longer true: this migration creates the store those keys have been
+--   naming since v3 Unit 1. Concretely, family erasure changes shape with this
+--   deploy:
+--     * `fp_onboarding_drafts.{photo_blob_key,cover_blob_key}` and
+--       `children.fp_cover_blob_key` were already classified `external-object`
+--       and already routed to `EraseFamilyDeps.deleteBlob` — but
+--       `blobConfigured` was FALSE in production, so a non-null key was
+--       STRANDED rather than deleted (deliberately: erase-family-core refuses
+--       to report an object erased that it could not reach).
+--     * `children.fp_photo_blob_key`, added below, is the FIRST child-scoped
+--       SOURCE-PHOTO pointer. It must be classified in
+--       ERASURE_COLUMN_LEDGER + ERASURE_EXTERNAL_OBJECT_LEDGER, added to
+--       CHILD_BLOB_KEY_COLUMNS, and named in the erase core's LITERAL
+--       `.select(...)` projection. The coverage tripwire
+--       (app/lib/funnel/__tests__/erase-family-schema-coverage.test.ts) fails
+--       the build if any of those is missed — the column name matches
+--       EXTERNAL_OBJECT_COLUMN_PATTERN, so it cannot be added silently.
+--
+-- ⚠ DEPLOY ORDERING: apply this migration BEFORE shipping any code that writes
+--   `children.fp_photo_blob_key` or puts an object in this bucket. Old code
+--   against the new DB is safe (nothing reads the column yet); new code against
+--   the old DB gets a PostgREST schema error on every upload.
+--   Run `NOTIFY pgrst, 'reload schema';` after applying, or the new column stays
+--   invisible to the API layer.
+--
+-- ⚠ POST-APPLY VERIFICATION (the apply is NOT complete until this passes; run
+--   via the Management API SQL endpoint). The Management API applies a
+--   migration in ONE transaction, so a mid-file error rolls the whole thing
+--   back.
+--   1. Bucket private, at the stated ceiling, with the mime allowlist:
+--        select id, public, file_size_limit, allowed_mime_types
+--          from storage.buckets where id = 'fp-child-media';
+--      → one row, public=false, 8388608, {image/png,image/jpeg,image/webp}
+--   2. ⚠ ENUMERATE EVERY storage.objects POLICY AND READ THEM:
+--        select policyname, cmd, roles, qual::text from pg_policies
+--         where schemaname='storage' and tablename='objects';
+--      Acceptance: EVERY listed policy is ANDed to a bucket_id that is not
+--      'fp-child-media'. A policy that merely fails to NAME this bucket is the
+--      dangerous case — an un-scoped `to authenticated` policy added by another
+--      lane applies to EVERY bucket including this one. Counting policies that
+--      mention 'fp-child-media' would return 0 and prove nothing.
+--   3. The column landed, nullable, on the right table:
+--        select column_name, data_type, is_nullable from information_schema.columns
+--         where table_name='children' and column_name='fp_photo_blob_key';
+--      → one row, text, YES
+--   4. No new grant leaked in:
+--        select grantee, privilege_type from information_schema.role_table_grants
+--         where table_name='children' and grantee in ('anon','authenticated');
+--      → unchanged from before this deploy (this file adds no GRANT).
+--
+-- Idempotent throughout: insert…on conflict do nothing / add column if not
+-- exists. Re-applying is a no-op. Additive-only: nothing existing is removed or
+-- narrowed, and there is no DROP of any kind in this file.
+
+-- ────────────────────────────────────────────────────────────── the bucket ──
+-- Private always: public=false means every read requires the service role or a
+-- short-lived signature. There is no direct-to-storage upload leg for this
+-- bucket and there must never be one: the photo has to traverse our origin so
+-- app/lib/fp/child-photo/photo-strip.ts can re-encode it, and a signed upload
+-- slot would let a browser PUT an unstripped file straight past that control.
+--
+-- ⚠ allowed_mime_types IS SET even though the only writer is our own server and
+-- therefore binds the content type itself. It is defence in depth against
+-- exactly one future mistake: a later unit adding a signed-slot upload path (as
+-- the Image Lab's reference leg has) at which point the BROWSER sets the type
+-- and the application allowlist governs only the DB row. Without this line an
+-- `image/svg+xml` would land in a bucket whose objects are served by signed URL
+-- into a browser session — and an SVG is an executable document on the storage
+-- origin.
+--
+-- file_size_limit (8 MB) is the OBJECT ceiling and is deliberately looser than
+-- the upload door's own inbound bound (FP_CHILD_PHOTO_MAX_BYTES, ~3.8 MB, sized
+-- under the platform's function-body ceiling). The two bound different things:
+-- this one also has to admit a GENERATED cover, which the door never sees. It
+-- is a backstop against a future writer that forgets the door's limit, not a
+-- duplicate of it. Well under the project's 50 MB Free-tier per-object hard
+-- ceiling (20260722140000_path_storage.sql).
+--
+-- ONE BUCKET FOR PHOTOS *AND* ARTWORK, on purpose: both already share ONE key
+-- namespace (`fp/v3/{drafts|children}/<id>/…`, cover-store-rules.blobKey), and
+-- that per-subject prefix is the erasure and reaper primitive. Splitting them
+-- would turn every sweep into a two-bucket walk in which forgetting the second
+-- bucket is silent.
+--
+-- ON CONFLICT DO NOTHING, deliberately NOT `do update`: a re-apply must never
+-- silently narrow a limit an operator raised in the dashboard back to 8 MB,
+-- which would surface as an opaque upload failure weeks later. Verification
+-- step 1 is what reports a mismatch.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('fp-child-media', 'fp-child-media', false, 8388608,
+        array['image/png', 'image/jpeg', 'image/webp'])
+on conflict (id) do nothing;
+
+-- ─────────────────────────────────────────────── children.fp_photo_blob_key ──
+-- The child-scoped SOURCE PHOTO pointer. Nullable and normally NULL: it is
+-- non-null only for the seconds between an upload and the generation that
+-- consumes it, because the generation core deletes the object and the caller
+-- nulls this column on every path.
+--
+-- A PLAIN NULLABLE TEXT COLUMN, with no CHECK on its shape, matching
+-- `fp_cover_blob_key` and `fp_onboarding_drafts.photo_blob_key`. A regex CHECK
+-- was considered and rejected: the key scheme lives in
+-- cover-store-rules.blobKey and its ownership guard (`keyBelongsTo`) is applied
+-- at every read and write, so a SQL copy of the pattern would be a third place
+-- for it to drift with no reader — and the shape it would enforce is already
+-- enforced by the only writer.
+--
+-- ⚠ NAMED `..._blob_key` ON PURPOSE. `EXTERNAL_OBJECT_COLUMN_PATTERN` in
+-- app/lib/funnel/erase-family-schema.ts matches /blob|storage|bucket|object_key
+-- |object_path/, so this column is dragged into the R28 coverage audit
+-- automatically and CANNOT be added without classifying it. A cuter name
+-- (`face_ref`, `portrait`) would have slipped past the tripwire silently. If
+-- you are adding another object pointer anywhere in this schema: name it so the
+-- pattern catches you.
+alter table public.children
+  add column if not exists fp_photo_blob_key text;
+
+comment on column public.children.fp_photo_blob_key is
+  'Storage key in the private fp-child-media bucket for this child''s SOURCE PHOTO. Transient: deleted immediately after AI generation on every path, and nulled with it. R28: classified external-object; erased by EraseFamilyDeps.deleteBlob.';

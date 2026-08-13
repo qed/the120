@@ -432,6 +432,10 @@ export const ERASURE_COLUMN_LEDGER: Record<string, Record<string, ColumnDisposit
       "row-deleted"
     ),
     fp_cover_blob_key: "external-object",
+    // The child-scoped SOURCE PHOTO pointer (migration 20260926120000). Same
+    // disposition as the cover key and for a stronger reason: this one names a
+    // PHOTOGRAPH OF THE CHILD, not a drawing derived from one.
+    fp_photo_blob_key: "external-object",
   },
 
   fp_onboarding_drafts: {
@@ -553,6 +557,10 @@ export const ERASURE_EXTERNAL_OBJECT_LEDGER: Record<string, ExternalObjectEntry>
   "children.fp_cover_blob_key": {
     external: true,
     note: "Deleted at the store (step 6b) BEFORE the children row, via deps.deleteBlob under the child namespace guard. Null today: the shipped cover path is template-only.",
+  },
+  "children.fp_photo_blob_key": {
+    external: true,
+    note: "THE SOURCE PHOTOGRAPH OF A MINOR, in the private `fp-child-media` Supabase Storage bucket at `fp/v3/children/{child_id}/photo.jpg` — the single highest-value object this system stores. Deleted at the store (step 6b) BEFORE the children row, via deps.deleteBlob under the child namespace guard, alongside fp_cover_blob_key. Normally already NULL, because the generation core deletes the object immediately after generation on the success path AND on every failure path; that is a reason to expect nothing here, never a reason to skip the read. Added by migration 20260926120000.",
   },
   "fp_onboarding_drafts.cover_blob_key": {
     external: true,

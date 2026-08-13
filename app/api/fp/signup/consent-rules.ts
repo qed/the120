@@ -131,6 +131,125 @@ export const FP_CONSENT_POLICY = {
 } as const;
 
 /**
+ * ⚠⚠ THE NEXT VERSION, AUTHORED AND DELIBERATELY NOT ACTIVE. ⚠⚠
+ *
+ * `FP_CONSENT_POLICY` above still points at 2026-08-08.1 and MUST CONTINUE TO
+ * until the founder resolves the TODO below. This constant exists so the wording
+ * can be reviewed, hashed and tested in a PR without a single parent being shown
+ * it, and without a single consent record binding to it. It is intentionally
+ * ABSENT from `FP_PARENTAL_CONSENT_VERSIONS`: that registry means "published",
+ * `isPublishedConsentVersion` is the load-bearing guard that stops
+ * `photoConsentVerdict` from inferring consent from a version number alone, and
+ * a version nobody has rendered must never satisfy it.
+ *
+ * ── WHAT IT ADDS, AND WHY THE EXISTING TEXT IS NOT ENOUGH ──
+ * The shipped 2026-08-08.1 photo sentence says the photo is "used to create the
+ * story and hero artwork". Every word of that was true of the pipeline that
+ * existed when it was written — a TEMPLATE compositor, running on our own
+ * servers, that never sent a photo anywhere. It is no longer a complete
+ * description. The photo now LEAVES OUR INFRASTRUCTURE and is transmitted to a
+ * third-party AI image provider. A parent reading the current sentence would not
+ * learn that, and "used to create artwork" cannot be stretched to cover it.
+ *
+ * So this version adds, to the SAME photo sentence rather than as a new one
+ * (they are one purpose, and splitting them invites reading the AI processing as
+ * optional relative to the photo):
+ *   - that the photo is sent to a third-party AI image service;
+ *   - what that service is permitted to do with it (retention + no-training);
+ *   - that the photo is deleted from our systems immediately after the artwork
+ *     is created, which is a real, enforced property of the pipeline
+ *     (child-photo-generate-core step 4) and is the strongest single fact we can
+ *     offer a parent.
+ *
+ * ── ⚠ FOUNDER INPUT REQUIRED — THE EXACT RETENTION WORDING ⚠ ──
+ * The bracketed placeholder in the text below is NOT copy to polish. It is a
+ * FACTUAL CLAIM about a contract with a third party, and this repo does not have
+ * the contract. Before this version may be published the founder must confirm,
+ * IN WRITING, against the executed provider terms:
+ *
+ *   (1) THE RETENTION PERIOD. How long does the provider hold the image after
+ *       the request — zero retention, a fixed abuse-monitoring window (Google's
+ *       standard Gemini API paid-tier term has historically been a bounded
+ *       abuse-review window, not zero), or something else? State the actual
+ *       number, in the units a parent thinks in ("up to 30 days", not "per the
+ *       DPA").
+ *   (2) THE TRAINING CLAIM. Confirm the executed terms say prompts and responses
+ *       are not used to train or improve the provider's models — and that this
+ *       holds for the SPECIFIC product/tier we call, not merely for the vendor's
+ *       enterprise offering generally.
+ *   (3) WHETHER THE PROVIDER MAY BE NAMED. "a third-party AI image service" is
+ *       the conservative wording. Naming Google is more informative and is
+ *       usually preferable for a consent notice, but it also pins us to one
+ *       vendor in a legal record; a vendor change would then require a new
+ *       version and a re-consent.
+ *   (4) THE SUB-PROCESSOR POSITION. We reach the model through the Vercel AI
+ *       Gateway, so there are TWO processors in the chain, not one. Confirm
+ *       whether the disclosure must say so.
+ *   (5) THE MINORS GRANT. The `personGeneration` allowlist grant covering minors
+ *       is an operational fact recorded outside this repo. Confirm it is
+ *       executed and covers this use before any of this text becomes true.
+ *
+ * ── HOW TO ACTIVATE IT, WHEN THOSE ANSWERS EXIST (all four steps, one PR) ──
+ *   1. Replace the bracketed placeholder with the confirmed wording.
+ *   2. Append "2026-08-14.1" to `FP_PARENTAL_CONSENT_VERSIONS` (it becomes the
+ *      LAST entry — a test pins that the last entry equals the rendered
+ *      version).
+ *   3. Point `FP_CONSENT_POLICY` at this object.
+ *   4. Move `FP_PHOTO_CONSENT_MIN_VERSION` to "2026-08-14.1". That is the anchor
+ *      that is ALLOWED to move (refusing a photo feature is a harmless no-op),
+ *      and moving it is what makes every pre-existing family re-consent before
+ *      their child's face can be sent anywhere.
+ *
+ * ⚠ DO NOT MOVE `FP_CONSENT_MIN_VERSION`. Its own docblock forbids moving it for
+ * a disclosure bump, and the reason is destructive rather than cosmetic:
+ * advancing the MINT anchor retroactively invalidates every consent captured
+ * before the deploy, so any in-flight signup walks into stale → compensate and
+ * DELETES a child that was correctly created seconds earlier.
+ */
+export const FP_CONSENT_POLICY_DRAFT_AI = {
+  version: "2026-08-14.1",
+  text:
+    "I confirm I am the parent or legal guardian of the child named in this " +
+    "signup, and I am at least 18 years old. I consent to The 120 creating an " +
+    "account for my child so they can play and learn, through various " +
+    "applications, and that these apps will store the limited information " +
+    "needed to run this account (my child's first name, last name, age, and " +
+    "information added inside the app, which are used only to improve The 120 " +
+    "and may be kept for up to twelve months after account deletion). I " +
+    "separately consent to The 120 publishing a public web page for my child " +
+    "on the firstprofit.school domain, where my child's first name becomes " +
+    "part of the web address (for example firstprofit.school/ethan), and " +
+    "where my child's first name and what my child writes about their " +
+    "business, including their headline and product ideas, are visible to " +
+    "anyone who has the link, including in previews shown when the link is " +
+    "shared. I understand that these pages ask search engines not to list " +
+    "them, that my child's last name, age, photograph, and contact details " +
+    "are never published, and that I can take my child's page offline at any " +
+    "time from my family dashboard. I separately consent to The 120 collecting " +
+    "a photo of my child, if I choose to provide one, and sending that photo " +
+    "to a third-party artificial intelligence image service that draws the " +
+    "story and hero artwork in my child's graphic novel. I understand that " +
+    "the photo leaves The 120's systems when it is sent to that service, that " +
+    "[FOUNDER TO CONFIRM: the provider's retention period and no-training " +
+    "commitment, in plain words], and that The 120 deletes the photo from its " +
+    "own systems as soon as the artwork has been created, whether or not the " +
+    "artwork succeeded. I understand that providing a photo is optional, that " +
+    "my child's account works fully without one, that I can decline this " +
+    "during signup or revoke it at any time by contacting The 120, and that " +
+    "when I revoke it the photo and the artwork created from it are deleted. I " +
+    "understand that I can review or delete my child's account by contacting " +
+    "The120, that I can withdraw consent at any time by contacting The 120, " +
+    "and that my consent is recorded with the version of this notice shown " +
+    "above. I understand that The120 may change the terms of service at any " +
+    "time.",
+} as const;
+
+/** The literal the activation checklist above must resolve. Exported so a test
+ *  can FAIL THE BUILD if this version is ever published with the placeholder
+ *  still in it — the one way this TODO could be lost. */
+export const FP_CONSENT_DRAFT_PLACEHOLDER = "[FOUNDER TO CONFIRM:";
+
+/**
  * The minimum consent-policy version a record may carry and still gate child
  * minting. A fixed HISTORICAL ANCHOR (not a live pointer to FP_CONSENT_POLICY):
  * pinning it to the literal keeps a later, unrelated text bump from silently

@@ -24,7 +24,18 @@ not a source of truth — the ledger is.**
 | `20260923120000` | (null) | applied |
 | `20260922120000` | `fp_save_doc_guard_story_fields` | applied |
 
-**Current holder: none.** The Artie lockdown lane
+**Current holder: the fpv04 U7a child-photo lane** (`120-The120` on
+`wip/u7a-photo-pipeline`). It has AUTHORED but NOT APPLIED
+`20260926120000_fp_child_photo` (private `fp-child-media` bucket +
+`children.fp_photo_blob_key`). Taken 2026-08-14.
+
+⚠ THE SLOT WAS RENUMBERED. It was first authored as `20260925120000`, which
+collided with the already-applied `artie_review_decisions`; the repo's
+migration-version tripwire test caught it. Re-query the ledger immediately
+before applying — if the Artie lane's expected `ai_generation_runs` has landed
+since, this file needs renumbering again.
+
+The Artie lockdown lane
 (`first-profit` on `artie/lockdown`, worktree `fp-artie`) authored and applied
 `20260925120000_artie_review_decisions` with the lock-holder's explicit go-ahead,
 after querying the ledger. It has one further migration expected —

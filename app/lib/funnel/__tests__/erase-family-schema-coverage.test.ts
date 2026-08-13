@@ -20,7 +20,7 @@
  * tests go red rather than going quiet.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -40,6 +40,9 @@ import {
   RELEASED_CLAIM_PII_COLUMNS,
   RELEASED_CLAIM_PRESERVED_COLUMN,
 } from "../erase-family-rules";
+import { PATH_EVIDENCE_BUCKET } from "../erase-family-rules";
+import { IMAGE_LAB_BUCKET } from "@/app/staff/image-lab/lib/image-lab-rules";
+import { FP_CHILD_MEDIA_BUCKET } from "@/app/lib/fp/child-photo/child-photo-rules";
 import { parseMigrationSchema } from "./helpers/migration-schema";
 
 const schema = parseMigrationSchema();
@@ -162,6 +165,84 @@ describe("R28 erasure coverage — the ledger matches the real schema", () => {
     const refs = ERASURE_EXTERNAL_OBJECT_LEDGER["fp_image_lab_references.storage_key"];
     expect(refs.external).toBe(false);
     expect(refs.note).toMatch(/append-only/i);
+  });
+
+  /* ------------------------------- the child-photo bucket (child-photo Unit 1) */
+
+  it("⚠ the child's SOURCE PHOTO is classified, enumerated, projected and really deleted", () => {
+    // The tripwire in its intended shape, for the single most sensitive object
+    // this system stores. Four independent links must all hold; break any one
+    // and a photograph of a child survives a family erasure.
+    //
+    //   1. CLASSIFIED     — the column is in the external-object ledger as
+    //                       external:true (a PROMISE that the bytes are deleted).
+    //   2. ENUMERATED     — the eraser's key-column constant names it, so
+    //                       planSubjectBlobDeletes plans a delete for it.
+    //   3. PROJECTED      — the core's LITERAL .select(...) asks for it, because
+    //                       supabase-js cannot build a projection from a constant.
+    //   4. EXECUTED       — a real deleteBlob adapter exists and is wired, so a
+    //                       found key is DELETED rather than stranded.
+    const entry = ERASURE_EXTERNAL_OBJECT_LEDGER["children.fp_photo_blob_key"];
+    expect(entry, "children.fp_photo_blob_key must be classified").toBeTruthy();
+    expect(entry.external).toBe(true);
+    expect(entry.note.length).toBeGreaterThan(20);
+    expect(ERASURE_COLUMN_LEDGER.children.fp_photo_blob_key).toBe("external-object");
+
+    expect(CHILD_BLOB_KEY_COLUMNS).toContain("fp_photo_blob_key");
+
+    const core = readFileSync(
+      path.resolve(process.cwd(), "app/lib/funnel/erase-family-core.ts"),
+      "utf8"
+    );
+    const projections = [...core.matchAll(/\.select\("([^"]*)"\)/g)].map((m) => m[1]).join(" | ");
+    expect(projections).toContain("fp_photo_blob_key");
+  });
+
+  it("⚠ the blob classification is backed by an executor that CAN reach the store", () => {
+    // For months `blobConfigured` was false and a non-null key was STRANDED
+    // rather than deleted — correct while no store existed, and a live hole the
+    // moment one did. This asserts the adapter is really wired, in the same
+    // "classification backed by an executor" shape the Image Lab assertion uses.
+    const deps = readFileSync(
+      path.resolve(process.cwd(), "app/lib/funnel/provision-deps.ts"),
+      "utf8"
+    );
+    const code = deps.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
+    expect(code).toMatch(/blobConfigured:\s*true/);
+    expect(code).toMatch(/deleteBlob:\s*supabaseObjectEraser\(/);
+    // ⚠ AND IT MUST NOT BE FLAGGED. Erasure is not a feature: tying deletion to
+    // FP_CHILD_PHOTO_LIVE would turn every object written while the gate was on
+    // into a strand the day someone turned it off.
+    expect(code).not.toMatch(/blobConfigured:.*FP_CHILD_PHOTO_LIVE/);
+    expect(code).not.toMatch(/blobConfigured:.*isChildPhotoLive/);
+  });
+
+  it("⚠ EVERY private bucket a migration creates is named by an erasure-aware constant", () => {
+    // The tripwire's documented blind spot: it audits SQL COLUMNS and never sees
+    // `insert into storage.buckets`. A future unit could add a bucket, store a
+    // child's bytes in it, and trip nothing. So the buckets are read straight out
+    // of the migrations and matched against the constants the eraser knows.
+    const dir = path.resolve(process.cwd(), "supabase/migrations");
+    const declared = new Set<string>();
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".sql"))) {
+      const sql = readFileSync(path.join(dir, file), "utf8").replace(/--.*/g, "");
+      for (const m of sql.matchAll(/insert\s+into\s+storage\.buckets[^;]*?values\s*\(\s*'([^']+)'/gi)) {
+        declared.add(m[1]!);
+      }
+    }
+    // Every bucket this repo creates, and the erasure path that reaches it.
+    const ERASURE_AWARE_BUCKETS = new Set([
+      PATH_EVIDENCE_BUCKET, // deps.deleteEvidenceObject (student graph drain)
+      IMAGE_LAB_BUCKET, // deps.deleteImageLabObject (Image Lab purge)
+      FP_CHILD_MEDIA_BUCKET, // deps.deleteBlob (child + draft blob erasure)
+    ]);
+    const unknown = [...declared].filter((b) => !ERASURE_AWARE_BUCKETS.has(b));
+    expect(
+      unknown,
+      `a migration creates ${unknown.join(", ")} but no erasure path names it — classify it or add its deps seam`
+    ).toEqual([]);
+    // Non-vacuous: the reader really found the buckets.
+    expect(declared.size).toBeGreaterThanOrEqual(3);
   });
 
   it("every column-audited table is also table-classified", () => {

@@ -474,8 +474,25 @@ export function imageLabKeyBelongsToRun(key: string, runId: string): boolean {
  *  generated art. Both must be deleted at the store, not merely dereferenced. */
 export const DRAFT_BLOB_KEY_COLUMNS = ["photo_blob_key", "cover_blob_key"] as const;
 
-/** The same, on `children` (the copy made at the draft→child carry). */
-export const CHILD_BLOB_KEY_COLUMNS = ["fp_cover_blob_key"] as const;
+/**
+ * The same, on `children`.
+ *
+ * `fp_cover_blob_key` is the copy made at the draft→child carry.
+ * `fp_photo_blob_key` (migration 20260926120000) is the child-scoped SOURCE
+ * PHOTO — the one uploaded through /api/fp/parent/child-photo after signup, as
+ * opposed to the draft-scoped one the onboarding flow captures. It is normally
+ * NULL (the generation core deletes the object within seconds of the upload, on
+ * every path), but "normally null" is precisely the reasoning that left
+ * `blobConfigured: false` in production for months, so it is enumerated here
+ * unconditionally: an erasure must delete the object it FINDS, not the object it
+ * expected to find.
+ *
+ * ⚠ Adding an entry here is HALF the change. The core's projection is a LITERAL
+ * `.select("id, …")` string, and the coverage tripwire
+ * (__tests__/erase-family-schema-coverage.test.ts, "the executor's static
+ * projections really ask for every blob-key column") fails if the two disagree.
+ */
+export const CHILD_BLOB_KEY_COLUMNS = ["fp_cover_blob_key", "fp_photo_blob_key"] as const;
 
 /** One object an erasure intends to delete, with the ownership verdict already
  *  applied. `owned:false` means the key does not live in this subject's own

@@ -831,7 +831,7 @@ export async function eraseFamily(
     //    `readKeys` strands loudly if it stops doing so.)
     let childQuery = db
       .from("children")
-      .select("id, fp_cover_blob_key")
+      .select("id, fp_cover_blob_key, fp_photo_blob_key")
       .eq("parent_id", input.parentUserId);
     if (childScoped) childQuery = childQuery.in("id", input.childIds as string[]);
     const childrenRes = await childQuery;
@@ -975,12 +975,14 @@ export async function eraseFamily(
         }
       }
 
-      // 6b (v3): the child's OWN cover object. `children.fp_cover_blob_key` is a
-      //     pointer into the blob store; the roster delete below removes the
-      //     pointer but NOT the bytes, and a Blob URL stays readable forever
-      //     until the object is deleted. Object BEFORE row, and BEFORE the
-      //     strand guard below, so a store failure preserves the anchor for the
-      //     re-run instead of orphaning the picture.
+      // 6b (v3): the child's OWN objects — `fp_cover_blob_key` (the generated
+      //     art) and, since migration 20260926120000, `fp_photo_blob_key` (THE
+      //     SOURCE PHOTOGRAPH). Both are pointers into the store; the roster
+      //     delete below removes the pointer but NOT the bytes, and the object
+      //     stays readable to anyone who can mint a signed URL until it is
+      //     really deleted. Object BEFORE row, and BEFORE the strand guard
+      //     below, so a store failure preserves the anchor for the re-run
+      //     instead of orphaning a picture of a child.
       await eraseBlobs(
         deps,
         summary,

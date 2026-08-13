@@ -15,6 +15,15 @@
  * FP client no longer sends `credentialChoice`; the schema still `.strip()`s any
  * stray unknown key defensively rather than 401-refusing an old in-flight caller.
  *
+ * (fpv04 U5a) ADDITIVE EXTENSIONS for the firstprofit.school signup track:
+ * `attemptId` optional (absent → resolved server-side from the Bearer identity;
+ * the email-keyed verify door means the SPA never holds one), `childLastName`,
+ * the validated cover vocabulary (`coverLook`/`heroVibe`/`heroGender`), and
+ * `childPassword` optional — absent means the route MINTS the memorable
+ * one-time `word-word-NN` password and returns it ONCE as the response's
+ * `childPassword` (see ../mint-rules.ts for the pinned FpChildMintBody).
+ * Every pre-fpv04 request body behaves byte-identically.
+ *
  * CORS MIRROR of /api/fp/login + ../route.ts + ../verify/route.ts: OPTIONS 204
  * with the echoed origin, 403 for a bad Origin, one generic 401 for EVERY
  * refusal (the child-core reason lives only in the server log — no oracle),
@@ -26,7 +35,10 @@
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseParentToken } from "@/app/lib/supabase/parent-token";
-import { buildStudentCreateUserPayload } from "@/app/lib/fp/provision-rules";
+import {
+  buildStudentCreateUserPayload,
+  validateStudentPassword,
+} from "@/app/lib/fp/provision-rules";
 import {
   checkAndRecordRateLimit,
   releaseRateLimitEvent,
@@ -41,6 +53,14 @@ import {
   SIGNUP_RATE_LIMIT,
 } from "../signup-rules";
 import { createChild, type CreateChildDeps } from "../child-core";
+import {
+  FP_HERO_GENDERS,
+  FP_HERO_VIBES,
+  FP_STORY_LOOK_IDS,
+  mintMemorablePassword,
+  type FpChildMintBody,
+} from "../mint-rules";
+import { resolveAttemptForParent } from "../attempt-resolve";
 import { sendSignupRecap } from "@/app/lib/fp/parent-email/send";
 import type { RecapChild } from "@/app/lib/fp/parent-email/rules";
 
@@ -52,14 +72,34 @@ const childSchema = z
     // Postgres, error 22P02, be classified `outage`, and REFUND the rate-limit
     // strike — letting a valid-token caller loop malformed ids for free. A
     // malformed id now collapses to the same pre-DB generic 401, strike standing.
-    attemptId: z.uuid(),
+    //
+    // (fpv04 U5a) OPTIONAL: the fpv04 verify door is email-keyed by design, so
+    // the SPA never holds an attemptId. When ABSENT the route resolves the
+    // caller's newest verified/child_created attempt SERVER-SIDE from the
+    // Bearer identity (attempt-resolve.ts — the id never crosses the wire in
+    // either direction). Callers that send one keep the byte-identical old
+    // behavior, malformed-id refusal included.
+    attemptId: z.uuid().optional(),
     childFirstName: z.string().trim().min(1).max(80),
+    // (fpv04 U5a) Optional last name — the core already carried it (v3 U3);
+    // this door now accepts it so the fpv04 founder step's full name reaches
+    // the roster row and widens the username base to firstname.lastname.
+    childLastName: z.string().trim().max(80).optional(),
     // Optional: FP captures an age band, not a grade. Accepted as a number or a
     // numeric string; the core coerces it through the funnel gradeVerdict guard.
     childGrade: z.union([z.number(), z.string().max(4)]).optional(),
-    // (Slice B U14) REQUIRED — the parent-set child password. The core validates
-    // it against the R29 student floor. The former path-b optionality is gone.
-    childPassword: z.string().min(1).max(200),
+    // (Slice B U14 → fpv04 U5a) The child password, now OPTIONAL: present is
+    // the pre-fpv04 parent-set path, byte-identical; ABSENT means the route
+    // MINTS the memorable one-time `word-word-NN` password (mint-rules) and
+    // returns it ONCE in the response's `childPassword`. Either way the core
+    // validates the final value against the R29 student floor. NEVER logged.
+    childPassword: z.string().min(1).max(200).optional(),
+    // (fpv04 U5a) The signup-chosen preset cover look + hero inputs. Server
+    // allowlists, never free strings: coverLook becomes a durable seeded
+    // save-doc value; vibe/gender become redraw inputs on the child row.
+    coverLook: z.enum(FP_STORY_LOOK_IDS).optional(),
+    heroVibe: z.enum(FP_HERO_VIBES).optional(),
+    heroGender: z.enum(FP_HERO_GENDERS).optional(),
   })
   // .strip() (the zod default), NOT .strict(): the canonical body is now
   // `{ attemptId, childFirstName, childPassword, childGrade? }`. As of U15 the FP
@@ -138,7 +178,10 @@ export async function POST(req: Request): Promise<Response> {
     const ip = extractClientIp(req.headers);
     // A `fp-signup-child` namespace, keyed on (ip, attemptId) + an ip aggregate,
     // distinct from START/verify so those budgets never interact. Same configs.
-    const attemptKey = `fp-signup-child:${encodeURIComponent(ip)}:${encodeURIComponent(data.attemptId)}`;
+    // (fpv04 U5a) An ABSENT attemptId keys its segment as the literal `self`:
+    // the strike must land BEFORE any DB I/O, and the server-side resolution
+    // below is DB I/O. The ip aggregate still bounds a fan-out.
+    const attemptKey = `fp-signup-child:${encodeURIComponent(ip)}:${encodeURIComponent(data.attemptId ?? "self")}`;
     const ipKey = `fp-signup-child-ip:${encodeURIComponent(ip)}`;
     const releaseStrikes = (): void => {
       releaseRateLimitEvent(attemptKey);
@@ -175,12 +218,65 @@ export async function POST(req: Request): Promise<Response> {
       now: () => Date.now(),
     };
 
+    // (fpv04 U5a) Resolve the attempt SERVER-SIDE when the caller sent none:
+    // the fpv04 SPA never holds an attemptId (the verify door is email-keyed
+    // by design), so the newest verified/child_created attempt owned by the
+    // Bearer identity IS the attempt this flow is in. 'child_created' is
+    // included so the door's idempotent replay (a lost mint response) still
+    // resolves. No attempt for this parent → the same generic 401, strike
+    // standing (a valid token with no signup in flight is a bad request, not
+    // our outage); a read failure IS our outage and refunds the strike.
+    let attemptId = data.attemptId;
+    if (!attemptId) {
+      const who = await supabaseParentToken(token).auth.getUser();
+      const parentId = who.data?.user?.id;
+      if (who.error || !parentId) return refuse();
+      const resolved = await resolveAttemptForParent(admin, {
+        parentId,
+        states: ["verified", "child_created"],
+      });
+      if (!resolved.ok) {
+        if (resolved.reason === "outage") releaseStrikes();
+        return refuse();
+      }
+      attemptId = resolved.attemptId;
+    }
+
+    // (fpv04 U5a) Mint the memorable one-time password when the caller sent
+    // none. Bounded re-roll against the R29 student floor: the wordlist is
+    // built to clear it (mint-rules), so the only realistic re-roll cause is
+    // a kid whose first name IS a wordlist word (the name guard). NEVER log
+    // the minted value.
+    let mintedPassword: string | null = null;
+    let childPassword = data.childPassword ?? null;
+    if (!childPassword) {
+      for (let i = 0; i < 10; i += 1) {
+        const candidate = mintMemorablePassword();
+        if (validateStudentPassword(candidate, { studentName: data.childFirstName }).ok) {
+          mintedPassword = candidate;
+          break;
+        }
+      }
+      if (!mintedPassword) {
+        // Statistically unreachable (would need every roll to collide with
+        // the kid's name); classified as our fault, strike refunded.
+        console.error(`[fp/signup/child] memorable password mint exhausted`);
+        releaseStrikes();
+        return refuse();
+      }
+      childPassword = mintedPassword;
+    }
+
     const result = await createChild(deps, {
-      attemptId: data.attemptId,
+      attemptId,
       parentToken: token,
       firstName: data.childFirstName,
+      lastName: data.childLastName,
       grade: data.childGrade,
-      childPassword: data.childPassword,
+      childPassword,
+      coverLook: data.coverLook,
+      heroVibe: data.heroVibe,
+      heroGender: data.heroGender,
     });
 
     if (!result.ok) {
@@ -225,17 +321,21 @@ export async function POST(req: Request): Promise<Response> {
       );
     }
 
-    // Surface the generated fp_username (U15) so the FP confirmation can show the
-    // parent the login key. Absent only on an idempotent replay (empty string).
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        status: "child_created",
-        childId: result.childId,
-        username: result.username ?? "",
-      }),
-      { status: 200, headers }
-    );
+    // ⚠ THE CHILD-MINT CONTRACT — FpChildMintBody lives in ../mint-rules.ts
+    // (key-pinned there, twin-pinned by the SPA's signupApi test). `username`
+    // is the generated fp_username (U15), absent only on an idempotent replay
+    // (empty string). `childPassword` (fpv04 U5a) carries the server-minted
+    // one-time memorable password EXACTLY ONCE — and ONLY when this call
+    // minted it; a caller-supplied password is never echoed back, and a
+    // replay carries "" (the one-time reveal cannot be re-fetched).
+    const responseBody: FpChildMintBody = {
+      ok: true,
+      status: "child_created",
+      childId: result.childId,
+      username: result.username ?? "",
+      childPassword: result.username ? mintedPassword ?? "" : "",
+    };
+    return new Response(JSON.stringify(responseBody), { status: 200, headers });
   } catch (err) {
     console.error(
       `[fp/signup/child] unexpected error: ${err instanceof Error ? err.message : String(err)}`

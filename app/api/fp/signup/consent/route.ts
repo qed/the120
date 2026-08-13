@@ -10,6 +10,10 @@
  * `consent_required` — consent is a separate, legally-distinct step from the
  * child create, so it has its own route rather than loosening the child schema.
  *
+ * (fpv04 U5a) `attemptId` is now OPTIONAL: absent → resolved server-side from
+ * the Bearer identity (the SPA never holds one; the verify door is email-keyed
+ * by design). Everything else is unchanged.
+ *
  * CORS MIRROR of ../child/route.ts (exactly): OPTIONS 204 with the echoed origin,
  * 403 for a bad Origin, one generic 401 for EVERY refusal (the recordConsent
  * reason lives only in the server log — no oracle), no-store, an atomic
@@ -43,6 +47,7 @@ import {
 } from "../signup-rules";
 import { parseConsentAccept } from "../consent-rules";
 import { recordConsent } from "../consent-core";
+import { resolveAttemptForParent } from "../attempt-resolve";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +57,14 @@ export const dynamic = "force-dynamic";
 // STRICT `parseConsentAccept` (consent-rules.ts) — attemptId is split off first
 // so that strict schema is fed only the accept fields it knows about, keeping
 // its strictness on the rest of the body.
-const attemptIdSchema = z.object({ attemptId: z.uuid() });
+//
+// (fpv04 U5a) OPTIONAL, mirroring ../child/route.ts: the fpv04 verify door is
+// email-keyed by design, so the SPA never holds an attemptId. Absent → resolved
+// server-side from the Bearer identity (attempt-resolve.ts, states=['verified',
+// 'child_created'] — a resolved child_created attempt answers the idempotent
+// success below; anything else recordConsent re-refuses itself). A caller that
+// sends one keeps the byte-identical old behavior.
+const attemptIdSchema = z.object({ attemptId: z.uuid().optional() });
 
 function corsJsonHeaders(origin: string): Record<string, string> {
   return {
@@ -131,8 +143,10 @@ export async function POST(req: Request): Promise<Response> {
 
     const ip = extractClientIp(req.headers);
     // A `fp-signup-consent` namespace, keyed on (ip, attemptId) + an ip aggregate,
-    // distinct from START/verify/child so those budgets never interact. Same configs.
-    const attemptKey = `fp-signup-consent:${encodeURIComponent(ip)}:${encodeURIComponent(attemptId)}`;
+    // distinct from START/verify/child so those budgets never interact. Same
+    // configs. (fpv04 U5a) An absent attemptId keys its segment as the literal
+    // `self` — the strike must land before the DB I/O the resolution needs.
+    const attemptKey = `fp-signup-consent:${encodeURIComponent(ip)}:${encodeURIComponent(attemptId ?? "self")}`;
     const ipKey = `fp-signup-consent-ip:${encodeURIComponent(ip)}`;
     const releaseStrikes = (): void => {
       releaseRateLimitEvent(attemptKey);
@@ -161,8 +175,36 @@ export async function POST(req: Request): Promise<Response> {
       return refuse();
     }
 
+    // (fpv04 U5a) Resolve the attempt server-side when the caller sent none
+    // (the SPA path). 'verified' is the live pre-mint state; 'child_created'
+    // is admitted too (U5a review P1-1) because a LOST MINT RESPONSE leaves
+    // the attempt there while the SPA retries this door first — with only
+    // ['verified'] that retry met an eternal uniform refusal over a fully
+    // created account. A resolved 'child_created' attempt necessarily had its
+    // consent recorded and claimed (the mint is consent-gated), so the honest
+    // answer is the SAME idempotent success the `duplicate` verdict gets —
+    // recordConsent would only mis-refuse it as not_verified.
+    let resolvedAttemptId = attemptId;
+    if (!resolvedAttemptId) {
+      const resolved = await resolveAttemptForParent(admin, {
+        parentId,
+        states: ["verified", "child_created"],
+      });
+      if (!resolved.ok) {
+        if (resolved.reason === "outage") releaseStrikes();
+        return refuse();
+      }
+      if (resolved.state === "child_created") {
+        return new Response(
+          JSON.stringify({ ok: true, status: "consent_recorded" }),
+          { status: 200, headers }
+        );
+      }
+      resolvedAttemptId = resolved.attemptId;
+    }
+
     const result = await recordConsent(admin, {
-      attemptId,
+      attemptId: resolvedAttemptId,
       parentId,
       echoedVersion: accept.data.echoedVersion,
       echoedHash: accept.data.echoedHash,

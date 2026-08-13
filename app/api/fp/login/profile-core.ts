@@ -75,6 +75,20 @@ export async function ensurePlayerProfile(
     childId: string;
     firstName: string;
     /**
+     * OPTIONAL initial save-doc seed (fpv04 U5a). When present it becomes the
+     * doc of the INSERT-if-absent save row (in place of the historical `{}`);
+     * an EXISTING save is NEVER touched (the seed rides an INSERT ... ON
+     * CONFLICT DO NOTHING — see seedSave), so a returning login or an
+     * idempotent mint replay cannot reset real state. The fpv04 mint seeds
+     * `{docVersion, coverLook, coverLookAt, firstRunComplete}` here so a new
+     * kid's first sign-in hydrates their signup-chosen cover and skips the
+     * old first-run picker. `docVersion` MUST ride the seed: the save-doc
+     * guard trigger (migration 20260924120000, live) gates its ENTIRE repair
+     * on docVersion agreement, so a seed without it would leave the seeded
+     * fields unprotected against a stale-build UPDATE.
+     */
+    seedDoc?: Record<string, unknown>;
+    /**
      * Test seam only: mints the random handle-suffix fallback. Production
      * callers omit it and get the crypto-backed default; a test injects a
      * deterministic generator to exercise the fallback path.
@@ -104,7 +118,7 @@ export async function ensurePlayerProfile(
       );
       return { ok: false, reason: "identity_mismatch" };
     }
-    return seedSave(db, existing.data);
+    return seedSave(db, existing.data, input.seedDoc);
   }
 
   // 2. Identity agreement with path_student_profiles, the child→user direction
@@ -153,7 +167,7 @@ export async function ensurePlayerProfile(
       .select("id, handle")
       .single();
     if (!inserted.error && inserted.data && isProfileRow(inserted.data)) {
-      return seedSave(db, inserted.data);
+      return seedSave(db, inserted.data, input.seedDoc);
     }
     if (inserted.error && inserted.error.code === "23505") {
       const kind = classifyInsertConflict(
@@ -169,7 +183,7 @@ export async function ensurePlayerProfile(
           .eq("user_id", input.userId)
           .maybeSingle();
         if (!adopted.error && adopted.data && isProfileRow(adopted.data)) {
-          return seedSave(db, adopted.data);
+          return seedSave(db, adopted.data, input.seedDoc);
         }
         console.error(`[fp/login] adopt-after-conflict re-select failed`);
         return { ok: false, reason: "insert_failed" };
@@ -185,16 +199,26 @@ export async function ensurePlayerProfile(
 }
 
 /**
- * Seed the save row (revision 0, empty doc) if absent — on conflict do
- * nothing, never touch an existing save. `ignoreDuplicates` makes the upsert
- * an INSERT ... ON CONFLICT DO NOTHING, so a returning login can never reset
- * a real save document.
+ * Seed the save row (revision 0, `seedDoc` or the historical empty doc) if
+ * absent — on conflict do nothing, never touch an existing save.
+ * `ignoreDuplicates` makes the upsert an INSERT ... ON CONFLICT DO NOTHING,
+ * so a returning login (or a mint replay) can never reset a real save
+ * document — which is also why the fpv04 seeded fields are safe on every
+ * path: they exist only on the one INSERT that creates the row. The
+ * BEFORE-UPDATE guard trigger (20260924120000) does not fire on this INSERT;
+ * it protects the seeded fields on every LATER client UPDATE instead (Graft
+ * A/B semantics — the mint test proves the seed survives a stale-doc UPDATE
+ * through the TS mirror of that trigger).
  */
-async function seedSave(db: SupabaseClient, profile: ProfileRow): Promise<EnsureProfileResult> {
+async function seedSave(
+  db: SupabaseClient,
+  profile: ProfileRow,
+  seedDoc?: Record<string, unknown>
+): Promise<EnsureProfileResult> {
   const res = await db
     .from("fp_player_saves")
     .upsert(
-      { profile_id: profile.id, revision: 0, doc: {} },
+      { profile_id: profile.id, revision: 0, doc: seedDoc ?? {} },
       { onConflict: "profile_id", ignoreDuplicates: true }
     );
   if (res.error) {

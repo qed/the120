@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createChild, type CreateChildDeps } from "../child-core";
+import { resolveAttemptForParent } from "../attempt-resolve";
 import { FP_CONSENT_POLICY } from "../consent-rules";
+import { guardSaveDocUpdate } from "@/app/lib/fp/fp-save-doc-guard-rules";
 
 /**
  * child-core (Slice B Unit 4, path a) driven through injected effect fakes + a
@@ -45,6 +47,9 @@ function makeClient(client: "admin" | "parent", handle: (s: State) => Result, ca
       },
       eq(col: string, val: unknown) {
         return builder({ ...state, filters: { ...state.filters, [col]: val } });
+      },
+      in(col: string, vals: unknown) {
+        return builder({ ...state, filters: { ...state.filters, [`in:${col}`]: vals } });
       },
       ilike(col: string, val: unknown) {
         return builder({ ...state, filters: { ...state.filters, [`ilike:${col}`]: val } });
@@ -561,6 +566,49 @@ describe("createChild — idempotent replay when the attempt is already child_cr
   });
 });
 
+/* ----------------------------------- resumed chain: resolve → replay (U5a review) */
+
+describe("createChild — resumed child_created chain (fpv04 U5a review P1-1: one continuous wiring)", () => {
+  it("resolveAttemptForParent finds the child_created attempt and createChild replays it, minting NOTHING", async () => {
+    // ONE fake row serves both modules: the resolver's newest-attempt read and
+    // the core's freshness read see the same 'child_created' attempt — the
+    // exact shape a lost mint response leaves behind for the SPA's retry.
+    const { deps, calls, authCreated } = build({
+      attempt: { id: "att1", parent_id: "u1", state: "child_created", child_id: "child1" },
+    });
+    const resolved = await resolveAttemptForParent(deps.admin, {
+      parentId: "u1",
+      states: ["verified", "child_created"],
+    });
+    expect(resolved).toEqual({ ok: true, attemptId: "att1", state: "child_created" });
+    if (!resolved.ok) return;
+    const res = await createChild(deps, { ...input, attemptId: resolved.attemptId });
+    expect(res).toEqual({ ok: true, childId: "child1" });
+    expect(authCreated).toEqual([]);
+    expect(insert(calls, "parent", "children")).toBe(false);
+  });
+
+  it("the ownership pin holds THROUGH the chain: a resolved id replayed under a different parent's token → parent_mismatch", async () => {
+    // The resolver keys on parentId in the WHERE clause; even if a resolved id
+    // somehow crossed parents, the core's own re-check refuses the replay.
+    const { deps, calls } = build({
+      parentUser: { id: "u2" },
+      attempt: { id: "att1", parent_id: "u1", state: "child_created", child_id: "child1" },
+    });
+    const resolved = await resolveAttemptForParent(deps.admin, {
+      parentId: "u1",
+      states: ["verified", "child_created"],
+    });
+    expect(resolved.ok).toBe(true);
+    const res = await createChild(deps, {
+      ...input,
+      attemptId: resolved.ok ? resolved.attemptId : "",
+    });
+    expect(res).toEqual({ ok: false, reason: "parent_mismatch" });
+    expect(insert(calls, "parent", "children")).toBe(false);
+  });
+});
+
 /* --------------------------------------------------------- non-fatal advance */
 
 describe("createChild — attempt-advance is non-fatal", () => {
@@ -807,5 +855,140 @@ describe("createChild — U14 single username+password path", () => {
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe("weak_password");
     expect(insert(calls, "parent", "children")).toBe(false);
+  });
+});
+
+/* --------------------------------------- fpv04 U5a: the seeded cover mint */
+
+describe("createChild — fpv04 U5a cover seed + hero redraw inputs", () => {
+  const fpv04Input = {
+    ...input,
+    lastName: "Reed",
+    coverLook: "manga-arc",
+    heroVibe: "inventor",
+    heroGender: "girl",
+  };
+
+  const saveUpsert = (calls: State[]) =>
+    calls.find((c) => c.client === "admin" && c.table === "fp_player_saves" && c.op === "upsert");
+
+  it("a coverLook mint SEEDS the save doc with docVersion + coverLook + coverLookAt + firstRunComplete", async () => {
+    const { deps, calls } = build();
+    const res = await createChild(deps, fpv04Input);
+    expect(res.ok).toBe(true);
+    const upsert = saveUpsert(calls);
+    // The seed rides the INSERT-if-absent save row (revision 0). docVersion is
+    // LOAD-BEARING: the live guard trigger gates its entire repair on
+    // docVersion agreement, so a seed without it would go unprotected.
+    expect(upsert?.row).toEqual({
+      profile_id: "pp1",
+      revision: 0,
+      doc: {
+        docVersion: 1,
+        coverLook: "manga-arc",
+        coverLookAt: 1000, // deps.now() — a SERVER stamp, never client time
+        firstRunComplete: true,
+      },
+    });
+  });
+
+  it("a mint WITHOUT a coverLook keeps the historical empty-doc seed byte-identical", async () => {
+    const { deps, calls } = build();
+    await createChild(deps, input);
+    expect(saveUpsert(calls)?.row).toEqual({ profile_id: "pp1", revision: 0, doc: {} });
+  });
+
+  it("hero vibe/gender land as redraw inputs on children.fp_story_answers (admin decoration)", async () => {
+    const { deps, calls } = build();
+    await createChild(deps, fpv04Input);
+    const deco = calls.find(
+      (c) =>
+        c.client === "admin" &&
+        c.table === "children" &&
+        c.op === "update" &&
+        c.row !== undefined &&
+        "fp_story_answers" in (c.row as Record<string, unknown>)
+    );
+    expect(deco?.row).toEqual({
+      fp_story_answers: { fpv04_hero_vibe: "inventor", fpv04_hero_gender: "girl" },
+    });
+    expect(deco?.filters).toMatchObject({ id: "child1" });
+  });
+
+  it("no hero inputs → no decoration write (pre-fpv04 parity)", async () => {
+    const { deps, calls } = build();
+    await createChild(deps, input);
+    const deco = calls.find(
+      (c) =>
+        c.client === "admin" &&
+        c.table === "children" &&
+        c.op === "update" &&
+        c.row !== undefined &&
+        "fp_story_answers" in (c.row as Record<string, unknown>)
+    );
+    expect(deco).toBeUndefined();
+  });
+});
+
+/* ------------- fpv04 U5a: the INSERT-path seed survives a stale UPDATE ---- */
+
+/**
+ * THE SEED/GUARD PROOF (named deliverable). The live guard trigger
+ * (20260924120000) is BEFORE UPDATE — it protects the seeded fields on every
+ * later client write, but the seed itself rides an INSERT the trigger never
+ * sees. So the proof is two-part, both against core logic (never a live DB):
+ *   1. the mint really writes the seeded doc on the save INSERT (the describe
+ *      block above);
+ *   2. an immediately-following STALE-BUILD UPDATE — a client that omits or
+ *      regresses the seeded fields — is repaired by the guard so the seeded
+ *      values survive. Proven here through `guardSaveDocUpdate`, the TS
+ *      byte-for-intent mirror of the live trigger (parity-tested against the
+ *      migration SQL by fp-save-doc-guard-migration-parity.test.ts).
+ */
+describe("fpv04 U5a — the seeded save doc survives a stale-doc UPDATE through the guard", () => {
+  const seededDoc = {
+    docVersion: 1,
+    coverLook: "manga-arc",
+    coverLookAt: 1000,
+    firstRunComplete: true,
+  };
+
+  it("an old-build write that OMITS the seeded fields entirely gets them re-grafted", () => {
+    const stale = { docVersion: 1, ideas: [] };
+    const merged = guardSaveDocUpdate(seededDoc, stale) as Record<string, unknown>;
+    expect(merged.coverLook).toBe("manga-arc");
+    expect(merged.coverLookAt).toBe(1000);
+    expect(merged.firstRunComplete).toBe(true);
+  });
+
+  it("a stale client that REGRESSES firstRunComplete:false and carries an OLDER cover stamp loses both", () => {
+    const stale = {
+      docVersion: 1,
+      firstRunComplete: false,
+      coverLook: "storybook-classic",
+      coverLookAt: 500, // older than the seed's server stamp
+    };
+    const merged = guardSaveDocUpdate(seededDoc, stale) as Record<string, unknown>;
+    expect(merged.firstRunComplete).toBe(true); // monotonic, never cleared
+    expect(merged.coverLook).toBe("manga-arc"); // newer stamp wins
+    expect(merged.coverLookAt).toBe(1000);
+  });
+
+  it("a NEWER deliberate cover choice still wins over the seed (LWW is intact, not a ratchet)", () => {
+    const newer = { docVersion: 1, coverLook: "night-hero", coverLookAt: 9000, firstRunComplete: true };
+    const merged = guardSaveDocUpdate(seededDoc, newer) as Record<string, unknown>;
+    expect(merged.coverLook).toBe("night-hero");
+    expect(merged.coverLookAt).toBe(9000);
+  });
+
+  it("docVersion is LOAD-BEARING: a seed missing it would pass through unprotected (why the seed carries it)", () => {
+    const unversionedSeed = { coverLook: "manga-arc", coverLookAt: 1000, firstRunComplete: true };
+    const stale = { docVersion: 1, ideas: [] };
+    // Version disagreement → the guard passes the write through untouched:
+    // the seeded cover would be erased. This is the failure mode the seed's
+    // docVersion field exists to prevent.
+    const merged = guardSaveDocUpdate(unversionedSeed, stale) as Record<string, unknown>;
+    expect(merged.coverLook).toBeUndefined();
+    expect(merged.firstRunComplete).toBeUndefined();
   });
 });

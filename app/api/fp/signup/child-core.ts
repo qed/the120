@@ -143,9 +143,27 @@ export type CreateChildInput = {
    * gradeVerdict guard (3-12 or refuse — never clamp).
    */
   grade?: number | string | null;
-  /** The parent-set child password — REQUIRED, validated against the R29 student
-   *  floor before any side effect. */
+  /** The child's password — REQUIRED, validated against the R29 student floor
+   *  before any side effect. Parent-set on the pre-fpv04 path; on the fpv04
+   *  path the ROUTE mints the memorable `word-word-NN` value and passes it
+   *  here (this core never needs to know which). NEVER logged. */
   childPassword: string;
+  /**
+   * fpv04 U5a — the signup-chosen preset cover look id (one of
+   * mint-rules.FP_STORY_LOOK_IDS, validated at the route schema). When present
+   * the mint SEEDS the kid's save doc with `{docVersion: 1, coverLook,
+   * coverLookAt: now, firstRunComplete: true}` (see the ensurePlayerProfile
+   * call below) so the kid's first sign-in hydrates the chosen cover and never
+   * enters the old first-run picker. Absent (pre-fpv04 callers) keeps the
+   * historical `{}` seed byte-identical.
+   */
+  coverLook?: string | null;
+  /** fpv04 U5a hero inputs (validated enums at the route). Persisted as
+   *  REDRAW INPUTS on the child row (children.fp_story_answers, the
+   *  20260918120000 column whose purpose is exactly this: what the future AI
+   *  cover draw needs to know). Best-effort decoration — never fails a mint. */
+  heroVibe?: string | null;
+  heroGender?: string | null;
 };
 
 export type CreateChildRefusal =
@@ -465,11 +483,52 @@ export async function createChild(
     }
     created.profileId = String((insProfile.data as { id: unknown }).id);
 
+    // 8b. fpv04 hero redraw inputs (vibe + gender), best-effort DECORATION on
+    //     the child row's fp_story_answers jsonb (the 20260918120000 redraw-
+    //     inputs column — exactly what a future AI cover draw needs). The v3
+    //     posture verbatim: a failed decoration write is logged and stepped
+    //     past; it never fails a mint that is otherwise complete.
+    if (input.heroVibe || input.heroGender) {
+      const deco = await admin
+        .from("children")
+        .update({
+          fp_story_answers: {
+            ...(input.heroVibe ? { fpv04_hero_vibe: input.heroVibe } : {}),
+            ...(input.heroGender ? { fpv04_hero_gender: input.heroGender } : {}),
+          },
+        })
+        .eq("id", childId);
+      if (deco.error) {
+        console.error(
+          `[fp/signup/child] hero redraw-inputs write failed (non-fatal): ${deco.error.message}`
+        );
+      }
+    }
+
     // 9. The FP player profile + seeded save (the precondition row now exists).
+    //    fpv04 U5a: when the mint carries a cover look, the save doc is SEEDED
+    //    with the chosen cover + firstRunComplete so the kid's first sign-in
+    //    lands past the old first-run gate with their cover already on. The
+    //    seed rides the INSERT that creates the save row (the guard trigger is
+    //    BEFORE UPDATE — it cannot and need not fire here); every LATER stale
+    //    client UPDATE is repaired by the live guard's Graft A (firstRunComplete
+    //    monotonic) and Graft B (coverLook/coverLookAt LWW) — which is why
+    //    docVersion: 1 MUST ride the seed (the guard's whole repair is gated on
+    //    docVersion agreement with the client's DOC_VERSION = 1).
     const player = await ensurePlayerProfile(admin, {
       userId: authUserId,
       childId,
       firstName,
+      ...(input.coverLook
+        ? {
+            seedDoc: {
+              docVersion: 1,
+              coverLook: input.coverLook,
+              coverLookAt: deps.now(),
+              firstRunComplete: true,
+            },
+          }
+        : {}),
     });
     if (!player.ok) {
       console.error(`[fp/signup/child] ensurePlayerProfile refused: ${player.reason}`);

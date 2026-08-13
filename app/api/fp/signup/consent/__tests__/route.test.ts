@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * version/hash reach recordConsent verbatim. No real DB or token is touched.
  */
 
-const { recordConsentRef, getUserRef, rateRef } = vi.hoisted(() => ({
+const { recordConsentRef, getUserRef, rateRef, resolveRef } = vi.hoisted(() => ({
   recordConsentRef: { fn: vi.fn() },
   getUserRef: { fn: vi.fn() },
   rateRef: {
@@ -17,10 +17,15 @@ const { recordConsentRef, getUserRef, rateRef } = vi.hoisted(() => ({
     checks: [] as string[],
     allowed: true,
   },
+  // (fpv04 U5a) The server-side attempt resolution seam (attemptId absent).
+  resolveRef: { fn: vi.fn() },
 }));
 
 vi.mock("@/app/api/fp/signup/consent-core", () => ({
   recordConsent: (...args: unknown[]) => recordConsentRef.fn(...args),
+}));
+vi.mock("@/app/api/fp/signup/attempt-resolve", () => ({
+  resolveAttemptForParent: (...args: unknown[]) => resolveRef.fn(...args),
 }));
 vi.mock("@/app/lib/fp/rate-limit-store", () => ({
   checkAndRecordRateLimit: (key: string) => {
@@ -176,5 +181,65 @@ describe("POST /api/fp/signup/consent (FIX 1: the consent-record seam)", () => {
     expect(res.status).toBe(200);
     const arg = recordConsentRef.fn.mock.calls[0][1] as Record<string, unknown>;
     expect(arg.childDob).toBeNull();
+  });
+});
+
+/* --------------------------------------------- fpv04 U5a route extensions */
+
+describe("POST /api/fp/signup/consent — fpv04 U5a: attemptId optional, resolved server-side", () => {
+  beforeEach(() => {
+    recordConsentRef.fn = vi.fn().mockResolvedValue({ ok: true, consentId: "consent-1" });
+    getUserRef.fn = vi.fn().mockResolvedValue({ data: { user: { id: "parent-1" } }, error: null });
+    resolveRef.fn = vi.fn();
+    rateRef.released = [];
+    rateRef.checks = [];
+    rateRef.allowed = true;
+  });
+  afterEach(() => vi.resetModules());
+
+  it("no attemptId → resolved from the Bearer identity (states=['verified','child_created']) and recorded against it", async () => {
+    resolveRef.fn = vi.fn().mockResolvedValue({ ok: true, attemptId: UUID, state: "verified" });
+    const res = await post({ ...validAccept });
+    expect(res.status).toBe(200);
+    expect(resolveRef.fn).toHaveBeenCalledWith(expect.anything(), {
+      parentId: "parent-1",
+      states: ["verified", "child_created"],
+    });
+    const arg = recordConsentRef.fn.mock.calls[0][1] as Record<string, unknown>;
+    expect(arg.attemptId).toBe(UUID);
+    // The strike key uses the literal `self` segment on this path.
+    expect(rateRef.checks.some((k) => k.endsWith(":self"))).toBe(true);
+  });
+
+  it("a resolved child_created attempt → idempotent 200 success WITHOUT recordConsent (U5a review P1-1: the lost-mint-response retry must not meet an eternal refusal)", async () => {
+    resolveRef.fn = vi.fn().mockResolvedValue({ ok: true, attemptId: UUID, state: "child_created" });
+    const res = await post({ ...validAccept });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, status: "consent_recorded" });
+    // The mint was consent-gated, so the consent necessarily exists already:
+    // nothing to re-record, and recordConsent would only mis-refuse it.
+    expect(recordConsentRef.fn).not.toHaveBeenCalled();
+    expect(rateRef.released).toEqual([]);
+  });
+
+  it("no resolvable attempt → generic 401, strike standing, recordConsent never called", async () => {
+    resolveRef.fn = vi.fn().mockResolvedValue({ ok: false, reason: "none" });
+    const res = await post({ ...validAccept });
+    expect(res.status).toBe(401);
+    expect(recordConsentRef.fn).not.toHaveBeenCalled();
+    expect(rateRef.released).toEqual([]);
+  });
+
+  it("a resolution outage refunds the strike (our fault)", async () => {
+    resolveRef.fn = vi.fn().mockResolvedValue({ ok: false, reason: "outage" });
+    const res = await post({ ...validAccept });
+    expect(res.status).toBe(401);
+    expect(rateRef.released.length).toBe(2);
+  });
+
+  it("a caller that DOES send attemptId never touches the resolver (byte-identical old path)", async () => {
+    const res = await post({ attemptId: UUID, ...validAccept });
+    expect(res.status).toBe(200);
+    expect(resolveRef.fn).not.toHaveBeenCalled();
   });
 });

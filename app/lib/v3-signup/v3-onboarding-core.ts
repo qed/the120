@@ -31,8 +31,13 @@ import "server-only";
  *     to brute-force. `code_guess_count` is set to 0 explicitly for the same
  *     reason the start path does it: a control that only exists when a DEFAULT
  *     fires is one an absent column silently disables.
- * A grep for `state: "verified"` outside this file and verify-store's redeem CAS
- * should find nothing; if it ever does, that is the thing to audit.
+ * A grep for `state: "verified"` should find this file, verify-store's redeem
+ * CAS, and ONE other site: app/api/fp/parent/add-child/route.ts, the BEARER-
+ * session twin of `v3AddKid` that the fpv04 SPA's parent dashboard calls to
+ * begin adding another kid. It writes the same row for the same reason on the
+ * same three grounds above (session-gated, parent_id from the session, no
+ * verification secret); its own header carries the full audit of what the state
+ * unlocks. Anything BEYOND those three is the thing to audit.
  *
  * ── DRAFT CONSUMPTION IS STAMPED ONLY AFTER createChild RETURNS ok ──
  * Stamping first would leave a `consumed` draft with no child whenever

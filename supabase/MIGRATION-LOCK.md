@@ -1,4 +1,42 @@
-# Migration lock — CONTENDED AGAIN: THREE LANES (2026-08-05)
+# Migration lock — CLEAR as of 2026-08-13 (ledger verified)
+
+**Everything below this block was STALE and is kept only as history. Read this
+first.**
+
+The live ledger was queried on 2026-08-13. Both migrations the 2026-08-05 block
+lists as "authored, **not yet applied**" — `20260920120000_fp_image_lab_cell_prompts`
+and `20260921120000_fp_login_code_and_username_legacy` — **are applied**, and two
+further versions exist beyond them (`20260923120000`, `20260924120000`, both with
+a null `name`).
+
+This is the exact condition the 2026-08-05 block warns about in its own words:
+*"the file said the opposite of the truth while three lanes ran, and that is
+exactly the precondition for collision #4."* An author trusting the file would
+have taken `20260922120000` as free and collided with an applied migration.
+
+**Always run the ledger query before authoring. The file is a coordination note,
+not a source of truth — the ledger is.**
+
+| Version | Name | State |
+|---|---|---|
+| `20260925120000` | `artie_review_decisions` | **applied 2026-08-13**, registered in the ledger |
+| `20260924120000` | (null) | applied |
+| `20260923120000` | (null) | applied |
+| `20260922120000` | `fp_save_doc_guard_story_fields` | applied |
+
+**Current holder: none.** The Artie lockdown lane
+(`first-profit` on `artie/lockdown`, worktree `fp-artie`) authored and applied
+`20260925120000_artie_review_decisions` with the lock-holder's explicit go-ahead,
+after querying the ledger. It has one further migration expected —
+`ai_generation_runs` for the AI spend log (plan Unit 5) — not yet authored. Ask
+before authoring a slot while that is outstanding.
+
+Two versions in the ledger carry a **null `name`**. Whoever applied them did not
+register a name; worth reconciling if anyone knows what they were.
+
+---
+
+# (HISTORY) Migration lock — CONTENDED AGAIN: THREE LANES (2026-08-05)
 
 **Three worktrees are live right now**, so the "no longer contended" note
 below (2026-07-29) is out of date and is kept only as history:

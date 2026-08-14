@@ -174,8 +174,14 @@ export function decidePlaceholderAudience(input: {
   placeholderMode: boolean;
   parentEmail: string | null | undefined;
   env: SignupGateEnv;
+  /** Founder decision 2026-08-14: placeholder mode open to every parent, with
+   *  the cover-loss cost accepted (see `isCoverPlaceholderOpenToAll`). Absent
+   *  or false keeps the founders-only default, so the open state can only ever
+   *  be reached by someone setting it deliberately. */
+  openToAll?: boolean;
 }): PlaceholderAudienceVerdict {
   if (!input.placeholderMode) return { ok: true, placeholder: false };
+  if (input.openToAll) return { ok: true, placeholder: true };
   const email = typeof input.parentEmail === "string" ? input.parentEmail.trim() : "";
   if (email.length === 0) return { ok: false, reason: "placeholder_not_founder" };
   if (!isTestSignup(email, input.env)) return { ok: false, reason: "placeholder_not_founder" };

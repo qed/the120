@@ -86,6 +86,7 @@ import {
   FP_CHILD_MEDIA_BUCKET,
   isChildPhotoLive,
   isCoverPlaceholderMode,
+  isCoverPlaceholderOpenToAll,
 } from "@/app/lib/fp/child-photo/child-photo-rules";
 import {
   supabaseBlobPort,
@@ -292,6 +293,7 @@ export async function POST(req: Request): Promise<Response> {
           ? parentRow.email
           : userEmail,
       env: { FP_SIGNUP_TEST_ALLOWLIST: process.env.FP_SIGNUP_TEST_ALLOWLIST },
+      openToAll: isCoverPlaceholderOpenToAll(),
     });
     if (!audience.ok) {
       // The email is NOT logged. The parent id is enough to answer "who hit a

@@ -325,6 +325,35 @@ describe("POST /api/fp/parent/child-photo", () => {
       expect(objects.size).toBe(1);
     });
 
+    it("OPEN TO ALL lets a non-founder through — the founder's accepted cost", async () => {
+      // FP_COVER_PLACEHOLDER_OPEN_TO_ALL is the deliberate escape hatch: every
+      // parent may walk the flow to judge the UX, knowing each walk costs the
+      // child the cover they chose (isCoverPlaceholderOpenToAll owns the why).
+      process.env.FP_COVER_PLACEHOLDER_MODE = "1";
+      process.env.FP_SIGNUP_TEST_ALLOWLIST = "someone.else@test.the120.invalid";
+      process.env.FP_COVER_PLACEHOLDER_OPEN_TO_ALL = "1";
+
+      const res = await post();
+      expect(res.status).toBe(200);
+      expect(objects.size).toBe(1);
+      delete process.env.FP_COVER_PLACEHOLDER_OPEN_TO_ALL;
+    });
+
+    it.each([undefined, "0", "false", "off", ""])(
+      "OPEN_TO_ALL=%s keeps the founders-only default",
+      async (v) => {
+        process.env.FP_COVER_PLACEHOLDER_MODE = "1";
+        process.env.FP_SIGNUP_TEST_ALLOWLIST = "someone.else@test.the120.invalid";
+        if (v === undefined) delete process.env.FP_COVER_PLACEHOLDER_OPEN_TO_ALL;
+        else process.env.FP_COVER_PLACEHOLDER_OPEN_TO_ALL = v;
+
+        const res = await post();
+        expect(res.status).toBe(401);
+        expect(objects.size).toBe(0);
+        delete process.env.FP_COVER_PLACEHOLDER_OPEN_TO_ALL;
+      },
+    );
+
     it("is byte-identical to every other refusal", async () => {
       process.env.FP_COVER_PLACEHOLDER_MODE = "1";
       process.env.FP_SIGNUP_TEST_ALLOWLIST = "founder@test.the120.invalid";

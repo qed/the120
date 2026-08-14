@@ -91,6 +91,7 @@ import {
   decidePhotoAdmission,
   isChildPhotoLive,
   isCoverPlaceholderMode,
+  isCoverPlaceholderOpenToAll,
 } from "@/app/lib/fp/child-photo/child-photo-rules";
 import { supabaseBlobPort } from "@/app/lib/fp/child-photo/child-photo-store";
 import {
@@ -319,6 +320,7 @@ export async function POST(req: Request): Promise<Response> {
           ? parentRow.email
           : userEmail,
       env: { FP_SIGNUP_TEST_ALLOWLIST: process.env.FP_SIGNUP_TEST_ALLOWLIST },
+      openToAll: isCoverPlaceholderOpenToAll(),
     }).ok) {
       // The email is never logged; the parent id answers the only operational
       // question, which is who reached a placeholder build.

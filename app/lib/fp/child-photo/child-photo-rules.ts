@@ -129,6 +129,42 @@ export function isCoverPlaceholderMode(env?: {
   return raw === "1" || raw === "true";
 }
 
+/**
+ * Whether placeholder mode is open to EVERY parent, not only founder
+ * identities (`FP_COVER_PLACEHOLDER_OPEN_TO_ALL`). Same allowlist parse, same
+ * fail-closed default, as every other flag in this file.
+ *
+ * ⚠ FOUNDER DECISION 2026-08-14, made with the cost stated: they want every
+ * parent able to walk the photo flow to judge the UX. The cost, in full,
+ * because a future reader will need it to understand why this knob exists:
+ *
+ *   1. The parent hands us a photograph of their child. It is stored,
+ *      re-encoded, and deleted the moment generation runs — that half is
+ *      unchanged and is what the consent covers.
+ *   2. The cover commit nulls `fp_cover_data_url`, which is the cover the KID
+ *      CHOSE at signup and the only cover the login/handoff doors serve.
+ *   3. What replaces it is a blob key that nothing serves yet, holding a
+ *      captioned kitten.
+ *
+ * So while this is on, a parent who walks the flow SUBTRACTS their child's
+ * chosen cover and gets nothing renderable back. That is accepted, explicitly
+ * and temporarily, to get UX judgement on the real flow.
+ *
+ * TURN THIS OFF the moment blob-keyed covers are served, and delete it once a
+ * real generator is wired — at that point placeholder mode is gone and the
+ * question it answers no longer exists.
+ */
+export function isCoverPlaceholderOpenToAll(env?: {
+  FP_COVER_PLACEHOLDER_OPEN_TO_ALL?: string | undefined;
+}): boolean {
+  const raw = (
+    env ? env.FP_COVER_PLACEHOLDER_OPEN_TO_ALL : process.env.FP_COVER_PLACEHOLDER_OPEN_TO_ALL
+  )
+    ?.trim()
+    .toLowerCase();
+  return raw === "1" || raw === "true";
+}
+
 /* ----------------------------------------------------------- the model id */
 
 /**

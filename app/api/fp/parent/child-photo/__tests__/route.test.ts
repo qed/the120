@@ -276,6 +276,65 @@ describe("POST /api/fp/parent/child-photo", () => {
     });
   });
 
+
+  /* ------------------------------------- the placeholder audience gate */
+
+  /**
+   * ⚠ THE UPLOAD MUST REFUSE A NON-FOUNDER WHILE THE OUTPUT IS A STAND-IN.
+   *
+   * The generate door already refuses placeholder mode for anyone but a
+   * founder — but refusing there is too late. By then this door has stored a
+   * photograph of a real child, and the parent is told something went wrong on
+   * our side while their kid's likeness sits in a bucket waiting for an
+   * erasure nobody has asked for. That is the exact harm the whole pipeline is
+   * built to avoid, reachable by turning on two env vars.
+   */
+  describe("⚠ placeholder mode refuses a non-founder BEFORE the photo is read", () => {
+    afterEach(() => {
+      delete process.env.FP_COVER_PLACEHOLDER_MODE;
+      delete process.env.FP_SIGNUP_TEST_ALLOWLIST;
+    });
+
+    it("stores NOTHING and points at nothing for a parent who is not a founder", async () => {
+      process.env.FP_COVER_PLACEHOLDER_MODE = "1";
+      process.env.FP_SIGNUP_TEST_ALLOWLIST = "founder@test.the120.invalid";
+
+      const res = await post();
+      expect(res.status).toBe(401);
+      expect(await res.text()).toBe(CHILD_PHOTO_REFUSAL_BODY);
+      // The photograph never landed anywhere.
+      expect(objects.size).toBe(0);
+      expect(childRow(CHILD_A).fp_photo_blob_key).toBeNull();
+    });
+
+    it("lets a FOUNDER through, so the mode is testable at all", async () => {
+      process.env.FP_COVER_PLACEHOLDER_MODE = "1";
+      process.env.FP_SIGNUP_TEST_ALLOWLIST = "a@example.com";
+
+      const res = await post();
+      expect(res.status).toBe(200);
+      expect(objects.size).toBe(1);
+    });
+
+    it("does not gate at all when the mode is off — the real pipeline is for everyone", async () => {
+      delete process.env.FP_COVER_PLACEHOLDER_MODE;
+      process.env.FP_SIGNUP_TEST_ALLOWLIST = "someone.else@test.the120.invalid";
+
+      const res = await post();
+      expect(res.status).toBe(200);
+      expect(objects.size).toBe(1);
+    });
+
+    it("is byte-identical to every other refusal", async () => {
+      process.env.FP_COVER_PLACEHOLDER_MODE = "1";
+      process.env.FP_SIGNUP_TEST_ALLOWLIST = "founder@test.the120.invalid";
+      const refused = await snapshotOf(await post());
+      delete process.env.FP_COVER_PLACEHOLDER_MODE;
+      const badToken = await snapshotOf(await post({ token: null }));
+      expect(refused).toEqual(badToken);
+    });
+  });
+
   /* --------------------------------------------------------- the happy path */
 
   describe("a parent uploading their own child's photo", () => {

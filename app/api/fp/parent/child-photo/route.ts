@@ -86,9 +86,11 @@ import {
   type PhotoConsentRow,
 } from "../../signup/consent-rules";
 import { blobKey } from "@/app/lib/fp/cover-store-rules";
+import { decidePlaceholderAudience } from "./generate/generate-door-rules";
 import {
   decidePhotoAdmission,
   isChildPhotoLive,
+  isCoverPlaceholderMode,
 } from "@/app/lib/fp/child-photo/child-photo-rules";
 import { supabaseBlobPort } from "@/app/lib/fp/child-photo/child-photo-store";
 import {
@@ -247,6 +249,7 @@ export async function POST(req: Request): Promise<Response> {
     // ── 4a. The token is genuine. A network throw is an outage, not a guess
     // about the account.
     let userId: string;
+    let userEmail: string | null = null;
     try {
       const raced = await withFwTimeout(
         supabaseParentToken(token).auth.getUser(),
@@ -260,6 +263,7 @@ export async function POST(req: Request): Promise<Response> {
       const who = raced.value;
       if (who.error || !who.data?.user) return refuse("invalid_token");
       userId = who.data.user.id;
+      userEmail = typeof who.data.user.email === "string" ? who.data.user.email : null;
     } catch (err) {
       console.error(
         `[fp/parent/child-photo] token verification threw: ${err instanceof Error ? err.message : String(err)}`
@@ -275,7 +279,7 @@ export async function POST(req: Request): Promise<Response> {
     // account has no parents row and lands here, so a child can never reach
     // this endpoint even with a valid session of their own.
     const gateRaced = await withFwTimeout(
-      admin.from("parents").select("id").eq("id", userId).maybeSingle(),
+      admin.from("parents").select("id, email").eq("id", userId).maybeSingle(),
       "fp/parent/child-photo parent gate",
       budgetFor()
     );
@@ -290,10 +294,38 @@ export async function POST(req: Request): Promise<Response> {
       releaseStrikes();
       return refuse("outage");
     }
-    const parentRow = gateRaced.value.data as { id?: unknown } | null;
+    const parentRow = gateRaced.value.data as { id?: unknown; email?: unknown } | null;
     if (!parentRow || typeof parentRow.id !== "string") {
       console.error(`[fp/parent/child-photo] parent gate refused ${userId}: no parents row`);
       return refuse("not_parent");
+    }
+
+    // ── 4b-bis. ⚠ WHILE THE OUTPUT IS A STAND-IN, ONLY FOUNDERS MAY HAND US A
+    // PHOTO. The generate door already refuses placeholder mode for anyone but
+    // a founder identity — but refusing THERE is too late: the upload has
+    // already stored a photograph of a child by then, and the parent is told
+    // something went wrong on our side while their kid's likeness sits in a
+    // bucket waiting for an erasure nobody has asked for.
+    //
+    // So the same predicate runs HERE, before a single byte of the body is
+    // read. It is derived from the placeholder flag rather than given its own
+    // knob deliberately: the rule is not "founders only forever", it is "we do
+    // not accept a photo we cannot actually use", and the day a real generator
+    // is wired the mode goes off and this gate opens with it.
+    if (!decidePlaceholderAudience({
+      placeholderMode: isCoverPlaceholderMode(),
+      parentEmail:
+        typeof parentRow.email === "string" && parentRow.email.trim().length > 0
+          ? parentRow.email
+          : userEmail,
+      env: { FP_SIGNUP_TEST_ALLOWLIST: process.env.FP_SIGNUP_TEST_ALLOWLIST },
+    }).ok) {
+      // The email is never logged; the parent id answers the only operational
+      // question, which is who reached a placeholder build.
+      console.error(
+        `[fp/parent/child-photo] ⚠ PLACEHOLDER MODE refused the upload for non-founder parent ${userId} — no photo was read or stored`
+      );
+      return refuse("not_founder_while_placeholder");
     }
 
     // ── 4c. OWNERSHIP. THE compound predicate (module header). A child this

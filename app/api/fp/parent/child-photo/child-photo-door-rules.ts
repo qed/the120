@@ -72,6 +72,10 @@ export type ChildPhotoRefusalReason =
    *  re-encoder could not decode. Collapsed on purpose — see below. */
   | "unusable_photo"
   | "rate_limited"
+  /** Placeholder mode is on and this parent is not a founder identity. Refused
+   *  at the UPLOAD door, before the body is read, so a real family's photo is
+   *  never stored for a generation that would refuse it. */
+  | "not_founder_while_placeholder"
   | "outage";
 
 /**

@@ -314,6 +314,146 @@ describe("mutation check: delete-after-generation", () => {
   });
 });
 
+/**
+ * ⚠⚠ THE PLACEHOLDER SWITCH ⚠⚠
+ *
+ * These assert the ONE property that keeps a picture of a cat out of a real
+ * family's account: the generator is chosen from the FLAG ALONE, and there is no
+ * path — none — from a failed real generation to the placeholder.
+ */
+describe("⚠ the placeholder switch", () => {
+  const KITTEN: NormalizedImageResult = {
+    kind: "generated",
+    bytes: new Uint8Array([0xca, 0x77]),
+    contentType: "image/png",
+    gatewayGenerationId: null,
+    costReportedUsd: null,
+  };
+
+  const withPlaceholder = (
+    h: Harness,
+    opts: { on: boolean; supply?: boolean }
+  ): ReturnType<typeof vi.fn> => {
+    const placeholder = vi.fn(async () => {
+      h.log.push("generatePlaceholder");
+      return KITTEN;
+    });
+    h.deps.isPlaceholderMode = () => opts.on;
+    if (opts.supply !== false) {
+      h.deps.generatePlaceholder =
+        placeholder as unknown as ChildPhotoGenerateDeps["generatePlaceholder"];
+    }
+    return placeholder;
+  };
+
+  it("OFF (the default posture): the MODEL runs and the placeholder is never called", async () => {
+    const h = harness();
+    const placeholder = withPlaceholder(h, { on: false });
+
+    const outcome = await run(h);
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.generatorUsed).toBe("model");
+    expect(h.generate).toHaveBeenCalledTimes(1);
+    expect(placeholder).not.toHaveBeenCalled();
+    // The committed bytes are the MODEL's, not the kitten's.
+    if (!outcome.ok) return;
+    expect(h.store.get(outcome.commit.coverBlobKey)).toEqual(GENERATED.bytes);
+  });
+
+  it("ON: the PLACEHOLDER runs, the model is never dialled, and the kitten commits", async () => {
+    const h = harness();
+    const placeholder = withPlaceholder(h, { on: true });
+
+    const outcome = await run(h);
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.generatorUsed).toBe("placeholder");
+    expect(placeholder).toHaveBeenCalledTimes(1);
+    // ⚠ NO VENDOR WAS DIALLED. Placeholder mode must not also spend money.
+    expect(h.generate).not.toHaveBeenCalled();
+    if (!outcome.ok) return;
+    expect(h.store.get(outcome.commit.coverBlobKey)).toEqual(KITTEN.bytes);
+  });
+
+  it("ON: the kitten travels the SAME path — source photo deleted, new key, confirmed", async () => {
+    const h = harness();
+    withPlaceholder(h, { on: true });
+
+    const outcome = await run(h);
+
+    // The entire point of the placeholder: prove the real path with real bytes.
+    expect(h.store.has(PHOTO_KEY)).toBe(false);
+    if (!outcome.ok) throw new Error("expected success");
+    expect(outcome.sourcePhotoDeleted).toBe(true);
+    expect(outcome.commit.sequence).toBe(2);
+    expect(outcome.commit.coverBlobKey).not.toBe(PREVIOUS_COVER_KEY);
+    expect(outcome.commit.coverBlobKey.startsWith(`fp/v3/children/${CHILD}/`)).toBe(true);
+  });
+
+  it("⚠⚠ NEVER A FALLBACK: an `unconfigured` model does NOT reach for the kitten", async () => {
+    // This is today's REAL production state — FP_COVER_MODEL_ID resolves to
+    // nothing, so every real call answers `unconfigured`. If a fallback existed
+    // anywhere, it would fire on EVERY request in EVERY environment and the
+    // pipeline would look like it worked.
+    const h = harness({ result: { kind: "unconfigured" } });
+    const placeholder = withPlaceholder(h, { on: false });
+
+    const outcome = await run(h);
+
+    expect(outcome).toMatchObject({ ok: false, reason: "generation_failed" });
+    expect(placeholder).not.toHaveBeenCalled();
+    expect(h.log.filter((l) => l.startsWith("put:"))).toEqual([]);
+  });
+
+  it.each([
+    ["a safety block", { kind: "safety_blocked", reason: "person_generation" }],
+    ["a timeout", { kind: "timeout", cause: "adapter_timeout" }],
+    ["a rate limit", { kind: "rate_limited" }],
+    ["a provider error", { kind: "provider_error", detail: "api_error:500" }],
+  ])("⚠ NEVER A FALLBACK: %s does NOT reach for the kitten either", async (_l, result) => {
+    const h = harness({ result: result as NormalizedImageResult });
+    const placeholder = withPlaceholder(h, { on: false });
+
+    expect((await run(h)).ok).toBe(false);
+    expect(placeholder).not.toHaveBeenCalled();
+    expect(h.log.filter((l) => l.startsWith("put:"))).toEqual([]);
+  });
+
+  it("⚠ NEVER THE REVERSE EITHER: a THROWN adapter does not reach for the kitten", async () => {
+    const h = harness({ generateThrows: true });
+    const placeholder = withPlaceholder(h, { on: false });
+    expect((await run(h)).ok).toBe(false);
+    expect(placeholder).not.toHaveBeenCalled();
+  });
+
+  it("ON with NO placeholder supplied REFUSES — it does not quietly dial the model", async () => {
+    const h = harness();
+    withPlaceholder(h, { on: true, supply: false });
+
+    const outcome = await run(h);
+
+    expect(outcome).toMatchObject({ ok: false, reason: "placeholder_unavailable" });
+    // Refused before the photo was even READ, exactly like a closed gate.
+    expect(h.log).toEqual([]);
+    expect(h.generate).not.toHaveBeenCalled();
+    expect(h.store.has(PHOTO_KEY)).toBe(true);
+  });
+
+  it("defaults to the MODEL when no switch is injected and the env is unset", async () => {
+    const h = harness();
+    delete process.env.FP_COVER_PLACEHOLDER_MODE;
+    const placeholder = withPlaceholder(h, { on: false });
+    // Remove the injected switch entirely so the module's own default decides.
+    delete h.deps.isPlaceholderMode;
+
+    const outcome = await run(h);
+
+    expect(outcome.generatorUsed).toBe("model");
+    expect(placeholder).not.toHaveBeenCalled();
+  });
+});
+
 describe("mutation check: atomic cover commit", () => {
   it("a generator that reports success on a FAILED call would be caught", async () => {
     // Sabotage: the classic "stub that returns a picture" the cover-core header

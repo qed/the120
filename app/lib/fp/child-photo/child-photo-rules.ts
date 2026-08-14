@@ -77,6 +77,58 @@ export function isChildPhotoLive(env?: { FP_CHILD_PHOTO_LIVE?: string | undefine
   return raw === "1" || raw === "true";
 }
 
+/* ------------------------------------------ ⚠⚠ THE PLACEHOLDER SWITCH ⚠⚠ */
+
+/**
+ * ⚠⚠ `FP_COVER_PLACEHOLDER_MODE` — THE KITTEN SWITCH. MUST BE OFF IN PROD. ⚠⚠
+ *
+ * When this is on, {@link generateCoverFromPhoto} does NOT call an image model
+ * at all. It calls the hand-drawn PLACEHOLDER KITTEN generator in
+ * ./child-photo-placeholder-generator.ts, and the kitten — an SVG of a cat with
+ * the word PLACEHOLDER drawn into it — is committed as the child's cover,
+ * travelling the exact storage and row-commit path a real generation would.
+ *
+ * ── WHY THIS EXISTS ──
+ * Founder decision, 2026-08-14: ship a WORKING end-to-end pipeline whose
+ * generation output is a placeholder, so the UX can be evaluated before the real
+ * provider is wired. It is needed at all because {@link FP_COVER_MODEL_ID} does
+ * not resolve in the Image Lab registry (see that constant), so every real call
+ * answers `unconfigured` and no cover ever commits — which makes the whole
+ * storage/commit path untestable by hand.
+ *
+ * ── THE THREE RULES THIS SWITCH OBEYS, AND WHY EACH ONE ──
+ *   1. THE DEFAULT IS THE SAFE ONE. Absent env = off, and every value except the
+ *      two allowlisted "on" spellings = off — the same allowlist discipline, for
+ *      the same reason, as {@link isChildPhotoLive}. A placeholder that reaches a
+ *      real family is a picture of a CAT where their child's artwork should be.
+ *   2. IT IS NEVER A FALLBACK. The core selects the generator from THIS FLAG
+ *      ALONE, before it reads anything. It does NOT reach for the kitten when the
+ *      real model answers `unconfigured`, times out, or is safety-blocked. A
+ *      fallback is exactly how a placeholder reaches production: the real model
+ *      is broken far more often than an operator flips a flag, and a
+ *      failure-triggered kitten would look like a working pipeline.
+ *   3. IT IS FOUNDER-ONLY AT THE DOOR. The generation route refuses placeholder
+ *      mode for any identity outside the founder allowlist
+ *      (`FP_SIGNUP_TEST_ALLOWLIST` / `@test.the120.invalid`), and a test fails
+ *      the build if that ever stops being true. That test is the SIGNAL to the
+ *      next engineer: the placeholder must go before public launch.
+ *
+ * ⚠ TO REMOVE THIS (the intended end state): delete this function, delete
+ * ./child-photo-placeholder-generator.ts, delete the `generatePlaceholder` /
+ * `isPlaceholderMode` deps from ChildPhotoGenerateDeps, and delete the
+ * placeholder-audience gate in
+ * app/api/fp/parent/child-photo/generate/generate-door-rules.ts. Everything
+ * placeholder-shaped is greppable by the string `PLACEHOLDER`.
+ */
+export function isCoverPlaceholderMode(env?: {
+  FP_COVER_PLACEHOLDER_MODE?: string | undefined;
+}): boolean {
+  const raw = (env ? env.FP_COVER_PLACEHOLDER_MODE : process.env.FP_COVER_PLACEHOLDER_MODE)
+    ?.trim()
+    .toLowerCase();
+  return raw === "1" || raw === "true";
+}
+
 /* ----------------------------------------------------------- the model id */
 
 /**

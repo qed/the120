@@ -31,6 +31,12 @@ import "server-only";
  *
  *   1. GATE. Fail-closed before anything is read. A dark build must not so much
  *      as open the photo.
+ *   1b. ⚠ CHOOSE THE GENERATOR, from `FP_COVER_PLACEHOLDER_MODE` ALONE. The real
+ *      model, or the hand-drawn PLACEHOLDER KITTEN
+ *      (./child-photo-placeholder-generator.ts). Made here, before anything is
+ *      read, precisely so it cannot be made LATER in response to a failure: there
+ *      is no fallback branch anywhere below, and there must never be one. See
+ *      step 1b in the code for the full argument.
  *   2. READ the stripped source photo. If it is gone, refuse — there is nothing
  *      to delete and nothing to draw from.
  *   3. GENERATE. Exactly one attempt (the adapter's `maxRetries: 0`).
@@ -71,7 +77,11 @@ import {
 } from "@/app/lib/fp/cover-store";
 import type { CoverOwnerScope, CoverStatus } from "@/app/lib/fp/cover-store-rules";
 import type { NormalizedImageResult } from "@/app/staff/image-lab/lib/image-model-rules";
-import { FP_COVER_MODEL_ID, isChildPhotoLive } from "./child-photo-rules";
+import {
+  FP_COVER_MODEL_ID,
+  isChildPhotoLive,
+  isCoverPlaceholderMode,
+} from "./child-photo-rules";
 import { STRIPPED_PHOTO_CONTENT_TYPE } from "./photo-strip";
 
 /* ------------------------------------------------------------------- deps */
@@ -100,9 +110,24 @@ export type ChildPhotoGenerateDeps = {
    * delete-after-generation invariant has a single seam to break.
    */
   deleteSourcePhoto: (key: string) => Promise<void>;
+  /** THE REAL ONE. The model. Dialled unless the placeholder switch is on. */
   generate: CoverImageGenerator;
+  /**
+   * ⚠⚠ THE PLACEHOLDER GENERATOR. The hand-drawn kitten
+   * (./child-photo-placeholder-generator.ts), supplied by a caller that has
+   * decided to run in placeholder mode.
+   *
+   * SEPARATE FIELD, NOT A SUBSTITUTED `generate`, on purpose: the field name is
+   * the audit trail. `grep generatePlaceholder` finds every caller that can
+   * possibly produce a kitten, which a caller that quietly passed the kitten as
+   * `generate` would hide completely.
+   */
+  generatePlaceholder?: CoverImageGenerator;
   /** Overridable so no test touches process.env. */
   isLive?: () => boolean;
+  /** ⚠ THE PLACEHOLDER SWITCH, overridable for the same reason as `isLive`.
+   *  Defaults to `FP_COVER_PLACEHOLDER_MODE` — off unless explicitly on. */
+  isPlaceholderMode?: () => boolean;
   /** The registry key to dial. Defaults to {@link FP_COVER_MODEL_ID}; a
    *  parameter only so a test can prove the id reaches the adapter. */
   modelId?: string;
@@ -116,6 +141,11 @@ export type CoverGenerateRefusal =
   /** The stripped source photo is not in the store (reaped, erased, or never
    *  written). Nothing was dialled. */
   | "photo_missing"
+  /** ⚠ PLACEHOLDER MODE IS ON AND NO PLACEHOLDER GENERATOR WAS SUPPLIED. A
+   *  MISCONFIGURATION, REFUSED — never quietly satisfied by dialling the real
+   *  model instead. Decided before the photo is read, so nothing was read,
+   *  dialled or deleted. See {@link ChildPhotoGenerateDeps.generatePlaceholder}. */
+  | "placeholder_unavailable"
   /** The model answered with no usable image: a safety block, a timeout, a rate
    *  limit, a provider error, or an unresolvable model id. The `detail` carries
    *  the adapter's NORMALIZED kind and nothing from the vendor's prose — vendor
@@ -140,6 +170,14 @@ export type CoverCommit = {
   byteSize: number;
 };
 
+/**
+ * WHICH GENERATOR ACTUALLY RAN. Reported on every outcome so the caller can log
+ * it, the door can refuse on it, and a test can assert the SELECTION rather than
+ * inferring it from the bytes. `"placeholder"` means the committed cover is a
+ * picture of a cat.
+ */
+export type CoverGeneratorUsed = "model" | "placeholder" | "none";
+
 export type CoverGenerateResult =
   | {
       ok: true;
@@ -147,11 +185,13 @@ export type CoverGenerateResult =
       /** False means the object survives and must be treated as STRANDED —
        *  a minor's photograph we failed to delete. Never silently true. */
       sourcePhotoDeleted: boolean;
+      generatorUsed: CoverGeneratorUsed;
     }
   | {
       ok: false;
       reason: CoverGenerateRefusal;
       detail: string;
+      generatorUsed: CoverGeneratorUsed;
       /** Same meaning as on the success branch. `false` on `gate_closed` and
        *  `photo_missing` is not a stranding — nothing was attempted, and the
        *  photo (if any) stays in the reaper's and the eraser's scope. */
@@ -187,6 +227,37 @@ export async function generateCoverFromPhoto(
       reason: "gate_closed",
       detail: "FP_CHILD_PHOTO_LIVE is not on",
       sourcePhotoDeleted: false,
+      generatorUsed: "none",
+    };
+  }
+
+  // ── 1b. ⚠⚠ CHOOSE THE GENERATOR. FROM THE SWITCH ALONE, AND HERE. ⚠⚠
+  //
+  // Placed BEFORE the read for two reasons. First, a misconfiguration must cost
+  // a minor's photograph nothing: refusing here reads nothing and deletes
+  // nothing, exactly like a closed gate. Second, and more important, the choice
+  // is made where NO OUTCOME IS KNOWN YET. There is deliberately no branch
+  // further down that could reach for the placeholder because the real model
+  // answered `unconfigured`, timed out, or was safety-blocked.
+  //
+  // ⚠ THAT ABSENCE IS THE WHOLE DESIGN. `FP_COVER_MODEL_ID` does not resolve
+  // today, so a failure-triggered fallback would fire on EVERY request, in every
+  // environment, and the pipeline would look like it worked. A placeholder
+  // reaches production through a fallback, not through a flag.
+  const usePlaceholder = (deps.isPlaceholderMode ?? (() => isCoverPlaceholderMode()))();
+  const generator = usePlaceholder ? deps.generatePlaceholder : deps.generate;
+  const generatorUsed: CoverGeneratorUsed = usePlaceholder ? "placeholder" : "model";
+  if (!generator) {
+    // Placeholder mode with no placeholder supplied. REFUSE. Falling through to
+    // `deps.generate` here would send a real child's face to a vendor because a
+    // caller forgot to wire a stub, which is the failure this branch exists to
+    // make impossible.
+    return {
+      ok: false,
+      reason: "placeholder_unavailable",
+      detail: "FP_COVER_PLACEHOLDER_MODE is on but no placeholder generator was supplied",
+      sourcePhotoDeleted: false,
+      generatorUsed,
     };
   }
 
@@ -198,6 +269,7 @@ export async function generateCoverFromPhoto(
       reason: "photo_missing",
       detail: "the stripped source photo could not be read",
       sourcePhotoDeleted: false,
+      generatorUsed,
     };
   }
 
@@ -206,7 +278,7 @@ export async function generateCoverFromPhoto(
   //    future adapter that breaks that contract cannot skip step 4.
   let generated: NormalizedImageResult;
   try {
-    generated = await deps.generate({
+    generated = await generator({
       modelId: deps.modelId ?? FP_COVER_MODEL_ID,
       prompt: input.prompt,
       referenceImages: [{ bytes: photoBytes, contentType: STRIPPED_PHOTO_CONTENT_TYPE }],
@@ -221,6 +293,7 @@ export async function generateCoverFromPhoto(
       // is still not repeated: a vendor exception routinely quotes the prompt.
       detail: `the image adapter threw (${err instanceof Error ? err.name : "unknown"})`,
       sourcePhotoDeleted,
+      generatorUsed,
     };
   }
 
@@ -237,6 +310,7 @@ export async function generateCoverFromPhoto(
       // and `provider_error` a closed-set detail; neither is vendor prose.
       detail: `model returned ${generated.kind}`,
       sourcePhotoDeleted,
+      generatorUsed,
     };
   }
 
@@ -265,15 +339,23 @@ export async function generateCoverFromPhoto(
       reason: "commit_failed",
       detail: `cover object write failed (${err instanceof Error ? err.name : "unknown"})`,
       sourcePhotoDeleted,
+      generatorUsed,
     };
   }
   if (!put.ok) {
-    return { ok: false, reason: "commit_failed", detail: put.detail, sourcePhotoDeleted };
+    return {
+      ok: false,
+      reason: "commit_failed",
+      detail: put.detail,
+      sourcePhotoDeleted,
+      generatorUsed,
+    };
   }
 
   return {
     ok: true,
     sourcePhotoDeleted,
+    generatorUsed,
     commit: {
       scope: input.scope,
       ownerId: input.ownerId,

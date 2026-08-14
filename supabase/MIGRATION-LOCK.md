@@ -19,21 +19,27 @@ not a source of truth — the ledger is.**
 
 | Version | Name | State |
 |---|---|---|
+| `20260926120000` | `fp_child_photo` | **applied 2026-08-14**, registered in the ledger, all four post-apply checks green |
 | `20260925120000` | `artie_review_decisions` | **applied 2026-08-13**, registered in the ledger |
 | `20260924120000` | (null) | applied |
 | `20260923120000` | (null) | applied |
 | `20260922120000` | `fp_save_doc_guard_story_fields` | applied |
 
-**Current holder: the fpv04 U7a child-photo lane** (`120-The120` on
-`wip/u7a-photo-pipeline`). It has AUTHORED but NOT APPLIED
-`20260926120000_fp_child_photo` (private `fp-child-media` bucket +
-`children.fp_photo_blob_key`). Taken 2026-08-14.
+**Current holder: NOBODY. The fpv04 U7a child-photo lane released it on
+2026-08-14** after applying `20260926120000_fp_child_photo` (private
+`fp-child-media` bucket + `children.fp_photo_blob_key`) via the Management API
+playbook. The ledger was re-queried immediately before applying (top was
+`20260925120000`, as assumed), the version was registered, `notify pgrst` was
+issued, and all four of the file's own post-apply checks pass: bucket
+private/8MB/three mime types; the ONLY `storage.objects` policy is ANDed to
+`bucket_id = 'path-evidence'`, so nothing authorizes a read of this bucket;
+column `text`, nullable; no new grant.
 
-⚠ THE SLOT WAS RENUMBERED. It was first authored as `20260925120000`, which
-collided with the already-applied `artie_review_decisions`; the repo's
-migration-version tripwire test caught it. Re-query the ledger immediately
-before applying — if the Artie lane's expected `ai_generation_runs` has landed
-since, this file needs renumbering again.
+⚠ THE SLOT WAS RENUMBERED before applying. It was first authored as
+`20260925120000`, which collided with the already-applied
+`artie_review_decisions`; the repo's migration-version tripwire test caught it.
+The next lane must re-query the ledger the same way — the Artie lane's expected
+`ai_generation_runs` is still unauthored and could take the next slot.
 
 The Artie lockdown lane
 (`first-profit` on `artie/lockdown`, worktree `fp-artie`) authored and applied

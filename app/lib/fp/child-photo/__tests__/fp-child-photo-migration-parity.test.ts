@@ -116,11 +116,17 @@ describe("migration parity: fp_child_photo.sql", () => {
 
   // ------------------------------------------------------------ header ritual
 
-  it("the header carries the version ritual and the apply playbook", () => {
-    expect(raw).toMatch(/AUTHORED, NOT YET APPLIED/i);
+  it("the header records the apply, and says the file is frozen", () => {
+    // Flipped 2026-08-14, when the migration was actually applied. Before that
+    // this asserted "AUTHORED, NOT YET APPLIED". The header of an applied
+    // migration must say so, because the repo's amendment convention allows
+    // in-place edits ONLY while a file has never run — a stale "not yet
+    // applied" banner is an active invitation to edit production history.
+    expect(raw).toMatch(/APPLIED TO PRODUCTION/i);
+    expect(raw).toMatch(/FROZEN/i);
+    expect(raw).not.toMatch(/AUTHORED, NOT YET APPLIED/i);
     expect(raw).toMatch(/schema_migrations/);
     expect(raw).toMatch(/Management API/i);
-    expect(raw).toMatch(/RENAME this file/i);
   });
 
   it("the header states what actually lives in the bucket, in plain words", () => {

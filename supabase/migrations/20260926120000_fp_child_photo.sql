@@ -9,7 +9,13 @@
 --   (resolves this file by GLOB and parses it as text).
 -- Key scheme: app/lib/fp/cover-store-rules.ts (blobKey / blobPrefix), unchanged.
 --
--- ⚠ VERSION — AUTHORED, NOT YET APPLIED, AND NOT TO BE APPLIED BY THIS BRANCH.
+-- ⚠ VERSION — APPLIED TO PRODUCTION 2026-08-14 via the Management API playbook,
+--   registered in supabase_migrations.schema_migrations, `notify pgrst` issued,
+--   and all four post-apply checks below verified green. THE FILE IS NOW FROZEN:
+--   the in-place amendment allowance above expired at that moment; any change
+--   stacks as a NEW migration.
+--
+--   (Historical, kept because it is the reason for the slot number.)
 --   This slot (20260926120000) assumes the live top of
 --   supabase_migrations.schema_migrations is 20260925120000
 --   (artie_review_decisions, applied 2026-08-13 per MIGRATION-LOCK.md).
@@ -31,7 +37,7 @@
 -- AMENDMENT LOG (in-place amendments are allowed ONLY while this file is
 --   branch-only / never applied — the 20260907 convention; once applied,
 --   changes stack as a new migration):
---   * (none yet — initial authoring.)
+--   * (none — applied unamended 2026-08-14.)
 --
 -- ⚠ WHAT LIVES IN THIS BUCKET, STATED PLAINLY: A PHOTOGRAPH OF A CHILD.
 --   Not "user content", not "an image asset". Everything below — the private

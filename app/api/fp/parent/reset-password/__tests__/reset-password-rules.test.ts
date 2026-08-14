@@ -62,13 +62,13 @@ describe("shapeParentResetRefusal — one voice", () => {
 
 describe("parseParentResetRequest — childId, and nothing else", () => {
   it("accepts exactly {childId}", () => {
-    expect(parseParentResetRequest({ childId: "c-1" })).toEqual({ ok: true, childId: "c-1" });
+    expect(parseParentResetRequest({ childId: "ccccccc1-0000-4000-8000-000000000001" })).toEqual({ ok: true, childId: "ccccccc1-0000-4000-8000-000000000001" });
   });
 
   it("REFUSES a caller-supplied password rather than ignoring it", () => {
     // The strictness is the point: this door MINTS. A caller that believes it
     // set a password must never be told "ok" while the server used its own.
-    expect(parseParentResetRequest({ childId: "c-1", password: "hunter2-hunter2" })).toEqual({
+    expect(parseParentResetRequest({ childId: "ccccccc1-0000-4000-8000-000000000001", password: "hunter2-hunter2" })).toEqual({
       ok: false,
     });
   });
@@ -77,7 +77,7 @@ describe("parseParentResetRequest — childId, and nothing else", () => {
     for (const body of [
       {},
       null,
-      "c-1",
+      "ccccccc1-0000-4000-8000-000000000001",
       { childId: "" },
       { childId: 7 },
       { childId: "x".repeat(101) },
@@ -86,10 +86,17 @@ describe("parseParentResetRequest — childId, and nothing else", () => {
     }
   });
 
-  it("accepts the longest childId the CORE accepts — the two bounds agree", () => {
-    // A body this schema takes must never be one the core then calls
-    // bad_request on for length.
-    expect(parseParentResetRequest({ childId: "x".repeat(100) }).ok).toBe(true);
+  it("⚠ REFUSES a childId that is not a UUID, so it can never reach a cast error", () => {
+    // fpv04 U8b review (SEC-1). `children.id` is a uuid column: a non-UUID does
+    // not miss the row, it makes PostgREST answer 22P02, which this door reads
+    // as an OUTAGE — and an outage REFUNDS both rate-limit strikes. A caller
+    // could loop a malformed id forever without ever filling the bucket.
+    for (const bad of ["x".repeat(100), "c-a1", "", "not-a-uuid", "../../etc"]) {
+      expect(parseParentResetRequest({ childId: bad }).ok, bad).toBe(false);
+    }
+    expect(parseParentResetRequest({ childId: "aaaaaaa1-0000-4000-8000-000000000001" }).ok).toBe(
+      true
+    );
   });
 });
 

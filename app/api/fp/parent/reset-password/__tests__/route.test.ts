@@ -139,17 +139,17 @@ function seed(): void {
       { id: PARENT_B, email: "b@example.com", first_name: "Sam" },
     ],
     children: [
-      { id: "c-a1", parent_id: PARENT_A, first_name: "Alex", last_name: "Ng", fp_username: "alex" },
+      { id: "aaaaaaa1-0000-4000-8000-000000000001", parent_id: PARENT_A, first_name: "Alex", last_name: "Ng", fp_username: "alex" },
       // Enrolled, but no path_student_profiles row → the core's no_fp_account.
-      { id: "c-a2", parent_id: PARENT_A, first_name: "Eve", last_name: "Ng", fp_username: "eve" },
+      { id: "aaaaaaa1-0000-4000-8000-000000000002", parent_id: PARENT_A, first_name: "Eve", last_name: "Ng", fp_username: "eve" },
       // Never provisioned into FP → invisible to the core's WHERE clause.
-      { id: "c-a3", parent_id: PARENT_A, first_name: "Ivy", last_name: "Ng", fp_username: null },
+      { id: "aaaaaaa1-0000-4000-8000-000000000003", parent_id: PARENT_A, first_name: "Ivy", last_name: "Ng", fp_username: null },
       // ⚠ ANOTHER FAMILY'S CHILD. Parent A must never move this password.
-      { id: "c-b1", parent_id: PARENT_B, first_name: "Bo", last_name: "Diaz", fp_username: "bo" },
+      { id: "bbbbbbb1-0000-4000-8000-000000000001", parent_id: PARENT_B, first_name: "Bo", last_name: "Diaz", fp_username: "bo" },
     ],
     path_student_profiles: [
-      { child_id: "c-a1", user_id: "u-a1" },
-      { child_id: "c-b1", user_id: "u-b1" },
+      { child_id: "aaaaaaa1-0000-4000-8000-000000000001", user_id: "u-a1" },
+      { child_id: "bbbbbbb1-0000-4000-8000-000000000001", user_id: "u-b1" },
     ],
   } as Store;
 }
@@ -169,7 +169,7 @@ const requestFor = (opts?: {
   return new Request("http://localhost/api/fp/parent/reset-password", {
     method: "POST",
     headers,
-    body: opts?.rawBody ?? JSON.stringify(opts?.body ?? { childId: "c-a1" }),
+    body: opts?.rawBody ?? JSON.stringify(opts?.body ?? { childId: "aaaaaaa1-0000-4000-8000-000000000001" }),
   });
 };
 
@@ -235,7 +235,7 @@ describe("POST /api/fp/parent/reset-password — the parent's one-time kid reset
 
       expect(Object.keys(body)).toEqual([...PARENT_RESET_BODY_KEYS]);
       expect(body.ok).toBe(true);
-      expect(body.childId).toBe("c-a1");
+      expect(body.childId).toBe("aaaaaaa1-0000-4000-8000-000000000001");
       expect(body.fpUsername).toBe("alex");
       expect(FP_MEMORABLE_PASSWORD_PATTERN.test(body.password)).toBe(true);
 
@@ -270,7 +270,7 @@ describe("POST /api/fp/parent/reset-password — the parent's one-time kid reset
       expect(output.includes(jwtFor(PARENT_A))).toBe(false);
       // The audit breadcrumb IS there: who reset whose password.
       expect(output.includes(PARENT_A)).toBe(true);
-      expect(output.includes("c-a1")).toBe(true);
+      expect(output.includes("aaaaaaa1-0000-4000-8000-000000000001")).toBe(true);
     });
 
     it("re-rolls when the mint collides with the child's own name", async () => {
@@ -278,7 +278,7 @@ describe("POST /api/fp/parent/reset-password — the parent's one-time kid reset
       // name, read from the row it just authorized. A forced colliding mint
       // must exhaust the bounded re-roll rather than set a guessable password.
       store.value.children = [
-        { id: "c-a1", parent_id: PARENT_A, first_name: "Maple", last_name: "Ng", fp_username: "alex" },
+        { id: "aaaaaaa1-0000-4000-8000-000000000001", parent_id: PARENT_A, first_name: "Maple", last_name: "Ng", fp_username: "alex" },
       ];
       mintRef.forced = "maple-lantern-42";
       const res = await post();
@@ -296,7 +296,7 @@ describe("POST /api/fp/parent/reset-password — the parent's one-time kid reset
       // does not — the parent must simply get a working password, with no hint
       // that anything was re-rolled.
       store.value.children = [
-        { id: "c-a1", parent_id: PARENT_A, first_name: "Maple", last_name: "Ng", fp_username: "alex" },
+        { id: "aaaaaaa1-0000-4000-8000-000000000001", parent_id: PARENT_A, first_name: "Maple", last_name: "Ng", fp_username: "alex" },
       ];
       mintRef.queue = ["maple-lantern-42", "brave-otter-42"];
       const res = await post();
@@ -312,7 +312,7 @@ describe("POST /api/fp/parent/reset-password — the parent's one-time kid reset
 
   describe("cross-parent isolation — the whole point of taking a childId", () => {
     it("parent A cannot reset parent B's child, and NOTHING is written", async () => {
-      const res = await post({ body: { childId: "c-b1" } });
+      const res = await post({ body: { childId: "bbbbbbb1-0000-4000-8000-000000000001" } });
       expect(res.status).toBe(401);
       expect(await res.text()).toBe(PARENT_RESET_REFUSAL_BODY);
       // THE assertion this route exists to keep true: the other family's auth
@@ -328,9 +328,9 @@ describe("POST /api/fp/parent/reset-password — the parent's one-time kid reset
       // Asserted against the QUERY, not the response: the reads run with the
       // SERVICE ROLE, so this `.eq` is the entire authorization for another
       // family's data, and a response assertion cannot see it.
-      await post({ body: { childId: "c-b1" } });
+      await post({ body: { childId: "bbbbbbb1-0000-4000-8000-000000000001" } });
       const q = coreChildQuery()!;
-      expect(q.filters).toContainEqual({ op: "eq", col: "id", value: "c-b1" });
+      expect(q.filters).toContainEqual({ op: "eq", col: "id", value: "bbbbbbb1-0000-4000-8000-000000000001" });
       expect(q.filters).toContainEqual({ op: "eq", col: "parent_id", value: PARENT_A });
     });
 
@@ -338,7 +338,7 @@ describe("POST /api/fp/parent/reset-password — the parent's one-time kid reset
       // A forged/stale `sub` claiming to be parent B while getUser() resolves
       // parent A must still be scoped to parent A: the sub is a rate-limit
       // bucket segment only.
-      const res = await post({ token: jwtFor(PARENT_B), body: { childId: "c-b1" } });
+      const res = await post({ token: jwtFor(PARENT_B), body: { childId: "bbbbbbb1-0000-4000-8000-000000000001" } });
       expect(res.status).toBe(401);
       expect(coreChildQuery()!.filters).toContainEqual({
         op: "eq",
@@ -354,21 +354,21 @@ describe("POST /api/fp/parent/reset-password — the parent's one-time kid reset
       tokenRef.getUser = vi
         .fn()
         .mockResolvedValue(sessionUser(PARENT_B)) as unknown as GetUserFn;
-      const res = await post({ token: jwtFor(PARENT_B), body: { childId: "c-b1" } });
+      const res = await post({ token: jwtFor(PARENT_B), body: { childId: "bbbbbbb1-0000-4000-8000-000000000001" } });
       expect(res.status).toBe(200);
       expect(((await res.json()) as Body).fpUsername).toBe("bo");
       expect(authRef.calls.map((c) => c.userId)).toEqual(["u-b1"]);
     });
 
     it("a child with no FP account is the SAME refusal as a foreign child", async () => {
-      const res = await post({ body: { childId: "c-a2" } });
+      const res = await post({ body: { childId: "aaaaaaa1-0000-4000-8000-000000000002" } });
       expect(res.status).toBe(401);
       expect(await res.text()).toBe(PARENT_RESET_REFUSAL_BODY);
       expect(authRef.calls).toEqual([]);
     });
 
     it("a child never provisioned into FP is refused too", async () => {
-      const res = await post({ body: { childId: "c-a3" } });
+      const res = await post({ body: { childId: "aaaaaaa1-0000-4000-8000-000000000003" } });
       expect(res.status).toBe(401);
       expect(authRef.calls).toEqual([]);
     });
@@ -420,7 +420,7 @@ describe("POST /api/fp/parent/reset-password — the parent's one-time kid reset
         { body: { childId: 7 } },
         // ⚠ This door MINTS. A caller-supplied password is a malformed request,
         // never a silently ignored field.
-        { body: { childId: "c-a1", password: "chosen-by-the-parent" } },
+        { body: { childId: "aaaaaaa1-0000-4000-8000-000000000001", password: "chosen-by-the-parent" } },
       ];
       for (const opts of bodies) {
         authRef.calls = [];
@@ -464,8 +464,8 @@ describe("POST /api/fp/parent/reset-password — the parent's one-time kid reset
       snapshots.missing_token = await snapshotOf(await post({ token: null }));
       snapshots.invalid_sub = await snapshotOf(await post({ token: "garbage" }));
       snapshots.malformed = await snapshotOf(await post({ body: { nope: 1 } }));
-      snapshots.not_owned = await snapshotOf(await post({ body: { childId: "c-b1" } }));
-      snapshots.no_fp_account = await snapshotOf(await post({ body: { childId: "c-a2" } }));
+      snapshots.not_owned = await snapshotOf(await post({ body: { childId: "bbbbbbb1-0000-4000-8000-000000000001" } }));
+      snapshots.no_fp_account = await snapshotOf(await post({ body: { childId: "aaaaaaa1-0000-4000-8000-000000000002" } }));
 
       tokenRef.getUser = vi
         .fn()

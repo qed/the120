@@ -69,6 +69,8 @@ import {
   encodeRateLimitSegment,
   type RateLimitConfig,
 } from "@/app/lib/fp/rate-limit-rules";
+import { ageBandFromGrade, resolveChildGrade } from "../../grade/grade-rules";
+import type { ChildAgeBand } from "../../signup/signup-rules";
 
 /* --------------------------------------------------------- refusal shaping */
 
@@ -125,6 +127,12 @@ export const PARENT_ROSTER_CHILD_KEYS = [
   "docUnreadable",
   "ideas",
   "businesses",
+  // ── fpv04 U8b: the three facts the SPA's parent dashboard needs in order to
+  // offer PHOTO PERMISSION and TAKE THE PAGE OFFLINE. APPENDED, never
+  // interleaved — field order is observable output.
+  "ageBand",
+  "photoConsentOpen",
+  "site",
 ] as const;
 
 export function shapeParentRosterRefusal(
@@ -240,15 +248,30 @@ export const PARENT_ROSTER_MAX_RESPONSE_BYTES = 4_000_000;
 /* -------------------------------------------------------------- row inputs */
 
 /**
- * Only the four columns the shape actually reads. No `birth_year`, no `grade`,
- * no `photo`: this endpoint has no business reading a child's date of birth or
- * photo under the service role for a column nothing on the wire consumes.
+ * Only the columns the shape actually reads. No `photo`, no `email`, no
+ * `applicant_state`: this endpoint has no business reading a column nothing on
+ * the wire consumes.
+ *
+ * ⚠ `birth_year` / `grade` WERE on that never-read list, and are here now
+ * (fpv04 U8b) for exactly one reason: `ageBand`. The photo-consent GRANT door
+ * writes `fp_parental_consent.child_age_band`, a NOT NULL column of a legal
+ * evidence record, and the First Profit SPA holds no age for a child anywhere —
+ * so it would have to INVENT one, which on an evidence record is the wrong
+ * thing. The band is derived server-side here and NEITHER RAW COLUMN GOES ON
+ * THE WIRE: a coarse three-value band is what the affordance needs, and a birth
+ * year is not.
  */
 export type RosterChildRowLike = {
   id: string;
   first_name?: unknown;
   last_name?: unknown;
   fp_username?: unknown;
+  /** Text column; `''` is the unset sentinel. Consumed ONLY by
+   *  `resolveChildGrade` → `ageBandFromGrade`, never serialized. */
+  birth_year?: unknown;
+  /** The stored fallback when no birth year exists. Same rule: never
+   *  serialized. */
+  grade?: unknown;
 };
 
 /** Re-exported so the route (and its tests) import ONE vocabulary. Identical to
@@ -294,6 +317,76 @@ export type ParentRosterChild = {
   docUnreadable: boolean;
   ideas: WalkedIdea[];
   businesses: WalkedBusiness[];
+  /**
+   * The consent age band this child's record would be written with, derived
+   * server-side from `birth_year`/`grade` (see `RosterChildRowLike`). `null`
+   * when NO age signal exists — the SPA then offers no grant affordance rather
+   * than guessing a band onto a legal evidence record.
+   */
+  ageBand: ChildAgeBand | null;
+  /**
+   * Is photo/cover permission currently OPEN for this child?
+   *
+   * ⚠ `null` IS NOT "CLOSED". It means the consent read FAILED, and the SPA
+   * must then render NEITHER affordance — offering "give permission" to a
+   * family who already consented, or "withdraw" to one who never did, are both
+   * worse than offering nothing until the next load. Same three-state contract
+   * the120's own `photoAffordance` consumes.
+   */
+  photoConsentOpen: boolean | null;
+  /**
+   * This child's public First Profit page. `null` means the SITE READ FAILED —
+   * again not "no page": the SPA renders no take-offline control on null. A
+   * SUCCESSFUL read for a child with no page answers
+   * `{handle: null, published: false}`.
+   *
+   * `published` is the DERIVED truth (`deriveSiteStatus` === "published"), not
+   * the raw column: an operator lock keeps a page offline whatever `published`
+   * says, and this field must mean "a stranger can see it".
+   */
+  site: ParentRosterSite | null;
+};
+
+/**
+ * The public page as the parent client receives it.
+ *
+ * ⚠ `locked` IS NOT REDUNDANT WITH `published`. The status ladder deliberately
+ * folds an OPERATOR takedown and a PARENT takedown into the same `offline`,
+ * and the parent is allowed to know which — because only one of them is theirs
+ * to undo. Without this field a locked page reads as "offline", the client
+ * offers "put it back online", the write succeeds, and NOTHING CHANGES,
+ * because the lock wins. the120's own UI refuses that button for exactly this
+ * reason; the field is what lets a second surface refuse it too.
+ *
+ * ⚠ `handle === null` MEANS THERE IS NO PAGE AT ALL, and is a real answer
+ * (distinct from the whole field being null, which means the read failed).
+ * A client must gate its controls on the handle: offering "put their page
+ * back online" to a child who has never had one earns a refusal the parent
+ * cannot act on.
+ */
+export type ParentRosterSite = {
+  handle: string | null;
+  published: boolean;
+  locked: boolean;
+};
+
+/**
+ * The two side facts, each nullable on its own (fpv04 U8b).
+ *
+ * ⚠ NULL MEANS "THE READ FAILED", AND IT MUST NOT COLLAPSE INTO A NEGATIVE.
+ * "we could not find out whether this parent gave photo permission" and "this
+ * parent did not give photo permission" are different sentences, and only one
+ * of them may put a withdraw button on a screen. Keeping them separate here is
+ * why a site-table outage degrades ONE FIELD instead of failing the roster: a
+ * parent must still see their kids' progress when the site table is down.
+ */
+export type RosterExtras = {
+  /** Child ids with photo permission currently OPEN, or null if the read
+   *  failed. Membership is only meaningful when the set exists. */
+  consentOpen?: ReadonlySet<string> | null;
+  /** child id → their public page, or null if the read failed. A present map
+   *  MISSING a child means that child has no page. */
+  sitesByChildId?: ReadonlyMap<string, ParentRosterSite> | null;
 };
 
 /* ------------------------------------------------------------ row shaping */
@@ -327,7 +420,17 @@ export function shapeParentRoster(
   /** Optional collector for operator-facing notes about abnormal docs, keyed by
    *  `profile_id` (never the username — R3). APPENDED to, never read, so this
    *  function stays pure; the route owns whether any of it is worth a log line. */
-  walkNotes?: RosterWalkNote[]
+  walkNotes?: RosterWalkNote[],
+  /**
+   * The two SIDE FACTS (fpv04 U8b), each independently nullable because each
+   * comes from a read that may fail on its own. OMITTING this argument means
+   * BOTH failed, which is the fail-closed default: a caller that forgets it
+   * gets "render neither affordance", never a confident wrong answer.
+   *
+   * ⚠ THEY ARE HANDED IN, NOT FETCHED. This function shapes; the route reads.
+   * Same rule as the parent scoping — see the ⚠ above.
+   */
+  extras?: RosterExtras
 ): ParentRosterChild[] {
   // First row wins on duplicates: the schema is one profile per child
   // (child_id unique) and one save per profile (profile_id PK), so this is
@@ -363,6 +466,23 @@ export function shapeParentRoster(
       docUnreadable: walked.docUnreadable,
       ideas: walked.ideas,
       businesses: walked.businesses,
+      // Derived at READ TIME from birth_year, falling back to the stored grade
+      // (R9: the value never goes stale across school years) — the SAME
+      // `resolveChildGrade` the login and handoff doors use.
+      // The SAME derivation the consent door writes with — the stored grade
+      // alone, never `birth_year` (which the CHILD can set through
+      // /api/fp/grade). This field decides whether a client OFFERS the grant,
+      // so if it disagreed with what the door would record, the offer would be
+      // made on one basis and the evidence written on another.
+      ageBand: ageBandFromGrade(typeof child.grade === "number" ? child.grade : null),
+      // Membership answers only when the SET EXISTS. A null read is null per
+      // child — never silently demoted to `false`.
+      photoConsentOpen: extras?.consentOpen ? extras.consentOpen.has(child.id) : null,
+      // Likewise: a null sites map is a failed read; a present map that simply
+      // lacks this child means the child has no page, which is a real answer.
+      site: extras?.sitesByChildId
+        ? extras.sitesByChildId.get(child.id) ?? { handle: null, published: false, locked: false }
+        : null,
     });
   }
   return out;

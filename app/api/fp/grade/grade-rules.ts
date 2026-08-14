@@ -66,6 +66,7 @@ import {
   encodeRateLimitSegment,
   type RateLimitConfig,
 } from "@/app/lib/fp/rate-limit-rules";
+import type { ChildAgeBand } from "@/app/api/fp/signup/signup-rules";
 
 /* ------------------------------------------------- school-year derivation */
 
@@ -110,6 +111,49 @@ export function resolveChildGrade(
   }
   return null;
 }
+
+/* -------------------------------------------------- the consent AGE BAND */
+
+/**
+ * The `fp_parental_consent.child_age_band` value implied by a resolved grade —
+ * or `null` when there is NO age signal at all (fpv04 U8b).
+ *
+ * ── WHY IT LIVES HERE AND NOT BESIDE ITS WRITERS ──
+ * `app/dashboard/KidCredentials.tsx`'s `ageBandFor` warns, in as many words,
+ * that a SECOND writer of this NOT NULL column of this legal-evidence table
+ * must agree with it "for EVERY grade — not roughly, exactly", or the band on a
+ * child's record depends on which screen the parent happened to consent from.
+ * The cross-origin `/api/fp/parent/photo-consent` door IS that second writer, so
+ * the arithmetic moved to this module — the one that already owns "what grade is
+ * this child in" — and both writers derive from it. The equality is pinned by a
+ * cross-importing test (app/api/fp/parent/photo-consent/__tests__).
+ *
+ * ── null IS NOT A BAND, AND THE TWO CALLERS TREAT IT DIFFERENTLY ON PURPOSE ──
+ * A missing grade means we do not know how old this child is:
+ *   - a READER (the roster door's `ageBand`) reports `null`, so the SPA can
+ *     decline to offer a consent affordance it cannot honestly label;
+ *   - a WRITER falls back to `under_13`, the band with the STRICTEST
+ *     obligations, because over-protecting a 16-year-old costs nothing and
+ *     under-protecting a 10-year-old is a compliance failure. That fallback is
+ *     `AGE_BAND_WHEN_UNKNOWN` below — named, so neither writer invents its own.
+ *
+ * `Number.isFinite`, NOT `typeof === "number"` (review 2026-08-10, P2-e): `NaN`
+ * is a number, and `NaN + 5 < 13` is false and `NaN <= 15` is false, so the
+ * naive check fell through to `16_plus` — the LEAST protective band — for the
+ * one input that means "we do not know".
+ */
+export function ageBandFromGrade(grade: number | null | undefined): ChildAgeBand | null {
+  if (typeof grade !== "number" || !Number.isFinite(grade)) return null;
+  // Canadian grade → typical age is grade + 5.
+  const age = grade + 5;
+  if (age < 13) return "under_13";
+  if (age <= 15) return "13_to_15";
+  return "16_plus";
+}
+
+/** The band a WRITER records when no age signal exists — the most protective
+ *  one. See `ageBandFromGrade`'s docblock for why readers answer null instead. */
+export const AGE_BAND_WHEN_UNKNOWN: ChildAgeBand = "under_13";
 
 /* ----------------------------------------------------------- request parse */
 

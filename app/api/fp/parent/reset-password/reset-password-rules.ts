@@ -59,7 +59,23 @@ import {
  * bound, so a body this schema accepts can never be one the core then calls
  * `bad_request` on for length.
  */
-const resetPasswordSchema = z.object({ childId: z.string().min(1).max(100) }).strict();
+/**
+ * ⚠ A UUID, NOT "a non-empty string" (fpv04 U8b review, SEC-1).
+ *
+ * `children.id` is a `uuid` column, so a non-UUID does not miss the row — it
+ * makes PostgREST answer 22P02 (invalid input syntax), which every site here
+ * reads as OUR failure: the outcome is `outage`, and `outage` REFUNDS both
+ * rate-limit strikes. A caller could therefore loop `{"childId":"x"}` forever,
+ * paying a token verification and a service-role round trip each time while
+ * the budget never fills — the documented volume control on the doors that
+ * move a child's password, photo permission and public visibility, bypassed by
+ * a malformed field.
+ *
+ * Refusing it at the schema makes it `malformed_request` instead: the strike
+ * stands, and no DB round trip happens at all.
+ */
+const UUID_CHILD_ID = z.string().uuid();
+const resetPasswordSchema = z.object({ childId: UUID_CHILD_ID }).strict();
 
 export type ParsedParentResetRequest = { ok: true; childId: string } | { ok: false };
 

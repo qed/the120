@@ -36,10 +36,7 @@ import "server-only";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { VERIFIED_TASK_STATE } from "@/app/lib/fp/progress-core";
-import {
-  photoConsentVerdict,
-  type PhotoConsentRow,
-} from "@/app/api/fp/signup/consent-rules";
+import { loadPhotoConsentOpenIds } from "@/app/lib/fp/photo-consent-read";
 import {
   dashboardRegister,
   deriveHasPassword,
@@ -195,60 +192,20 @@ function realDeps(): DashboardGateDeps {
         return null;
       }
     },
-    loadPhotoConsentChildIds: async (childIds) => {
-      if (childIds.length === 0) return new Set<string>();
-      // Service-role for the same reason as the counts above: fp_parental_consent
-      // is RLS-on with ZERO policies, and the ids came from THIS request's RLS'd
-      // children read. What crosses back is a set of ids, never evidence rows.
-      try {
-        const db = supabaseAdmin();
-        const [consents, kids] = await Promise.all([
-          db
-            .from("fp_parental_consent")
-            // `evidence` rides along for the verdict's photo_declined read
-            // (fpv03 U3 review, FIX A) — the SAME shape /api/fp/cover reads,
-            // so the dashboard can never offer what the endpoint refuses.
-            .select("child_id, policy_version, accepted_at, revoked_at, evidence")
-            .in("child_id", childIds as string[]),
-          db
-            .from("children")
-            .select("id, photo_consent_revoked_at")
-            .in("id", childIds as string[]),
-        ]);
-        if (consents.error || kids.error) return null;
-        const tombstones = new Map<string, string | null>();
-        for (const k of (kids.data as Array<Record<string, unknown>> | null) ?? []) {
-          const stamp = k.photo_consent_revoked_at;
-          tombstones.set(String(k.id), typeof stamp === "string" ? stamp : null);
-        }
-        const byChild = new Map<string, PhotoConsentRow[]>();
-        for (const r of (consents.data as Array<Record<string, unknown>> | null) ?? []) {
-          const id = String(r.child_id);
-          const list = byChild.get(id) ?? [];
-          list.push({
-            policyVersion: typeof r.policy_version === "string" ? r.policy_version : null,
-            acceptedAt: typeof r.accepted_at === "string" ? r.accepted_at : null,
-            revokedAt: typeof r.revoked_at === "string" ? r.revoked_at : null,
-            // Raw jsonb; the verdict narrows it (absent/malformed = no claim).
-            evidence: r.evidence,
-          });
-          byChild.set(id, list);
-        }
-        const open = new Set<string>();
-        for (const id of childIds) {
-          // The SHARED pure gate — the same verdict `/api/fp/cover` enforces, so
-          // the dashboard can never offer an affordance the endpoint refuses.
-          const verdict = photoConsentVerdict({
-            rows: byChild.get(id) ?? [],
-            revokedAt: tombstones.get(id) ?? null,
-          });
-          if (verdict.ok) open.add(id);
-        }
-        return open;
-      } catch {
-        return null;
-      }
-    },
+    // Service-role for the same reason as the counts above: fp_parental_consent
+    // is RLS-on with ZERO policies, and the ids came from THIS request's RLS'd
+    // children read. What crosses back is a set of ids, never evidence rows.
+    //
+    // ⚠ THE READ ITSELF LIVES IN @/app/lib/fp/photo-consent-read (fpv04 U8b).
+    // The First Profit SPA's cross-origin roster door needs the SAME answer for
+    // the SAME children, and two reads of `fp_parental_consent` + the per-child
+    // tombstone would be two places for the tombstone rule and the version
+    // anchor to rot — the symptom being a parent whose withdrawal took effect on
+    // one screen and not the other. This dep is now the WIRING; the decision is
+    // shared. It still returns null on any failure, which the gate reads as
+    // "offer neither consent affordance this page load".
+    loadPhotoConsentChildIds: (childIds) =>
+      loadPhotoConsentOpenIds(supabaseAdmin(), childIds),
   };
 }
 

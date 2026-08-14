@@ -150,12 +150,113 @@ describe("shapeParentRoster — the join", () => {
       "docUnreadable",
       "ideas",
       "businesses",
+      "ageBand",
+      "photoConsentOpen",
+      "site",
     ]);
     expect(out[0]).toMatchObject({
       id: "c-1",
       firstName: "Alex",
       lastName: "Ng",
       fpUsername: "alex",
+    });
+  });
+
+  // ── fpv04 U8b: the three fields that are not progress ──
+
+  describe("the side facts — null is not a negative", () => {
+    it("OMITTING the extras answers null for BOTH, which is the fail-closed default", () => {
+      // A caller that forgets to pass them gets "render neither affordance",
+      // never a confident wrong answer.
+      const out = shapeParentRoster([child()], [], [], now);
+      expect(out[0]!.photoConsentOpen).toBeNull();
+      expect(out[0]!.site).toBeNull();
+    });
+
+    it("a null consent set is null PER CHILD — never demoted to false", () => {
+      const out = shapeParentRoster([child()], [], [], now, undefined, {
+        consentOpen: null,
+        sitesByChildId: new Map(),
+      });
+      expect(out[0]!.photoConsentOpen).toBeNull();
+      // The sites read SUCCEEDED and simply has no page for this child, which
+      // is a real answer rather than a missing one.
+      expect(out[0]!.site).toEqual({ handle: null, published: false, locked: false });
+    });
+
+    it("a present set answers membership: in = true, out = FALSE", () => {
+      const open = shapeParentRoster([child()], [], [], now, undefined, {
+        consentOpen: new Set(["c-1"]),
+      });
+      expect(open[0]!.photoConsentOpen).toBe(true);
+      const closed = shapeParentRoster([child()], [], [], now, undefined, {
+        consentOpen: new Set<string>(),
+      });
+      expect(closed[0]!.photoConsentOpen).toBe(false);
+    });
+
+    it("a null sites map is null PER CHILD — never demoted to 'no page'", () => {
+      const out = shapeParentRoster([child()], [], [], now, undefined, {
+        consentOpen: new Set(["c-1"]),
+        sitesByChildId: null,
+      });
+      expect(out[0]!.site).toBeNull();
+      // The OTHER field is unaffected: one failed read costs one field.
+      expect(out[0]!.photoConsentOpen).toBe(true);
+    });
+
+    it("passes a child's own page through, handle and derived published", () => {
+      const out = shapeParentRoster([child()], [], [], now, undefined, {
+        sitesByChildId: new Map([["c-1", { handle: "alex-treats", published: true, locked: false }]]),
+      });
+      expect(out[0]!.site).toEqual({ handle: "alex-treats", published: true, locked: false });
+    });
+  });
+
+  describe("ageBand — derived here, so nobody has to invent one", () => {
+    it("⚠ derives from the STORED GRADE, and ignores birth_year entirely", () => {
+      // fpv04 U8b review (SEC-3). This used to prefer birth_year, which the
+      // CHILD can set through /api/fp/grade — so a nine-year-old could put
+      // themselves in the least protected band, and the roster would offer
+      // their parent a grant on that basis. It now reads the same column the
+      // consent door writes from, so the offer and the record agree.
+      const year = now.getUTCFullYear() - (now.getUTCMonth() >= 8 ? 0 : 1);
+      const out = shapeParentRoster(
+        [{ ...child(), birth_year: String(year - 8), grade: 11 }],
+        [],
+        [],
+        now
+      );
+      expect(out[0]!.ageBand).toBe("16_plus");
+    });
+
+    it("answers null when there is no grade, so no client can offer a grant on a guess", () => {
+      const out = shapeParentRoster(
+        [{ ...child(), birth_year: String(now.getUTCFullYear() - 9), grade: null }],
+        [],
+        [],
+        now
+      );
+      expect(out[0]!.ageBand).toBeNull();
+    });
+
+    it("falls back to the stored grade, and answers NULL when there is no age signal at all", () => {
+      const banded = shapeParentRoster([{ ...child(), grade: 11 }], [], [], now);
+      expect(banded[0]!.ageBand).toBe("16_plus");
+      // No birth year, no grade → we genuinely do not know. The SPA must then
+      // offer no GRANT rather than guess a band onto a legal evidence record.
+      expect(shapeParentRoster([child()], [], [], now)[0]!.ageBand).toBeNull();
+      expect(
+        shapeParentRoster([{ ...child(), birth_year: "", grade: null }], [], [], now)[0]!.ageBand
+      ).toBeNull();
+    });
+
+    it("NEVER puts a birth year or a grade on the wire", () => {
+      const out = shapeParentRoster([{ ...child(), birth_year: "2015", grade: 6 }], [], [], now);
+      const serialized = JSON.stringify(out[0]);
+      expect(serialized).not.toContain("2015");
+      expect(serialized).not.toContain("birth");
+      expect(serialized).not.toContain("grade");
     });
   });
 

@@ -14,6 +14,7 @@ import {
   PARENT_ROSTER_READ_TIMEOUT_MS,
   PARENT_ROSTER_REFUSAL_BODY,
 } from "../roster-rules";
+import { FP_CONSENT_POLICY } from "@/app/api/fp/signup/consent-rules";
 
 /**
  * Route-level coverage for GET /api/fp/parent/roster — the parent dashboard's
@@ -187,6 +188,9 @@ type RosterChild = {
   docUnreadable: boolean;
   ideas: Record<string, unknown>[];
   businesses: Record<string, unknown>[];
+  ageBand: string | null;
+  photoConsentOpen: boolean | null;
+  site: { handle: string | null; published: boolean; locked: boolean } | null;
 };
 type Body = { ok: boolean; children: RosterChild[] };
 
@@ -286,6 +290,12 @@ describe("GET /api/fp/parent/roster — the parent dashboard roster feed", () =>
           recencyClamped: false,
         },
       ],
+      // fpv04 U8b. The fixture carries no age signal and no consent row, and
+      // parent A's kids have no public page — so: unknown band, permission
+      // genuinely CLOSED (the read succeeded), and a real "no page" answer.
+      ageBand: null,
+      photoConsentOpen: false,
+      site: { handle: null, published: false, locked: false },
     });
 
     // Present, empty, and NOT flagged unreadable — "never signed in" is a card,
@@ -300,6 +310,9 @@ describe("GET /api/fp/parent/roster — the parent dashboard roster feed", () =>
       docUnreadable: false,
       ideas: [],
       businesses: [],
+      ageBand: null,
+      photoConsentOpen: false,
+      site: { handle: null, published: false, locked: false },
     });
 
     expect(res.headers.get("cache-control")).toBe("no-store");
@@ -311,12 +324,185 @@ describe("GET /api/fp/parent/roster — the parent dashboard roster feed", () =>
     expect(await usernames(await get())).toEqual(["alex", "eve"]);
   });
 
-  it("reads NO birth_year, grade or photo, and no table beyond the four it needs", async () => {
+  it("reads NO photo, and no table beyond the ones the three fields need", async () => {
     await get();
-    expect(childrenQuery()!.columns).toBe("id, first_name, last_name, fp_username");
-    expect(new Set(callLog.filter((c) => c.startsWith("db:")))).toEqual(
-      new Set(["db:parents", "db:children", "db:fp_player_profiles", "db:fp_player_saves"])
+    // `birth_year, grade` joined the roster read in fpv04 U8b — for `ageBand`
+    // and NOTHING else. Neither column reaches the wire (asserted in
+    // roster-rules.test.ts). No `photo`, no `email`, no `applicant_state`.
+    expect(childrenQuery()!.columns).toBe(
+      "id, first_name, last_name, fp_username, birth_year, grade"
     );
+    expect(new Set(callLog.filter((c) => c.startsWith("db:")))).toEqual(
+      new Set([
+        "db:parents",
+        "db:children",
+        "db:fp_player_profiles",
+        "db:fp_player_saves",
+        // The two side facts (U8b), read through the SAME code the120's own
+        // dashboard reads them with.
+        "db:fp_parental_consent",
+        "db:fp_public_sites",
+      ])
+    );
+  });
+
+  // ── fpv04 U8b: the two side facts, and the rule that they may never fail
+  // the roster ──
+
+  describe("photo permission and the public page — one failed read costs one FIELD", () => {
+    /** An OPEN photo consent for one child: the server's CURRENT policy
+     *  version, accepted now, never revoked, with no tombstone. */
+    const openConsentFor = (childId: string): void => {
+      store.value.fp_parental_consent = [
+        {
+          id: `consent-${childId}`,
+          child_id: childId,
+          parent_id: PARENT_A,
+          policy_version: FP_CONSENT_POLICY.version,
+          accepted_at: new Date().toISOString(),
+          revoked_at: null,
+          evidence: {},
+        },
+      ];
+    };
+
+    const childNamed = async (res: Response, username: string) =>
+      ((await res.json()) as Body).children.find((c) => c.fpUsername === username)!;
+
+    it("reports an OPEN consent as true and a sibling's absence as FALSE", async () => {
+      openConsentFor("c-a1");
+      const res = await get();
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Body;
+      expect(body.children.find((c) => c.fpUsername === "alex")!.photoConsentOpen).toBe(true);
+      // The read SUCCEEDED and this child simply has no consent — a real
+      // `false`, not a missing datum.
+      expect(body.children.find((c) => c.fpUsername === "eve")!.photoConsentOpen).toBe(false);
+    });
+
+    it("a WITHDRAWN consent (the per-child tombstone) reads as false", async () => {
+      // The same instrument /api/fp/parent/photo-consent's withdraw path
+      // stamps, and the same verdict /api/fp/cover enforces — this door can
+      // never say "open" about a child that endpoint would refuse.
+      openConsentFor("c-a1");
+      store.value.children = (store.value.children as Record<string, unknown>[]).map((c) =>
+        c.id === "c-a1" ? { ...c, photo_consent_revoked_at: new Date(Date.now() + 1000).toISOString() } : c
+      );
+      expect((await childNamed(await get(), "alex")).photoConsentOpen).toBe(false);
+    });
+
+    it("a FAILED consent read degrades that ONE field to null and still serves the roster", async () => {
+      openConsentFor("c-a1");
+      faults.value["select:fp_parental_consent"] = {
+        kind: "error",
+        error: { message: "consent table down" },
+      };
+      const res = await get();
+      // ⚠ THE POINT: a parent must still see their kids' progress.
+      expect(res.status).toBe(200);
+      const alex = await childNamed(res, "alex");
+      expect(alex.photoConsentOpen).toBeNull();
+      expect(alex.ideas).toHaveLength(1); // progress survived intact
+      // The OTHER side fact is unaffected — one failed read costs one field.
+      expect(alex.site).toEqual({ handle: null, published: false, locked: false });
+      // A read that CANNOT refuse has nothing to refund.
+      expect(rateRef.released).toEqual([]);
+    });
+
+    it("reports a live page, and derives `published` rather than echoing the column", async () => {
+      store.value.fp_public_sites = [
+        {
+          profile_id: "p-a1",
+          handle: "alex-treats",
+          published: true,
+          operator_locked: false,
+          first_published_at: "2026-01-01T00:00:00.000Z",
+        },
+      ];
+      expect((await childNamed(await get(), "alex")).site).toEqual({
+        handle: "alex-treats",
+        published: true,
+        locked: false,
+      });
+
+      // ⚠ AN OPERATOR LOCK KEEPS A PAGE OFFLINE WHATEVER `published` SAYS, and
+      // this field means "a stranger can see it". Echoing the raw column here
+      // would tell a parent their child's page is live when nobody can reach it.
+      //
+      // ⚠ AND THE LOCK IS CARRIED, NOT FOLDED AWAY (U8b review). Without it the
+      // client sees plain `published: false`, offers "put it back online", the
+      // write succeeds, and NOTHING CHANGES — the lock wins. Only the parent's
+      // own takedown is theirs to undo.
+      (store.value.fp_public_sites as Record<string, unknown>[])[0]!.operator_locked = true;
+      expect((await childNamed(await get(), "alex")).site).toEqual({
+        handle: "alex-treats",
+        published: false,
+        locked: true,
+      });
+    });
+
+    it("a FAILED site read degrades that ONE field to null and still serves the roster", async () => {
+      faults.value["select:fp_public_sites"] = {
+        kind: "error",
+        error: { message: "site table down" },
+      };
+      const res = await get();
+      expect(res.status).toBe(200);
+      const alex = await childNamed(res, "alex");
+      expect(alex.site).toBeNull();
+      expect(alex.ideas).toHaveLength(1);
+      expect(alex.photoConsentOpen).toBe(false);
+      expect(rateRef.released).toEqual([]);
+    });
+
+    it("a THROWN site read is the same degrade — not a 401", async () => {
+      // `withFwTimeout` is Promise.race and does not catch, so a rejected round
+      // trip that reached the handler's outer catch would 401 a roster this
+      // read is not allowed to fail.
+      throwingTables.add("fp_public_sites");
+      const res = await get();
+      expect(res.status).toBe(200);
+      expect((await childNamed(res, "alex")).site).toBeNull();
+    });
+
+    it("BOTH failing still serves progress — neither field, both cards", async () => {
+      faults.value["select:fp_parental_consent"] = {
+        kind: "error",
+        error: { message: "down" },
+      };
+      faults.value["select:fp_public_sites"] = { kind: "error", error: { message: "down" } };
+      const res = await get();
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Body;
+      expect(body.children.map((c) => c.fpUsername).sort()).toEqual(["alex", "eve"]);
+      for (const child of body.children) {
+        expect(child.photoConsentOpen).toBeNull();
+        expect(child.site).toBeNull();
+      }
+    });
+
+    it("ANOTHER FAMILY'S page never reaches this parent's wire", async () => {
+      store.value.fp_public_sites = [
+        {
+          profile_id: "p-b1",
+          handle: "bo-cookies",
+          published: true,
+          operator_locked: false,
+          first_published_at: "2026-01-01T00:00:00.000Z",
+        },
+      ];
+      const res = await get();
+      expect(await res.text()).not.toContain("bo-cookies");
+    });
+
+    it("derives ageBand from the child's own row, and null when there is no signal", async () => {
+      store.value.children = (store.value.children as Record<string, unknown>[]).map((c) =>
+        c.id === "c-a1" ? { ...c, grade: 11 } : c
+      );
+      const body = (await (await get()).json()) as Body;
+      expect(body.children.find((c) => c.fpUsername === "alex")!.ageBand).toBe("16_plus");
+      expect(body.children.find((c) => c.fpUsername === "eve")!.ageBand).toBeNull();
+    });
   });
 
   it("an FP-less roster answers {ok, children: []} without downstream round trips", async () => {

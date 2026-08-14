@@ -20,9 +20,23 @@
  *
  *   200 {ok: true, children: [ParentRosterChild]} — the shape documented in
  *   full at ./roster-rules.ts (id, firstName, lastName, fpUsername, truncated,
- *   docUnreadable, ideas[], businesses[]). The completion maps go out RAW and
- *   UNFILTERED; the CLIENT derives n/total from its own curriculum data. The
- *   server holds no task-id domain knowledge and computes no totals.
+ *   docUnreadable, ideas[], businesses[], ageBand, photoConsentOpen, site). The
+ *   completion maps go out RAW and UNFILTERED; the CLIENT derives n/total from
+ *   its own curriculum data. The server holds no task-id domain knowledge and
+ *   computes no totals.
+ *
+ * ── THE THREE FIELDS THAT ARE NOT PROGRESS (fpv04 U8b) ──
+ * `photoConsentOpen`, `site` and `ageBand` exist so the SPA's parent dashboard
+ * can offer PHOTO PERMISSION and TAKE THE PAGE OFFLINE — the last two controls
+ * that lived only on the120's own /dashboard. Their doors are the siblings
+ * ../photo-consent and ../site-visibility.
+ *
+ * ⚠ EACH OF THE FIRST TWO IS `null` WHEN ITS READ FAILED, AND A FAILURE OF
+ * EITHER MUST NOT FAIL THE ROSTER. A parent must still see their kids' progress
+ * when the site table is down. `null` is NOT "closed" and NOT "no page": the
+ * SPA renders neither affordance on null. `ageBand` is null when the child row
+ * carries no age signal at all, and then the SPA offers no GRANT — because the
+ * alternative is inventing a band onto a legal evidence record.
  *
  *   401 — byte-identical for EVERY authorization-shaped refusal (missing/blank
  *   token, a bad or expired token, a NON-PARENT session, rate limit, capacity,
@@ -81,6 +95,8 @@ import {
   extractClientIp,
 } from "../../login/login-rules";
 import { extractBearerToken, unverifiedJwtSub } from "../../grade/grade-rules";
+import { loadPhotoConsentOpenIds } from "@/app/lib/fp/photo-consent-read";
+import { listParentSites } from "@/app/lib/fp/fp-site-parent-core";
 import {
   deriveParentRosterRateLimitKeys,
   shapeParentRoster,
@@ -92,6 +108,7 @@ import {
   PARENT_ROSTER_READ_TIMEOUT_MS,
   PARENT_ROSTER_TOTAL_BUDGET_MS,
   type ParentRosterRefusalReason,
+  type ParentRosterSite,
   type RosterChildRowLike,
   type RosterProfileRowLike,
   type RosterSaveRowLike,
@@ -192,6 +209,53 @@ async function readBounded<T>(
     return { ok: false, reason: "too_many_rows" };
   }
   return { ok: true, rows };
+}
+
+/**
+ * ONE SIDE FACT — a read whose failure costs a FIELD, never the roster.
+ *
+ * The difference from `readBounded` is the whole point: that helper's refusals
+ * become the route's refusal, because a roster without children is not a
+ * roster. These two reads are not like that. A parent whose `fp_public_sites`
+ * read is down must still see their kids' progress; the take-offline control
+ * simply does not render this load. So every failure mode — an in-band error
+ * the loader already swallowed into null, a stalled round trip, a REJECTED
+ * promise, an exhausted invocation budget — collapses to `null`, and null is
+ * carried per field to the wire.
+ *
+ * ⚠ NULL IS NOT A NEGATIVE. See RosterExtras: `null` must never be rendered as
+ * "no permission" or "no page".
+ */
+async function readSideFact<T>(
+  label: string,
+  deadlineAt: number,
+  load: () => Promise<T | null>
+): Promise<T | null> {
+  const remainingMs = deadlineAt - Date.now();
+  if (remainingMs <= 0) {
+    console.error(`[fp/parent/roster] ${label} ran out of invocation budget`);
+    return null;
+  }
+  try {
+    const raced = await withFwTimeout(
+      load(),
+      `fp/parent/roster ${label}`,
+      Math.min(PARENT_ROSTER_READ_TIMEOUT_MS, remainingMs)
+    );
+    if (raced.timedOut) {
+      console.error(`[fp/parent/roster] ${label} timed out — the field degrades to null`);
+      return null;
+    }
+    return raced.value;
+  } catch (err) {
+    // `withFwTimeout` is `Promise.race`; it does not catch. A rejected round
+    // trip must land here and not in the handler's outer catch, or a site-table
+    // blip would 401 a roster it is not allowed to fail.
+    console.error(
+      `[fp/parent/roster] ${label} threw: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return null;
+  }
 }
 
 /* -------------------------------------------------------------------- CORS */
@@ -368,7 +432,10 @@ export async function GET(req: Request): Promise<Response> {
       () =>
         admin
           .from("children")
-          .select("id, first_name, last_name, fp_username")
+          // `birth_year, grade` feed `ageBand` ONLY and never reach the wire —
+          // see RosterChildRowLike for why a coarse band, and not a birth year,
+          // is what the SPA is given.
+          .select("id, first_name, last_name, fp_username, birth_year, grade")
           .eq("parent_id", userId)
           .not("fp_username", "is", null)
           .order("id", { ascending: true })
@@ -407,6 +474,62 @@ export async function GET(req: Request): Promise<Response> {
       : ({ ok: true, rows: [] } as ReadResult<RosterSaveRowLike>);
     if (!savesRead.ok) return refuseRead(savesRead.reason);
 
+    // ── 4. THE TWO SIDE FACTS (fpv04 U8b): photo permission, and the public
+    // page. Both feed CONTROLS the First Profit SPA offers, and both are read
+    // through the SAME code the120's own dashboard reads them with — the shared
+    // `loadPhotoConsentOpenIds`, and `listParentSites` itself — so no surface
+    // can offer an affordance another one would refuse.
+    //
+    // ⚠ NEITHER MAY FAIL THE ROSTER. A parent must still see their kids'
+    // progress when `fp_public_sites` is down. Each degrades to `null` FOR ITS
+    // OWN FIELD, which the SPA renders as "offer no control this load" — never
+    // as "closed" or "no page", and never as a 401. That also means neither
+    // read touches the strike policy: they cannot refuse, so there is nothing
+    // to refund.
+    // ⚠ THE TWO SIDE FACTS RUN TOGETHER, NOT ONE AFTER THE OTHER. They are
+    // independent, each carries its own 8s ceiling, and the client aborts the
+    // whole roster at 12s — so serializing them turns a merely SLOW sites
+    // table into "we could not reach First Profit" and no dashboard at all,
+    // which is the exact outcome `readSideFact`'s per-field null exists to
+    // prevent.
+    const [consentOpen, siteRows] = await Promise.all([
+      childIds.length
+        ? readSideFact("photo consent read", deadlineAt, () =>
+            loadPhotoConsentOpenIds(admin, childIds)
+          )
+        : Promise.resolve(new Set<string>()),
+
+      // `listParentSites` takes NO child id — it derives the roster from the
+      // parent id itself, exactly as the dashboard page calls it. Its own
+      // children read is scoped by `.eq("parent_id", userId)`, so this pass
+      // adds no new authorization surface.
+      childIds.length
+        ? readSideFact("public sites read", deadlineAt, () =>
+            listParentSites(
+              { db: () => admin, now: () => Date.now(), log: (m) => console.error(m) },
+              { parentId: userId }
+            )
+          )
+        : Promise.resolve([]),
+    ]);
+    const sitesByChildId = siteRows
+      ? new Map<string, ParentRosterSite>(
+          siteRows.map((row) => [
+            row.childId,
+            // The DERIVED truth, not the raw column: an operator lock keeps a
+            // page offline whatever `published` says, and this field means "a
+            // stranger can see it".
+            {
+              handle: row.handle,
+              published: row.status === "published",
+              // Carried, not folded away: only the parent's own takedown is
+              // theirs to undo (see ParentRosterSite).
+              locked: row.operatorLocked === true,
+            },
+          ])
+        )
+      : null;
+
     // ONE clock for the whole response: it stamps the audit breadcrumb below
     // AND is the ceiling every child's future-dated stamps are clamped to. Two
     // `new Date()` calls would clamp two siblings against different instants,
@@ -418,7 +541,8 @@ export async function GET(req: Request): Promise<Response> {
       profilesRead.rows,
       savesRead.rows,
       now,
-      walkNotes
+      walkNotes,
+      { consentOpen, sitesByChildId }
     );
 
     // Abnormal docs, named by the only id that is BOTH actionable and not child

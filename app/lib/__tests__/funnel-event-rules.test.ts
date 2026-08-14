@@ -213,14 +213,16 @@ describe("the v3 front door's single emission (v3 Unit 9)", () => {
     expect((page.match(/emitFunnelEvent\(/g) ?? []).length).toBe(1);
   });
 
-  it("emits BEFORE the session read — every landing is in the denominator", () => {
-    // Deliberate, and stated in the page. The go-live gate this pin
-    // originally guarded was removed by owner decision, but the property it
-    // protected outlived it: the emit must sit above EVERYTHING conditional in
-    // the render, so an auth outage or a signed-out visitor cannot quietly drop
-    // visits out of the conversion denominator.
+  it("emits BEFORE the REDIRECT — every landing is still in the denominator", () => {
+    // The property outlived two rewrites now. It originally guarded a go-live
+    // gate; then a session read; and since fpv04 U8 the page is a redirect to
+    // First Profit's signup. The rule is unchanged: the emit sits above
+    // EVERYTHING conditional, so nothing — an auth outage, a signed-out
+    // visitor, or the retirement itself — can quietly drop visits out of the
+    // conversion denominator.
     expect(page.indexOf('emitFunnelEvent("start_view"')).toBeLessThan(
-      page.indexOf("supabaseServer()")
+      // The CALL, not the word: the docblock discusses redirects above it.
+      page.indexOf("redirect(retiredStartTarget")
     );
   });
 });

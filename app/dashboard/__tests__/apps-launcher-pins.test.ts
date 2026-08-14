@@ -339,25 +339,25 @@ describe("the two per-kid audiences keep their own wrapper treatment", () => {
 
 /* ─────────────────── the three server pages ─────────────────── */
 
-describe("app/dashboard/page.tsx — the parent list loads only the gate", () => {
+describe("app/dashboard/page.tsx — RETIRED to First Profit (fpv04 U8)", () => {
   const page = stripComments(read("app/dashboard/page.tsx"));
 
-  it("keeps the gate + redirect and renders ParentDashboard", () => {
-    expect(page).toMatch(/cache\(\(\) => loadDashboardGateFactsCore\(\)\)/);
-    expect(page).toMatch(/if \(verdict\.action === "redirect"\) redirect\(verdict\.route\)/);
-    expect(page).toContain("<ParentDashboard");
+  it("redirects to First Profit's parent surface and renders nothing", () => {
+    expect(page).toContain("redirect(FP_PARENT_DASHBOARD_URL)");
+    expect(page).not.toContain("<ParentDashboard");
   });
 
-  it("loads NO per-kid READS (fpSites / consent policy live on the account page)", () => {
+  it("reads NOTHING — no gate, no session, no kid data for a page that never renders", () => {
+    expect(page).not.toContain("loadDashboardGateFactsCore");
     expect(page).not.toContain("loadParentSitesForRequest");
-    expect(page).not.toContain("consentPolicy");
-    expect(page).not.toContain("photoConsentChildIds");
+    expect(page).not.toContain("verifiedTaskCounts");
   });
 
-  // The Path bars on the kid cards. These counts are NOT an extra read: the gate
-  // facts the redirect already awaited carry them, so the bars cost nothing.
-  it("threads the verified counts the gate already loaded into the kid cards", () => {
-    expect(page).toContain("verifiedTaskCounts={facts.verifiedTaskCounts}");
+  it("the per-kid CONTROLS are not retired with it", () => {
+    // The R21 site-live notice links straight to this page, and it is the only
+    // place a parent can revoke photo consent or take a site offline. It
+    // renders its own SignIn swap, so it does not need the retired root.
+    expect(() => read("app/dashboard/kids/[id]/account/page.tsx")).not.toThrow();
   });
 });
 

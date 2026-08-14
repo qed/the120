@@ -7,6 +7,10 @@
  */
 
 import { BOOKING_URL, DEPOSIT_REFUND_DEADLINE_LABEL, intensives } from "@/app/lib/site";
+import {
+  FP_PARENT_DASHBOARD_URL,
+  FP_SIGNUP_URL,
+} from "@/app/lib/fp/retired-parent-surfaces";
 import type { NurtureTemplate } from "./rules";
 
 export type NurtureEmail = { subject: string; html: string; text: string };
@@ -22,7 +26,15 @@ type Params = { firstName: string; childFirstName?: string };
  */
 const DEADLINE_NBSP = DEPOSIT_REFUND_DEADLINE_LABEL.replace(/ /g, "&nbsp;");
 
-const DASHBOARD_URL = "https://the120.school/dashboard";
+/**
+ * ⚠ RETARGETED AT fpv04 U8. These are LIVE senders — the nurture sequence is
+ * still running to real families — and the two the120 URLs they named are now
+ * redirects. Both still work, but an email is a durable artifact that outlives
+ * the redirect that rescues it, so it names the true destination instead. Read
+ * from the retirement table rather than retyped, so they move with it.
+ */
+const DASHBOARD_URL = FP_PARENT_DASHBOARD_URL;
+const SIGNUP_URL = FP_SIGNUP_URL;
 const SITE_URL = "https://the120.school";
 
 const greeting = (firstName: string) => (firstName ? `Hi ${firstName},` : "Hi,");
@@ -239,14 +251,14 @@ export function renderNurtureEmail(template: NurtureTemplate, params: Params): N
           "",
           `${kid} is added and the fun part hasn't started yet: ten minutes on the phone and ${kid} designs a real business, with real customers. Everything picks up exactly where you left off.`,
           "",
-          `Pick it back up: ${SITE_URL}/start`,
+          `Pick it back up: ${SIGNUP_URL}`,
         ].join("\n"),
         html: layout(
           p(esc(hi)) +
             p(
               `<strong>${esc(kid)} is added</strong> and the fun part hasn't started yet: ten minutes on the phone and ${esc(kid)} designs a real business, with real customers. Everything picks up exactly where you left off.`
             ),
-          { label: "Pick it back up", url: `${SITE_URL}/start` }
+          { label: "Pick it back up", url: `${SIGNUP_URL}` }
         ),
       };
     }
@@ -260,14 +272,14 @@ export function renderNurtureEmail(template: NurtureTemplate, params: Params): N
           "",
           `${kid} built a real project page, and it's sitting one short step from a finished application. The work is saved; the application takes about ten minutes from here.`,
           "",
-          `See the project and finish up: ${SITE_URL}/start`,
+          `See the project and finish up: ${SIGNUP_URL}`,
         ].join("\n"),
         html: layout(
           p(esc(hi)) +
             p(
               `<strong>${esc(kid)} built a real project page</strong>, and it's sitting one short step from a finished application. The work is saved; the application takes about ten minutes from here.`
             ),
-          { label: "See the project and finish up", url: `${SITE_URL}/start` }
+          { label: "See the project and finish up", url: `${SIGNUP_URL}` }
         ),
       };
     }

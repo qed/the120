@@ -104,8 +104,12 @@ describe("the dashboard gate loads the flip fact (dashboard-gate-core + page.tsx
     );
   });
 
-  it("the page delegates loading to the core inside its cache() wrapper", () => {
-    expect(page).toMatch(/cache\(\(\) => loadDashboardGateFactsCore\(\)\)/);
+  it("RETIRED (fpv04 U8): the page loads nothing, because it renders nothing", () => {
+    // The gate + cache() wiring this pinned went with the surface. The parent
+    // dashboard is First Profit's now; this file only forwards. The gate core
+    // itself is untouched — the per-kid routes under /dashboard still run it.
+    expect(page).not.toMatch(/loadDashboardGateFactsCore/);
+    expect(page).toContain("redirect(FP_PARENT_DASHBOARD_URL)");
   });
 
   // fpv03 U4 (deliberate update): the dashboard is the S05 apps LAUNCHER now and
@@ -120,9 +124,9 @@ describe("the dashboard gate loads the flip fact (dashboard-gate-core + page.tsx
   // again. The two were retired in the same sweep but are not the same thing —
   // the counts are First Profit progress, which outlived payment entirely, and
   // they ride facts the gate already loaded rather than a new read.
-  it("passes no register, but DOES pass the verified counts the kid cards render", () => {
+  it("passes nothing at all — there is no component left to pass it to", () => {
     expect(page).not.toMatch(/register=\{register\}/);
-    expect(page).toContain("verifiedTaskCounts={facts.verifiedTaskCounts}");
+    expect(page).not.toContain("verifiedTaskCounts");
   });
 });
 

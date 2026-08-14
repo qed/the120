@@ -1,54 +1,35 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { cache } from "react";
-import ParentDashboard from "./ParentDashboard";
-import { dashboardGateVerdict } from "@/app/lib/funnel/session-rules";
-import { loadDashboardGateFactsCore } from "@/app/lib/funnel/dashboard-gate-core";
+import { FP_PARENT_DASHBOARD_URL } from "@/app/lib/fp/retired-parent-surfaces";
+
+/**
+ * `/dashboard` — RETIRED (fpv04 U8, R7). The parent surface it rendered is
+ * First Profit's own, at `/parent` (fpv04 U6b): the same kids, the same
+ * derived progress, the same credentials and add-a-kid, in the app the family
+ * already signs into.
+ *
+ * ⚠ THE ROOT RETIRES; THE PER-KID CONTROLS DO NOT.
+ * `/dashboard/kids/[id]/account` holds password reset, photo consent and the
+ * take-page-offline control, and the R21 site-live safety notice links
+ * straight to it (`fpParentKidTarget`). First Profit has no per-kid controls
+ * page yet, so that route stays live and reachable — it renders its OWN
+ * client-side SignIn swap when signed out (KidRouteShell), so it does not
+ * depend on this page for authentication. What it loses is navigation, which
+ * First Profit's founder cards now provide by linking to it directly.
+ *
+ * Everything else under `/dashboard` is a kid-scoped route reached from those
+ * links, plus `/dashboard/account`, which already redirects here and therefore
+ * redirects onward — one hop added, one router still.
+ *
+ * A 302, not a permanent redirect, for the same reason `/start` uses one: a
+ * cached 308 cannot be told to come back.
+ */
 
 export const metadata: Metadata = {
   title: "Your dashboard — The 120",
   description: "Your kids' First Profit apps, all in one place.",
 };
 
-/**
- * THE PARENT DASHBOARD (/dashboard) — the server half.
- *
- * The parent-dashboard restructure made this a clean landing that LISTS the
- * kids (app/dashboard/ParentDashboard.tsx). Each card opens that kid's own
- * space at /dashboard/kids/<childId> (their apps) and offers a second link to
- * /dashboard/kids/<childId>/account (the parent's controls for them).
- *
- * So this page performs NO per-kid READS: no fpSites, no consent policy, no
- * photo-consent ids. Those belong to the controls, and moved to the account
- * page.tsx that renders them.
- *
- * The ONE per-child-keyed fact it still threads is `verifiedTaskCounts`, which
- * feeds the Path bar on each card. It is not an exception to the rule above:
- * it is an aggregate count already carried on the gate facts this page had to
- * await anyway for the redirect, so the bars add no read and no round trip.
- *
- * The gate + redirect stay: they are the auth/session wiring, unchanged. The
- * split from the memoized-auth-gate learning holds — `cache()` a NON-throwing
- * loader, keep `redirect()` in the page, OUTSIDE any try.
- */
-const loadDashboardGateFacts = cache(() => loadDashboardGateFactsCore());
-
-export default async function DashboardPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const params = await searchParams;
-  const facts = await loadDashboardGateFacts();
-  const verdict = dashboardGateVerdict({ ...facts, stay: params.stay !== undefined });
-  // redirect() throws NEXT_REDIRECT by design and must stay OUTSIDE a try —
-  // a caught one reports failure on success, which this repo has shipped once.
-  if (verdict.action === "redirect") redirect(verdict.route);
-
-  // DashboardProvider is mounted once by app/dashboard/layout.tsx, so hopping
-  // to a kid's portal and back does not remount the store or refetch the family.
-  //
-  // The verified counts ride along on the gate facts the redirect already
-  // needed — no extra read — and feed the Path bar on each kid's card.
-  return <ParentDashboard verifiedTaskCounts={facts.verifiedTaskCounts} />;
+export default async function RetiredDashboardPage() {
+  redirect(FP_PARENT_DASHBOARD_URL);
 }

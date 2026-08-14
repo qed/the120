@@ -343,17 +343,19 @@ describe("/start and a signed-in visitor (v3 Unit 9: the v2 self-redirect is ret
    * clamps the URL against server facts, so a signed-in family lands where
    * they actually are instead of where a URL claims. */
 
-  it("reads the session and resolves the step from server facts, not from the URL alone", () => {
-    expect(code).toMatch(/getUser\(\)/);
-    expect(code).toMatch(/resolveV3Step\(/);
+  it("RETIRED (fpv04 U8): no session read, no step resolution, one way out", () => {
+    // The funnel this pinned lives at firstprofit.school/signup now. What the
+    // page still owes is the measurement and ONE redirect — nothing else,
+    // because a page that renders nothing has no business reading anything.
+    expect(code).not.toMatch(/getUser\(\)/);
+    expect(code).not.toMatch(/resolveV3Step\(/);
+    expect(code).not.toMatch(/shouldRedirectToDashboard\(/);
   });
 
-  it("bounces only through the pure completed-parent decision, never unconditionally", () => {
-    // The ONLY redirect on this page is the amendment's, and it is gated by
-    // shouldRedirectToDashboard — which answers false for any valid ?step=,
-    // keeping the add-a-kid destination reachable.
-    expect(code).toMatch(/shouldRedirectToDashboard\(/);
-    expect(code).toMatch(/redirect\("\/dashboard"\)/);
-    expect((code.match(/\bredirect\(/g) ?? []).length).toBe(1);
+  it("keeps the add-a-kid destination reachable across the retirement", () => {
+    // `/start?step=kid` was the dashboard's add-another-kid CTA. The pure rule
+    // carries that intent to First Profit's `/signup?add=1` rather than
+    // dropping a parent at step 1 of a signup they have already finished.
+    expect(code).toMatch(/retiredStartTarget\(/);
   });
 });

@@ -48,6 +48,15 @@ vi.mock("@/app/lib/supabase/admin", () => ({
 
 vi.mock("@/app/lib/email", () => ({ sendEmail: vi.fn() }));
 
+/** `redirect()` throws by design; the mock keeps that contract so the page's
+ *  control flow is the real one, and records the destination. */
+const redirectMock = vi.fn((url: string) => {
+  throw new Error(`NEXT_REDIRECT:${url}`);
+});
+vi.mock("next/navigation", () => ({
+  redirect: (url: string) => redirectMock(url),
+}));
+
 // The page fires this for analytics; it is not the subject here and it must not
 // reach a real table.
 vi.mock("@/app/lib/funnel/events", () => ({ emitFunnelEvent: vi.fn() }));
@@ -100,37 +109,39 @@ afterEach(() => {
 });
 
 describe("/start renders the signup flow with NO env configured at all", () => {
-  it("an anonymous visitor gets <V3Flow/>, starting at step 1", async () => {
-    const { default: V3StartPage } = await import("@/app/start/page");
-    const { V3Flow } = await import("@/app/start/V3Flow");
+  it("an anonymous visitor is REDIRECTED to First Profit's signup (fpv04 U8)", async () => {
+    const { default: RetiredStartPage } = await import("@/app/start/page");
+    const { FP_SIGNUP_URL } = await import("@/app/lib/fp/retired-parent-surfaces");
 
-    const element = await V3StartPage({ searchParams: Promise.resolve({}) });
-
-    // BEHAVIORAL: the component the page actually returned IS the flow. A
-    // holding/gated branch would return some other component here, whatever it
-    // were named, and this identity check would fail.
-    expect(element.type).toBe(V3Flow);
-    // And it is the real entry point, not a flow parked on a dead-end step.
-    expect(element.props.initialStep).toBe("parent");
-    expect(element.props.facts.parentVerified).toBe(false);
-    // The consent text the client must echo back is present, so the rendered
-    // flow is usable and not a shell.
-    expect(typeof element.props.consentPolicy.hash).toBe("string");
-    expect(element.props.consentPolicy.hash.length).toBeGreaterThan(0);
+    // `redirect()` throws NEXT_REDIRECT by design; the destination is what
+    // matters, and it must not depend on configuration any more than the flow
+    // it replaced did — the env is emptied above.
+    await expect(RetiredStartPage({ searchParams: Promise.resolve({}) })).rejects.toThrow(
+      /NEXT_REDIRECT/
+    );
+    expect(redirectMock).toHaveBeenCalledWith(FP_SIGNUP_URL);
   });
 
-  it("a signed-in parent also gets <V3Flow/> — the resume path needs no config either", async () => {
-    getUser.mockResolvedValue({
-      data: { user: { id: "parent-1", email: "alex@example.com" } },
-      error: null,
-    });
-    const { default: V3StartPage } = await import("@/app/start/page");
-    const { V3Flow } = await import("@/app/start/V3Flow");
+  it("carries the ADD-A-KID intent across the retirement, rather than dropping a parent at step 1", async () => {
+    const { default: RetiredStartPage } = await import("@/app/start/page");
+    const { FP_ADD_KID_URL } = await import("@/app/lib/fp/retired-parent-surfaces");
 
-    const element = await V3StartPage({ searchParams: Promise.resolve({}) });
+    // `/start?step=kid` is the old dashboard's add-another-kid CTA
+    // (V3_ADD_KID_HREF). First Profit has that flow at `/signup?add=1`.
+    await expect(
+      RetiredStartPage({ searchParams: Promise.resolve({ step: "kid" }) })
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+    expect(redirectMock).toHaveBeenCalledWith(FP_ADD_KID_URL);
+  });
 
-    expect(element.type).toBe(V3Flow);
-    expect(element.props.parentEmail).toBe("alex@example.com");
+  it("still counts the landing — measurement survives the retirement", async () => {
+    const { default: RetiredStartPage } = await import("@/app/start/page");
+    await expect(
+      RetiredStartPage({ searchParams: Promise.resolve({ src: "ig" }) })
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+    // Conversion measurement must not fall to zero on the day the door moves.
+    const { emitFunnelEvent } = await import("@/app/lib/funnel/events");
+    expect(emitFunnelEvent).toHaveBeenCalledWith("start_view", expect.anything());
   });
 });
 

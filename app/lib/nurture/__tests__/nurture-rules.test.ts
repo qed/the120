@@ -595,7 +595,10 @@ describe("offer sequence (R61's fourth point: applied-but-no-deposit)", () => {
     });
     expect(rendered.html).toContain("&lt;b&gt;Ada&lt;/b&gt;");
     expect(rendered.html).not.toContain("<b>Ada</b>");
-    expect(rendered.text).toContain("/dashboard");
+    // fpv04 U8: the parent dashboard is First Profit's. The email names the
+    // real destination rather than leaning on the120's redirect, because a
+    // sent email outlives the redirect that would rescue it.
+    expect(rendered.text).toContain("https://firstprofit.school/parent");
     expect(rendered.subject).toContain("seat is being held");
   });
 });

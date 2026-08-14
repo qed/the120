@@ -248,15 +248,20 @@ export const FP_SESSION_PROFILE_KEYS: readonly string[] = Object.keys(FP_SESSION
  *
  * ── WHAT IS OFFERED, AND WHEN ──
  * A picture is offered exactly when the row can produce one: a stored artifact
- * that clears `asStoredCoverDataUrl`, beside a status that IMPLIES a picture,
- * with NO blob key.
+ * that clears `asStoredCoverDataUrl`, beside a status that IMPLIES a picture.
+ * THE BLOB KEY IS NOT CONSULTED (changed in fpv04 U7c — the old rule was "and
+ * NO blob key", and re-adding that check silently un-ships generated covers).
  *   - No status at all ⇒ `{}`. That is every child provisioned before v3 AND
  *     every child provisioned before this migration: they simply have nothing,
  *     and there is deliberately no backfill, because re-rendering from the name
  *     is the bug.
- *   - A `final` status that NAMES a blob key (a future AI-drawn cover) ⇒ the
- *     status and NO url. This door cannot read blobs and must not claim a
- *     picture it cannot hand over; the client shows the ordinary sprite.
+ *   - A `final` status naming a blob key BESIDE an artifact (a generated cover;
+ *     the generate route writes both in one statement) ⇒ the status AND the
+ *     url. The key is the durable artifact, the column is the serving copy.
+ *   - A `final` status that NAMES a blob key with NO artifact (a cover too big
+ *     to inline, or one generated before U7c) ⇒ the status and NO url. This
+ *     door still cannot read blobs and must not claim a picture it cannot hand
+ *     over; the client shows the ordinary sprite.
  *   - A `final` status with neither key nor artifact (a pre-Unit-7 child) ⇒ the
  *     same honest status-only answer.
  *
@@ -281,7 +286,18 @@ export function deriveCoverSessionFields(input: {
   // between two independently-declared `"final"` constants.
   const claimsPicture = isCoverStatus(status) && statusImpliesCoverBlob(status);
   const artifact = asStoredCoverDataUrl(input.coverDataUrl);
-  const servable = claimsPicture && artifact !== null && !(input.coverBlobKey ?? "").trim();
+  // ⚠ THE BLOB KEY NO LONGER DISQUALIFIES THE ARTIFACT (fpv04 U7c).
+  //
+  // It used to: a row naming a key meant "a picture exists that this door
+  // cannot read", and answering status-only was the honest reply. But the
+  // generate route now writes the inline serving copy IN THE SAME STATEMENT as
+  // the key (child-photo-rules' FP_COVER_INLINE_MAX_BYTES), so a row can
+  // legitimately carry both — and refusing on the key's mere presence would
+  // hide a cover we are holding in our hand. The question is unchanged in
+  // spirit: is there an artifact to serve? A row with a key and NO artifact
+  // (too big to inline, or generated before this unit) still answers
+  // status-only, exactly as before.
+  const servable = claimsPicture && artifact !== null;
   if (!servable) return { coverStatus: status };
   return {
     coverStatus: status,

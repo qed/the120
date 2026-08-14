@@ -8,7 +8,16 @@ import {
   type Store,
 } from "@/app/api/fp/signup/__tests__/helpers/fake-supabase";
 import { FP_CONSENT_POLICY } from "@/app/api/fp/signup/consent-rules";
-import { blobKey } from "@/app/lib/fp/cover-store-rules";
+import {
+  COVER_DATA_URL_MAX,
+  asStoredCoverDataUrl,
+  blobKey,
+} from "@/app/lib/fp/cover-store-rules";
+import { renderPlaceholderKittenPng } from "@/app/lib/fp/child-photo/child-photo-placeholder-generator";
+import {
+  FP_COVER_INLINE_MAX_BYTES,
+  coverDataUrl,
+} from "@/app/lib/fp/child-photo/child-photo-rules";
 import type { NormalizedImageResult } from "@/app/staff/image-lab/lib/image-model-rules";
 import { COVER_GENERATE_REFUSAL_BODY } from "../generate-door-rules";
 
@@ -135,6 +144,32 @@ vi.mock("@/app/lib/fp/rate-limit-store", () => ({
   },
   releaseRateLimitEvent: (key: string) => rateRef.released.push(key),
 }));
+
+/**
+ * The placeholder generator, with its bytes swappable. The REAL renderer is
+ * still imported directly by the size-pin tests below — this seam exists only
+ * so a test can hand the route an image too big to inline, which is the branch
+ * that used to destroy the child's signup cover.
+ */
+const placeholderBytes: { value: Uint8Array | null } = { value: null };
+vi.mock("@/app/lib/fp/child-photo/child-photo-placeholder-generator", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/app/lib/fp/child-photo/child-photo-placeholder-generator")
+  >("@/app/lib/fp/child-photo/child-photo-placeholder-generator");
+  return {
+    ...actual,
+    placeholderKittenGenerator: async (request: unknown) =>
+      placeholderBytes.value
+        ? {
+            kind: "generated" as const,
+            bytes: placeholderBytes.value,
+            contentType: "image/png",
+            gatewayGenerationId: null,
+            costUsd: null,
+          }
+        : actual.placeholderKittenGenerator(request as never),
+  };
+});
 
 vi.mock("@/app/staff/image-lab/lib/image-model", () => ({
   generateLabImage: async () => {
@@ -304,6 +339,7 @@ describe("POST /api/fp/parent/child-photo/generate", () => {
   });
 
   afterEach(() => {
+    placeholderBytes.value = null;
     delete process.env.FP_CHILD_PHOTO_LIVE;
     delete process.env.FP_COVER_PLACEHOLDER_MODE;
     delete process.env.FP_SIGNUP_TEST_ALLOWLIST;
@@ -374,8 +410,74 @@ describe("POST /api/fp/parent/child-photo/generate", () => {
       expect(row.fp_cover_blob_key).toBe(COVER_KEY_A_1);
       expect(row.fp_cover_status).toBe("final");
       expect(row.fp_cover_generation_count).toBe(1);
-      // A previous cover's inline data URL must not survive beside a new key.
-      expect(row.fp_cover_data_url).toBeNull();
+      // ⚠ THE SERVING COPY IS WRITTEN, NOT NULLED (fpv04 U7c). The sign-in and
+      // handoff doors serve this column and nothing else, so committing a key
+      // alone used to SUBTRACT the cover the child chose at signup and give
+      // back something no surface could render. It carries the bytes we just
+      // committed — a previous cover's copy cannot survive beside a new key.
+      expect(row.fp_cover_data_url).toMatch(/^data:image\/png;base64,/);
+      const inlineBytes = Buffer.from(
+        String(row.fp_cover_data_url).split(",")[1] ?? "",
+        "base64"
+      );
+      expect(Buffer.from(cover!.bytes).equals(inlineBytes)).toBe(true);
+    });
+
+    it("⚠ a cover TOO BIG to inline must not destroy the cover the child already has", async () => {
+      // THE REGRESSION THIS PINS. Writing the null through would wipe the
+      // signup SVG — which lives in this column and nowhere else, with no
+      // backfill — and silently reinstate the subtraction this whole unit
+      // exists to remove. It is not a rare branch either: the placeholder is
+      // ~65KB, but a real 1024² model PNG is routinely 1-2MB.
+      process.env.FP_COVER_PLACEHOLDER_MODE = "1";
+      seed(FOUNDER_EMAIL);
+      const signupCover = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
+      childRow(CHILD_A).fp_cover_data_url = signupCover;
+      childRow(CHILD_A).fp_cover_status = "final";
+
+      // One byte over the ceiling, through the REAL route.
+      const huge = new Uint8Array(FP_COVER_INLINE_MAX_BYTES + 1);
+      huge.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+      placeholderBytes.value = huge;
+
+      const res = await post();
+      expect(res.status).toBe(200);
+
+      const row = childRow(CHILD_A);
+      // The new cover IS committed...
+      expect(row.fp_cover_blob_key).toBe(COVER_KEY_A_1);
+      expect(row.fp_cover_status).toBe("final");
+      // ...and the child still has a cover to look at. Stale beats missing.
+      expect(row.fp_cover_data_url).toBe(signupCover);
+      // The source photo is gone either way.
+      expect(row.fp_photo_blob_key).toBeNull();
+      expect(objects.has(PHOTO_KEY_A)).toBe(false);
+    });
+
+    it("the placeholder itself FITS the inline ceiling — the flow is additive today", async () => {
+      // The finding that started this: the fix only holds while the generated
+      // image is inlinable. If the placeholder ever grows past the cap, the
+      // founder's UX walk silently stops updating the kid's cover.
+      const bytes = await renderPlaceholderKittenPng();
+      expect(bytes.byteLength).toBeLessThanOrEqual(FP_COVER_INLINE_MAX_BYTES);
+      expect(coverDataUrl(bytes, "image/png")).not.toBeNull();
+    });
+
+    it("the inline ceiling is the ceiling, and what it admits both sides accept", async () => {
+      const atCap = new Uint8Array(FP_COVER_INLINE_MAX_BYTES);
+      atCap.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+      const url = coverDataUrl(atCap, "image/jpeg");
+      expect(url).not.toBeNull();
+      // The server's own gate must accept its largest legal output — otherwise
+      // the doors would drop a cover this module just decided to store.
+      expect(asStoredCoverDataUrl(url)).toBe(url);
+      // And it must clear First Profit's identical 256KB ceiling, which is the
+      // number FP_COVER_INLINE_MAX_BYTES was derived from.
+      expect((url as string).length).toBeLessThanOrEqual(COVER_DATA_URL_MAX);
+
+      const overCap = new Uint8Array(FP_COVER_INLINE_MAX_BYTES + 1);
+      overCap.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+      expect(coverDataUrl(overCap, "image/jpeg")).toBeNull();
     });
 
     it("⚠ LAUNCH BLOCKER: placeholder mode REFUSES an ordinary family and generates NOTHING", async () => {

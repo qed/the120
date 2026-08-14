@@ -165,6 +165,46 @@ export function isCoverPlaceholderOpenToAll(env?: {
   return raw === "1" || raw === "true";
 }
 
+/**
+ * The ceiling on inlining a generated cover into `children.fp_cover_data_url`.
+ *
+ * ⚠ WHY A GENERATED COVER IS INLINED AT ALL, when the durable artifact is the
+ * blob. The sign-in and handoff doors serve `fp_cover_data_url` and nothing
+ * else — they hold no storage reader, and a public per-child cover route would
+ * leak a kid's first name to anyone who guessed an id (login-rules' header
+ * owns that reasoning). Until this file, a generated cover therefore replaced
+ * the cover the CHILD CHOSE at signup with a key nothing could serve, so
+ * walking the photo flow SUBTRACTED a cover. Writing the inline copy beside
+ * the key is what makes generation additive: the blob stays the durable
+ * artifact and the erasure handle, the data URL is the serving copy, and the
+ * two are written in the same statement so they cannot disagree.
+ *
+ * THE NUMBER IS THE CLIENT'S, not a guess: First Profit's `asCoverUrl` refuses
+ * any cover URL over 256KB of string length (src/lib/cover.ts), and base64
+ * inflates by 4/3. 180KB of raw bytes encodes to ~240KB, which clears that bar
+ * with room for the `data:` prefix. Anything larger is NOT inlined — the row
+ * keeps the key and the status alone, the doors answer status-only exactly as
+ * they did before, and the client shows its own art rather than a broken
+ * image. A cover too big to serve is a fact to report, not one to truncate.
+ */
+export const FP_COVER_INLINE_MAX_BYTES = 180_000;
+
+/** The inline serving copy of a generated cover, or null when the image is too
+ *  big to inline (see the ceiling above). Pure. */
+export function coverDataUrl(
+  bytes: Uint8Array,
+  contentType: string,
+  maxBytes: number = FP_COVER_INLINE_MAX_BYTES
+): string | null {
+  if (bytes.byteLength === 0 || bytes.byteLength > maxBytes) return null;
+  const type = contentType.trim().toLowerCase();
+  // Raster only, and deliberately NOT svg: an SVG is an executable document,
+  // and while this app's own signup cover is an SVG written by our compositor,
+  // a GENERATED one comes from outside and must never be inlined as markup.
+  if (type !== "image/png" && type !== "image/jpeg" && type !== "image/webp") return null;
+  return `data:${type};base64,${Buffer.from(bytes).toString("base64")}`;
+}
+
 /* ----------------------------------------------------------- the model id */
 
 /**

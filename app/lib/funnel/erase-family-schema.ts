@@ -425,6 +425,13 @@ export const ERASURE_COLUMN_LEDGER: Record<string, Record<string, ColumnDisposit
         // by the children row delete.
         "fp_cover_status",
         "fp_cover_generation_count",
+        // ⚠ SINCE fpv04 U7c this column can hold a RASTER IMAGE DERIVED FROM A
+        // PHOTOGRAPH OF THE CHILD (the generate route inlines the serving copy
+        // beside the blob key), not just the compositor's name-and-shapes SVG.
+        // Row deletion still erases it, which is why it stays here rather than
+        // in the external-object ledger — but anyone deciding whether this
+        // column may be exported, logged or retained must read it as likeness
+        // data, the same as fp_cover_blob_key.
         "fp_cover_data_url",
         "fp_kid_age",
         "fp_story_answers",

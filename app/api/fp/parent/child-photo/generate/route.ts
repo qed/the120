@@ -558,11 +558,37 @@ export async function POST(req: Request): Promise<Response> {
     // So: zero rows means the child is gone from under us. Delete the object we
     // just wrote and refuse.
     //
-    // `fp_cover_data_url` is nulled in the SAME statement. The login and handoff
-    // doors serve `fp_cover_data_url` when it is present, so leaving a PREVIOUS
-    // cover's inline data URL beside a NEW blob key would keep serving the old
-    // art forever and make this whole route look broken.
+    // `fp_cover_data_url` is OVERWRITTEN in the SAME statement with the serving
+    // copy of the cover we just committed, so a PREVIOUS cover's inline copy
+    // cannot survive beside a new blob key and keep serving old art forever.
+    // The one exception is an image too big to inline — see below, where the
+    // column is left alone rather than nulled.
+    //
+    // Writing the copy is what makes generation ADDITIVE. The sign-in and
+    // handoff doors serve this column and nothing else, so committing a key
+    // alone used to take away the cover the child chose at signup and give
+    // back something no surface could render.
     const commit = outcome.commit;
+    // ⚠ THE OVERSIZE BRANCH MUST NOT TOUCH THE COLUMN AT ALL.
+    //
+    // Writing `dataUrl` unconditionally would null it whenever the new cover is
+    // too big to inline — which nulls the SIGNUP SVG the child still has, and
+    // silently reinstates the exact subtraction this unit exists to remove. The
+    // placeholder is ~65KB today so the branch is unreachable in placeholder
+    // mode, but a 1024² model PNG is routinely 1-2MB, so it becomes the COMMON
+    // case the day a real generator is wired.
+    //
+    // So an un-inlinable cover LEAVES THE PREVIOUS ARTIFACT SERVING. The cost is
+    // named rather than hidden: the doors keep handing out the old picture while
+    // the row's key names the new one, so the kid sees their signup cover until
+    // something can serve blobs. That is a stale picture; nulling is a missing
+    // one, and a child keeping the cover they chose beats losing it.
+    //
+    // ⚠ NEXT ENGINEER: when you wire the real model, re-encode the generated
+    // cover to fit FP_COVER_INLINE_MAX_BYTES before commit (sharp is already a
+    // dependency, and photo-strip.ts is the pattern) — or accept that every
+    // generated cover is invisible to the child.
+    const coverColumns = commit.dataUrl === null ? {} : { fp_cover_data_url: commit.dataUrl };
     const commitRaced = await withFwTimeout(
       admin
         .from("children")
@@ -570,7 +596,7 @@ export async function POST(req: Request): Promise<Response> {
           fp_cover_blob_key: commit.coverBlobKey,
           fp_cover_status: commit.status,
           fp_cover_generation_count: commit.sequence,
-          fp_cover_data_url: null,
+          ...coverColumns,
           // The source photo is already deleted by the core on every path; the
           // pointer must go with it, in the same statement.
           fp_photo_blob_key: null,

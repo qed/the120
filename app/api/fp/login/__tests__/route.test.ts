@@ -397,15 +397,45 @@ describe("POST /api/fp/login — username-only resolution (Slice B U13)", () => 
     );
   });
 
-  it("a 'final' status that NAMES a blob key yields the status but NO url", async () => {
-    // A future AI-drawn cover. This door cannot read blobs, so it must not
-    // claim a picture it cannot produce — the client falls back to the sprite.
+  it("a blob key BESIDE a RASTER artifact serves it — the shape generation writes", async () => {
+    // Deliberately a PNG, not the SVG every other cover fixture uses: the only
+    // producer of key+artifact is the generate route, and it always writes a
+    // raster data URL. An SVG fixture here would pass while the raster arm of
+    // the whitelist was deleted.
+    const generated = "data:image/png;base64,iVBORw0KGgo=";
+    seedChild("sam", {
+      coverStatus: "final",
+      coverBlobKey: "fp/v3/children/sam/cover-1.png",
+      coverDataUrl: generated,
+    });
+    const body = await (await post({ identifier: "sam", password: "correct horse tulip" })).json();
+    expect(body.coverStatus).toBe("final");
+    expect(body.coverUrl).toBe(generated);
+  });
+
+  it("a blob key BESIDE an artifact still serves the artifact (fpv04 U7c)", async () => {
+    // A generated cover: the blob is the durable copy, and the generate route
+    // writes the inline serving copy in the same statement. Refusing on the
+    // key's presence would hide a cover we are holding in our hand.
     seedChild("alex", {
       coverStatus: "final",
       coverBlobKey: "fp/v3/children/abc/cover-1.png",
       coverDataUrl: STORED_COVER,
     });
     const body = await (await post({ identifier: "alex", password: "correct horse tulip" })).json();
+    expect(body.coverStatus).toBe("final");
+    expect(body.coverUrl).toBe(STORED_COVER);
+  });
+
+  it("a blob key with NO artifact is still status-only — we do not claim what we cannot serve", async () => {
+    // Too big to inline, or generated before U7c. This door holds no storage
+    // reader, so the honest answer is the status alone.
+    seedChild("robin", {
+      coverStatus: "final",
+      coverBlobKey: "fp/v3/children/def/cover-1.png",
+      coverDataUrl: null,
+    });
+    const body = await (await post({ identifier: "robin", password: "correct horse tulip" })).json();
     expect(body.coverStatus).toBe("final");
     expect("coverUrl" in body).toBe(false);
   });

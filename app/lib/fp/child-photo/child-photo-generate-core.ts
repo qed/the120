@@ -81,6 +81,7 @@ import {
   FP_COVER_MODEL_ID,
   isChildPhotoLive,
   isCoverPlaceholderMode,
+  coverDataUrl,
 } from "./child-photo-rules";
 import { STRIPPED_PHOTO_CONTENT_TYPE } from "./photo-strip";
 
@@ -168,6 +169,10 @@ export type CoverCommit = {
   sequence: number;
   contentType: string;
   byteSize: number;
+  /** The serving copy for `children.fp_cover_data_url`, or null when the image
+   *  is too big to inline. The doors serve this; the blob is the durable
+   *  artifact. Both are written in one statement so they cannot disagree. */
+  dataUrl: string | null;
 };
 
 /**
@@ -364,6 +369,7 @@ export async function generateCoverFromPhoto(
       sequence,
       contentType: generated.contentType,
       byteSize: generated.bytes.byteLength,
+      dataUrl: coverDataUrl(generated.bytes, generated.contentType),
     },
   };
 }

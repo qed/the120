@@ -385,13 +385,27 @@ describe("deriveCoverSessionFields — the one READ BOTH sign-in doors call", ()
     expect(deriveCoverSessionFields(input)).toEqual(deriveCoverSessionFields(input));
   });
 
-  it("refuses to claim a URL for a cover whose bytes live in a blob it cannot read", () => {
-    // A future AI-drawn cover. Status yes, picture no — never a broken image.
+  it("serves the artifact even when a blob key names the durable copy (fpv04 U7c)", () => {
+    // A generated cover. The blob is the durable artifact; the inline copy is
+    // written in the same statement, so a row carrying both is the NORMAL
+    // shape and refusing on the key would hide a cover we are holding.
     expect(
       deriveCoverSessionFields({
         coverStatus: "final",
         coverBlobKey: "fp/v3/children/abc/cover-1.png",
         coverDataUrl: STORED,
+      })
+    ).toEqual({ coverStatus: "final", coverUrl: STORED });
+  });
+
+  it("still refuses to claim a URL for a blob-backed cover with NO artifact", () => {
+    // Too big to inline, or generated before U7c. Status yes, picture no —
+    // never a broken image.
+    expect(
+      deriveCoverSessionFields({
+        coverStatus: "final",
+        coverBlobKey: "fp/v3/children/abc/cover-1.png",
+        coverDataUrl: null,
       })
     ).toEqual({ coverStatus: "final" });
   });
@@ -423,7 +437,7 @@ describe("deriveCoverSessionFields — the one READ BOTH sign-in doors call", ()
     ).toEqual({ coverStatus: "some_future_word" });
   });
 
-  it("REFUSES a stored value that is not a bounded base64 SVG data URL", () => {
+  it("REFUSES a stored value that is not a bounded base64 image data URL", () => {
     // The column is service-role-written, but it still becomes an `<img src>`
     // in a child's browser. Corruption degrades to "no picture", never to a
     // broken image and never to a megabyte on the wire.

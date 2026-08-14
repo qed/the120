@@ -341,7 +341,7 @@ describe("exchange — the code is the only thing that authorizes", () => {
     expect(Object.keys(res.body).sort()).toEqual([...FP_SESSION_BODY_KEYS].sort());
   });
 
-  it("omits the cover url for a blob-backed cover it cannot produce, and everything for none at all", async () => {
+  it("serves a blob-backed cover's inline copy, and omits everything for none at all", async () => {
     const h = harness();
     const blobKid = seedKid(h.store, {
       firstName: "Bo",
@@ -358,7 +358,10 @@ describe("exchange — the code is the only thing that authorizes", () => {
     expect(blobRes.ok).toBe(true);
     if (!blobRes.ok) return;
     expect(blobRes.body.coverStatus).toBe("final");
-    expect("coverUrl" in blobRes.body).toBe(false);
+    // U7c: the key names the durable artifact, the column carries the serving
+    // copy, and this door answers with the copy — the same answer the login
+    // door gives for the same row.
+    expect(blobRes.body.coverUrl).toBe(STORED_COVER);
 
     // A pre-v3 child: no cover columns at all, so NEITHER key is emitted. This
     // is also the whole "children provisioned before the artifact migration"

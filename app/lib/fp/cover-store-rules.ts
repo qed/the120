@@ -372,10 +372,33 @@ export type CoverCarryPlan = {
  */
 export const COVER_DATA_URL_MAX = 256 * 1024;
 
-/** The one form a stored cover may take, restated here (rather than imported
- *  from the template module) because this module is the storage authority and
- *  must be able to reject a value the template module never produced. */
+/** The form the COMPOSITOR emits, restated here (rather than imported from the
+ *  template module) because this module is the storage authority and must be
+ *  able to reject a value the template module never produced. */
 export const COVER_DATA_URL_PREFIX = "data:image/svg+xml;base64,";
+
+/**
+ * Every form a stored cover may take (fpv04 U7c). The SVG is ours, written by
+ * `renderTemplateCover` at signup. The raster forms are GENERATED covers,
+ * inlined beside their blob key so the sign-in doors have something to serve
+ * (child-photo-rules' `coverDataUrl`).
+ *
+ * ⚠ NOTHING NEW IS EXECUTABLE HERE. The one dangerous form on this list is the
+ * SVG that was already on it — an SVG is a document, and the client contract
+ * has always been "render as an IMAGE, never inline into the DOM". The raster
+ * types are inert by construction, so widening the whitelist this way is
+ * strictly safer than what it already permitted, not looser.
+ *
+ * TWIN: First Profit's `asCoverUrl` (src/lib/cover.ts) must accept exactly
+ * this set. A form accepted here and refused there is a cover that survives
+ * every server check and then vanishes on the child's screen.
+ */
+export const COVER_DATA_URL_PREFIXES = [
+  COVER_DATA_URL_PREFIX,
+  "data:image/png;base64,",
+  "data:image/jpeg;base64,",
+  "data:image/webp;base64,",
+] as const;
 
 /**
  * Narrow a stored cover artifact, or null. The gate is a WHITELIST of the one
@@ -386,9 +409,11 @@ export const COVER_DATA_URL_PREFIX = "data:image/svg+xml;base64,";
  */
 export function asStoredCoverDataUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  if (value.length <= COVER_DATA_URL_PREFIX.length) return null;
   if (value.length > COVER_DATA_URL_MAX) return null;
-  return value.startsWith(COVER_DATA_URL_PREFIX) ? value : null;
+  const prefix = COVER_DATA_URL_PREFIXES.find((p) => value.startsWith(p));
+  // Longer than the prefix, not merely prefixed: `data:image/png;base64,` on
+  // its own is a broken image, and half a data URL is worse than none.
+  return prefix && value.length > prefix.length ? value : null;
 }
 
 /**
@@ -566,9 +591,22 @@ export function planCoverCarry(input: {
       fp_cover_blob_key: to,
       fp_cover_status: input.draftCoverStatus,
       fp_cover_generation_count: count,
-      // A BLOB-backed cover's picture is the object under `to`. The column is
-      // for the derived path only; carrying both would give one row two answers
-      // to "where is the picture", and the readers would have to pick.
+      // ⚠ THIS ARM IS UNREACHABLE TODAY, AND IT NOW CARRIES A TRAP.
+      //
+      // It was written when a row could not honestly hold both: "carrying both
+      // would give one row two answers to where the picture is". fpv04 U7c
+      // settled that question the other way for the child side — the KEY is
+      // the durable artifact, the COLUMN is the serving copy, and the sign-in
+      // doors read the column because they hold no storage reader. So a row
+      // with a key and a null column is exactly the state U7c calls broken: a
+      // `final` status and nothing any door can render.
+      //
+      // Nothing reaches here yet (cover-core refuses any mode but "template",
+      // so no draft acquires a cover blob key). But the moment a draft-side
+      // generated cover is enabled, this line ships a child into First Profit
+      // with a cover they cannot see and NO route to repair it — the generate
+      // door only runs on a parent's request. Carry the draft's artifact here
+      // too when that day comes; the copy is available.
       fp_cover_data_url: null,
     },
   };

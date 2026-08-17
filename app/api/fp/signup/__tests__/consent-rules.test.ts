@@ -178,32 +178,66 @@ describe("2026-08-03.1 policy bump (Phase A cohort instrument)", () => {
   });
 });
 
-/* ------------------------------------- the 2026-08-08.1 bump (public-site disclosure) */
+/* --------------------------------------- the 2026-08-17.1 bump (operator naming) */
 
-describe("2026-08-08.1 policy bump (public-site disclosure)", () => {
+describe("2026-08-17.1 policy bump (operator naming)", () => {
   it("is published AND is the version the server currently renders", () => {
-    expect(isPublishedConsentVersion("2026-08-08.1")).toBe(true);
-    expect(FP_CONSENT_POLICY.version).toBe("2026-08-08.1");
-    expect(FP_PARENTAL_CONSENT_VERSIONS[FP_PARENTAL_CONSENT_VERSIONS.length - 1]).toBe("2026-08-08.1");
+    expect(isPublishedConsentVersion("2026-08-17.1")).toBe(true);
+    expect(FP_CONSENT_POLICY.version).toBe("2026-08-17.1");
+    expect(FP_PARENTAL_CONSENT_VERSIONS[FP_PARENTAL_CONSENT_VERSIONS.length - 1]).toBe("2026-08-17.1");
+  });
+
+  it("names the PRODUCT, and discloses the operating company on first mention", () => {
+    const text = FP_CONSENT_POLICY.text;
+    // Terms of service are product-scoped (founder, 2026-08-17): this notice is
+    // First Profit's, and The 120 appears only as the operating company behind
+    // the DBA mark.
+    expect(text).toContain("First Profit (operated by The 120)");
+    // The FULL form must be the FIRST mention — a parent has to learn who holds
+    // the data before they are asked to consent to it, not halfway down.
+    expect(text.indexOf("First Profit")).toBe(text.indexOf("First Profit (operated by The 120)"));
+    // ...and it is an identification, not a refrain: exactly one occurrence, so
+    // a well-meaning edit cannot stamp it onto all eight mentions.
+    expect(text.split("The 120").length - 1).toBe(1);
+    // The old unspaced spelling is gone for good.
+    expect(text).not.toContain("The120");
+    // Every sentence that names the operator still names one (a rename that
+    // dropped the actor would read as consent to nobody in particular).
+    expect(text).toContain("I consent to First Profit (operated by The 120) creating an account");
+    expect(text).toContain("by contacting First Profit");
+  });
+
+  it("is a TEXT-ONLY rename: it changed no disclosure, so no anchor moved", () => {
+    // 2026-08-08.1's disclosures are all still asserted by the suites above and
+    // below; this pins the other half of "text-only" — that the bump did not
+    // drag the anchors along with it.
+    expect(FP_CONSENT_MIN_VERSION).toBe("2026-08-01.1");
+    expect(FP_PHOTO_CONSENT_MIN_VERSION).toBe("2026-08-08.1");
+    expect(FP_SITE_CONSENT_MIN_VERSION).toBe("2026-08-08.1");
   });
 
   it("binds by hash: the current version with the current text is ok, with any other text is a mismatch", () => {
     expect(
-      consentVerdict({ echoedVersion: "2026-08-08.1", echoedHash: currentPolicyHash() })
+      consentVerdict({ echoedVersion: "2026-08-17.1", echoedHash: currentPolicyHash() })
     ).toBe("ok");
     // A tampered/drifted text echoed under the current version number is
-    // exactly the case the hash exists to catch.
+    // exactly the case the hash exists to catch. The needle must be a string
+    // the CURRENT text actually contains, or replace() is a no-op and this
+    // test silently stops testing anything.
     const tamperedText = FP_CONSENT_POLICY.text.replace(
-      "I consent to The 120 creating an account for my child",
+      "I consent to First Profit (operated by The 120) creating an account for my child",
       "I do not consent to any account for my child"
     );
-    expect(consentVerdict({ echoedVersion: "2026-08-08.1", echoedHash: hashPolicyText(tamperedText) })).toBe(
+    expect(tamperedText).not.toBe(FP_CONSENT_POLICY.text);
+    expect(consentVerdict({ echoedVersion: "2026-08-17.1", echoedHash: hashPolicyText(tamperedText) })).toBe(
       "version_mismatch"
     );
   });
 
-  it("the superseded 2026-08-07.1 and 2026-08-05.1 versions stay published and now resolve to stale", () => {
-    for (const superseded of ["2026-08-05.1", "2026-08-07.1"]) {
+  it("the superseded versions stay published and now resolve to stale", () => {
+    // 2026-08-08.1 joins the list: the naming bump superseded it, and a consent
+    // captured against it echoes a hash the server no longer renders.
+    for (const superseded of ["2026-08-05.1", "2026-08-07.1", "2026-08-08.1"]) {
       expect(isPublishedConsentVersion(superseded)).toBe(true);
       expect(
         consentVerdict({ echoedVersion: superseded, echoedHash: currentPolicyHash() })
@@ -311,11 +345,17 @@ describe("the three consent anchors (mint vs photo vs public site)", () => {
   it("points the SITE anchor at the version whose text discloses publication", () => {
     // The anchor and the disclosure must move together: an anchor pointing
     // below the disclosing version would publish children whose parents were
-    // never told. Pinned to the literal AND tied to the current policy, so
-    // neither can drift alone.
+    // never told.
     expect(FP_SITE_CONSENT_MIN_VERSION).toBe("2026-08-08.1");
-    expect(FP_SITE_CONSENT_MIN_VERSION).toBe(FP_CONSENT_POLICY.version);
     expect(isPublishedConsentVersion(FP_SITE_CONSENT_MIN_VERSION)).toBe(true);
+    // This used to assert anchor === FP_CONSENT_POLICY.version, which was true
+    // only while the disclosing version happened to also be the newest one. The
+    // 2026-08-17.1 naming bump separated them, and equality is NOT the property
+    // that matters: what matters is that the anchor never sits ABOVE what we
+    // render (nothing could satisfy it) and that the rendered text still
+    // carries the disclosure the anchor exists to guarantee.
+    expect(policyVersionAtLeast(FP_CONSENT_POLICY.version, FP_SITE_CONSENT_MIN_VERSION)).toBe(true);
+    expect(FP_CONSENT_POLICY.text).toContain("publishing a public web page");
   });
 
   it("the mint anchor sits strictly below the photo and site anchors, which now COINCIDE at 2026-08-08.1", () => {
@@ -688,11 +728,11 @@ describe("the exported consent-coverage fixtures (consumed by first-profit's U9b
 /* ---------------------------------------------- the AUTHORED, INACTIVE draft */
 
 describe("⚠ FP_CONSENT_POLICY_DRAFT_AI — authored, tested, and NOT the policy", () => {
-  it("is NOT the active policy — the rendered version is still 2026-08-08.1", () => {
+  it("is NOT the active policy — the rendered version is 2026-08-17.1", () => {
     // The single most important assertion in this block. Publishing the AI
     // disclosure before the founder confirms the provider's retention terms
     // would bind parents to a factual claim nobody has verified.
-    expect(FP_CONSENT_POLICY.version).toBe("2026-08-08.1");
+    expect(FP_CONSENT_POLICY.version).toBe("2026-08-17.1");
     expect(FP_CONSENT_POLICY.version).not.toBe(FP_CONSENT_POLICY_DRAFT_AI.version);
     expect(FP_CONSENT_POLICY.text).not.toBe(FP_CONSENT_POLICY_DRAFT_AI.text);
   });
@@ -720,19 +760,34 @@ describe("⚠ FP_CONSENT_POLICY_DRAFT_AI — authored, tested, and NOT the polic
   });
 
   it("a client echoing the draft version is refused, not recorded", () => {
-    expect(
-      consentVerdict({
-        echoedVersion: FP_CONSENT_POLICY_DRAFT_AI.version,
-        echoedHash: hashPolicyText(FP_CONSENT_POLICY_DRAFT_AI.text),
-      })
-    ).toBe("version_mismatch");
+    // The REFUSAL is the invariant; which refusal it is depends only on where
+    // the draft's date sorts. It used to be `version_mismatch` (draft above the
+    // rendered version); since the 2026-08-17.1 naming bump the draft's stale
+    // 2026-08-14.1 sorts BELOW, so the same echo is refused as `stale`. Either
+    // way it is never recorded.
+    const verdict = consentVerdict({
+      echoedVersion: FP_CONSENT_POLICY_DRAFT_AI.version,
+      echoedHash: hashPolicyText(FP_CONSENT_POLICY_DRAFT_AI.text),
+    });
+    expect(verdict).not.toBe("ok");
+    expect(verdict).toBe("stale");
   });
 
-  it("orders strictly AFTER the current version, so activation is a forward move", () => {
+  it("⚠ MUST BE RENUMBERED before activation — its date now sorts BELOW the rendered version", () => {
+    // This test INVERTED at the 2026-08-17.1 naming bump, and the inversion is
+    // the point. The draft was authored as 2026-08-14.1 when the rendered
+    // version was 2026-08-08.1, so activation was a forward move. It no longer
+    // is. Publishing it as-is would append a version that sorts below what is
+    // already live, breaking the last-entry-equals-rendered pin and making
+    // policyVersionAtLeast read the AI disclosure as OLDER than consents
+    // captured without it. The activation checklist in consent-rules.ts step 2
+    // now requires renumbering; this fails if anyone skips it.
     expect(policyVersionAtLeast(FP_CONSENT_POLICY_DRAFT_AI.version, FP_CONSENT_POLICY.version)).toBe(
-      true
+      false
     );
     expect(FP_CONSENT_POLICY_DRAFT_AI.version).not.toBe(FP_CONSENT_POLICY.version);
+    // Still unpublished, which is what keeps the mis-ordering harmless for now.
+    expect(isPublishedConsentVersion(FP_CONSENT_POLICY_DRAFT_AI.version)).toBe(false);
   });
 
   it("⚠ THE MINT ANCHOR HAS NOT MOVED — moving it for a disclosure bump deletes children", () => {
@@ -746,7 +801,7 @@ describe("⚠ FP_CONSENT_POLICY_DRAFT_AI — authored, tested, and NOT the polic
   it("discloses the three facts the current text does not: transmission, provider terms, deletion", () => {
     const text = FP_CONSENT_POLICY_DRAFT_AI.text;
     expect(text).toMatch(/sending that photo to a third-party artificial intelligence image service/i);
-    expect(text).toMatch(/leaves The 120's systems/i);
+    expect(text).toMatch(/leaves First Profit's systems/i);
     expect(text).toMatch(/deletes the photo from its own systems as soon as the artwork has been created/i);
     expect(text).toMatch(/whether or not the artwork succeeded/i);
     // The current text says none of that — which is the whole reason for a bump.
@@ -761,11 +816,17 @@ describe("⚠ FP_CONSENT_POLICY_DRAFT_AI — authored, tested, and NOT the polic
       "firstprofit.school/ethan",
       "ask search engines not to list them",
       "providing a photo is optional",
-      "revoke it at any time by contacting The 120",
+      "revoke it at any time by contacting First Profit",
       "withdraw consent at any time",
     ]) {
       expect(text, clause).toContain(clause);
     }
+    // The draft carries the same DBA naming, so activating it can never regress
+    // to the old operator-only wording: full form once, on first mention.
+    expect(text).toContain("First Profit (operated by The 120)");
+    expect(text.indexOf("First Profit")).toBe(text.indexOf("First Profit (operated by The 120)"));
+    expect(text.split("The 120").length - 1).toBe(1);
+    expect(text).not.toContain("The120");
   });
 
   it("keeps repo style: no em dashes", () => {
@@ -790,14 +851,15 @@ describe("⚠ FP_CONSENT_POLICY_DRAFT_AI — authored, tested, and NOT the polic
 
 describe("the AI/photo draft must not activate before the founder confirms it (fpv04 U7a)", () => {
   it("FP_CONSENT_POLICY is NOT the draft, and the anchors have not moved", () => {
-    // The draft discloses that a child's photograph leaves The 120's systems
+    // The draft discloses that a child's photograph leaves First Profit's
+    // systems
     // for a third-party AI provider. Its retention wording is a FOUNDER INPUT
     // that has not been supplied, so activating it would put an unconfirmed
     // claim in front of a parent at the moment they consent. Activation is a
     // deliberate multi-step edit; this fails the build if any of it happens by
     // accident.
     expect(FP_CONSENT_POLICY.version).not.toBe(FP_CONSENT_POLICY_DRAFT_AI.version);
-    expect(FP_CONSENT_POLICY.version).toBe("2026-08-08.1");
+    expect(FP_CONSENT_POLICY.version).toBe("2026-08-17.1");
     expect(FP_CONSENT_MIN_VERSION).toBe("2026-08-01.1");
   });
 

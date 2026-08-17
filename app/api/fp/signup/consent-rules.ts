@@ -53,6 +53,7 @@ export const FP_PARENTAL_CONSENT_VERSIONS: readonly string[] = [
   "2026-08-05.1",
   "2026-08-07.1",
   "2026-08-08.1",
+  "2026-08-17.1",
 ];
 
 /**
@@ -99,16 +100,46 @@ export const FP_CONSENT_POLICY = {
   //   - deletion on revocation ............ the source photo blob is already
   //     deleted after generation (fp_onboarding_drafts.photo_blob_key is
   //     nulled, 20260912120000), and family erasure removes the artwork
-  version: "2026-08-08.1",
+  // 2026-08-17.1 (NAMING, founder decision): this notice names the PRODUCT the
+  // family actually signed up for, with the operating company disclosed.
+  //
+  // ── THE RULE (founder, 2026-08-17) ──
+  // Terms of service are a PRODUCT-scoped item, not a legal-entity-scoped one.
+  // The 120 is the operating company; "First Profit" is a registered
+  // operating-as / doing-business-as mark. Different products may carry
+  // different terms, so the First Profit notice says First Profit and the
+  // The 120 notice says The 120. Do NOT "unify" these by rewriting one to
+  // match the other.
+  //
+  // ── THE WORDING, AND WHY IT IS NOT REPEATED ──
+  // FIRST mention carries the full form, "First Profit (operated by The 120)",
+  // which is what discloses the contracting party a parent is consenting TO.
+  // Every later mention is the short "First Profit". That is ordinary drafting
+  // practice for a DBA: the parenthetical is an identification, and repeating
+  // it at all eight mentions would make the notice harder to read without
+  // telling the parent anything the first mention did not.
+  //
+  // ⚠ KEEP THE FIRST MENTION FULL. A copy edit that trims the parenthetical
+  // leaves a consent notice that names only a brand and never the company that
+  // holds the data. The guard test in __tests__/consent-rules.test.ts pins both
+  // halves: the full form is present, and "The 120" appears ONLY there.
+  //
+  // TEXT-ONLY relative to 2026-08-08.1. Not one factual claim, obligation, or
+  // disclosure changed, so every verified claim documented below still holds
+  // verbatim and no anchor needs to move.
+  version: "2026-08-17.1",
   text:
     "I confirm I am the parent or legal guardian of the child named in this " +
-    "signup, and I am at least 18 years old. I consent to The 120 creating an " +
+    "signup, and I am at least 18 years old. I consent to First Profit " +
+    "(operated by The 120) " +
+    "creating an " +
     "account for my child so they can play and learn, through various " +
     "applications, and that these apps will store the limited information " +
     "needed to run this account (my child's first name, last name, age, and " +
-    "information added inside the app, which are used only to improve The 120 " +
+    "information added inside the app, which are used only to improve First " +
+    "Profit " +
     "and may be kept for up to twelve months after account deletion). I " +
-    "separately consent to The 120 publishing a public web page for my child " +
+    "separately consent to First Profit publishing a public web page for my child " +
     "on the firstprofit.school domain, where my child's first name becomes " +
     "part of the web address (for example firstprofit.school/ethan), and " +
     "where my child's first name and what my child writes about their " +
@@ -117,23 +148,25 @@ export const FP_CONSENT_POLICY = {
     "shared. I understand that these pages ask search engines not to list " +
     "them, that my child's last name, age, photograph, and contact details " +
     "are never published, and that I can take my child's page offline at any " +
-    "time from my family dashboard. I separately consent to The 120 collecting " +
+    "time from my family dashboard. I separately consent to First Profit " +
+    "collecting " +
     "a photo of my child, if I choose to provide one, and using it to create " +
     "the story and hero artwork in my child's graphic novel. I understand that " +
     "providing a photo is optional, that I can decline this during signup or " +
-    "revoke it at any time by contacting The 120, and that when I revoke it " +
+    "revoke it at any time by contacting First Profit, and that when I revoke it " +
     "the photo and the artwork created from it are deleted. I " +
     "understand that I can review or delete my child's account by contacting " +
-    "The120, that I can withdraw consent at any time by contacting The 120, " +
+    "First Profit, that I can withdraw consent at any time by contacting " +
+    "First Profit, " +
     "and that my consent is recorded with the version of this notice shown " +
-    "above. I understand that The120 may change the terms of service at any " +
-    "time.",
+    "above. I understand that First Profit may change the terms of service at " +
+    "any time.",
 } as const;
 
 /**
  * ⚠⚠ THE NEXT VERSION, AUTHORED AND DELIBERATELY NOT ACTIVE. ⚠⚠
  *
- * `FP_CONSENT_POLICY` above still points at 2026-08-08.1 and MUST CONTINUE TO
+ * `FP_CONSENT_POLICY` above still points at 2026-08-17.1 and MUST CONTINUE TO
  * until the founder resolves the TODO below. This constant exists so the wording
  * can be reviewed, hashed and tested in a PR without a single parent being shown
  * it, and without a single consent record binding to it. It is intentionally
@@ -191,11 +224,14 @@ export const FP_CONSENT_POLICY = {
  *
  * ── HOW TO ACTIVATE IT, WHEN THOSE ANSWERS EXIST (all four steps, one PR) ──
  *   1. Replace the bracketed placeholder with the confirmed wording.
- *   2. Append "2026-08-14.1" to `FP_PARENTAL_CONSENT_VERSIONS` (it becomes the
- *      LAST entry — a test pins that the last entry equals the rendered
- *      version).
+ *   2. RENUMBER this object's `version` to a date at or after the rendered
+ *      version (2026-08-17.1 as of the naming bump), then append it to
+ *      `FP_PARENTAL_CONSENT_VERSIONS` as the LAST entry — a test pins that the
+ *      last entry equals the rendered version, and the comparator is
+ *      date-ordered, so a stale 2026-08-14.1 would sort BELOW what is already
+ *      live. Use that new literal in steps 3 and 4 too.
  *   3. Point `FP_CONSENT_POLICY` at this object.
- *   4. Move `FP_PHOTO_CONSENT_MIN_VERSION` to "2026-08-14.1". That is the anchor
+ *   4. Move `FP_PHOTO_CONSENT_MIN_VERSION` to the renumbered version. That is the anchor
  *      that is ALLOWED to move (refusing a photo feature is a harmless no-op),
  *      and moving it is what makes every pre-existing family re-consent before
  *      their child's face can be sent anywhere.
@@ -207,16 +243,31 @@ export const FP_CONSENT_POLICY = {
  * DELETES a child that was correctly created seconds earlier.
  */
 export const FP_CONSENT_POLICY_DRAFT_AI = {
+  // Carries the same DBA naming as the live policy: full form
+  // "First Profit (operated by The 120)" on FIRST mention, short "First Profit"
+  // after. See FP_CONSENT_POLICY's docblock for the rule; the guard test pins
+  // it on this object too, so activating this draft cannot regress the naming.
+  //
+  // ⚠ VERSION MUST BE RENUMBERED BEFORE PUBLISHING. 2026-08-17.1 (the naming
+  // bump) shipped AFTER this draft was authored, so "2026-08-14.1" now sorts
+  // BELOW the rendered version. Appending it as-is would break the
+  // last-entry-equals-rendered-version pin and, worse, would publish an
+  // AI-disclosure version that policyVersionAtLeast reads as OLDER than a
+  // consent already captured without that disclosure. Give it a date at or
+  // after the then-current rendered version when it is activated.
   version: "2026-08-14.1",
   text:
     "I confirm I am the parent or legal guardian of the child named in this " +
-    "signup, and I am at least 18 years old. I consent to The 120 creating an " +
+    "signup, and I am at least 18 years old. I consent to First Profit " +
+    "(operated by The 120) " +
+    "creating an " +
     "account for my child so they can play and learn, through various " +
     "applications, and that these apps will store the limited information " +
     "needed to run this account (my child's first name, last name, age, and " +
-    "information added inside the app, which are used only to improve The 120 " +
+    "information added inside the app, which are used only to improve First " +
+    "Profit " +
     "and may be kept for up to twelve months after account deletion). I " +
-    "separately consent to The 120 publishing a public web page for my child " +
+    "separately consent to First Profit publishing a public web page for my child " +
     "on the firstprofit.school domain, where my child's first name becomes " +
     "part of the web address (for example firstprofit.school/ethan), and " +
     "where my child's first name and what my child writes about their " +
@@ -225,23 +276,27 @@ export const FP_CONSENT_POLICY_DRAFT_AI = {
     "shared. I understand that these pages ask search engines not to list " +
     "them, that my child's last name, age, photograph, and contact details " +
     "are never published, and that I can take my child's page offline at any " +
-    "time from my family dashboard. I separately consent to The 120 collecting " +
+    "time from my family dashboard. I separately consent to First Profit " +
+    "collecting " +
     "a photo of my child, if I choose to provide one, and sending that photo " +
     "to a third-party artificial intelligence image service that draws the " +
     "story and hero artwork in my child's graphic novel. I understand that " +
-    "the photo leaves The 120's systems when it is sent to that service, that " +
+    "the photo leaves First Profit's systems when it is sent to that service, " +
+    "that " +
     "[FOUNDER TO CONFIRM: the provider's retention period and no-training " +
-    "commitment, in plain words], and that The 120 deletes the photo from its " +
+    "commitment, in plain words], and that First Profit deletes the photo from " +
+    "its " +
     "own systems as soon as the artwork has been created, whether or not the " +
     "artwork succeeded. I understand that providing a photo is optional, that " +
     "my child's account works fully without one, that I can decline this " +
-    "during signup or revoke it at any time by contacting The 120, and that " +
+    "during signup or revoke it at any time by contacting First Profit, and that " +
     "when I revoke it the photo and the artwork created from it are deleted. I " +
     "understand that I can review or delete my child's account by contacting " +
-    "The120, that I can withdraw consent at any time by contacting The 120, " +
+    "First Profit, that I can withdraw consent at any time by contacting " +
+    "First Profit, " +
     "and that my consent is recorded with the version of this notice shown " +
-    "above. I understand that The120 may change the terms of service at any " +
-    "time.",
+    "above. I understand that First Profit may change the terms of service at " +
+    "any time.",
 } as const;
 
 /** The literal the activation checklist above must resolve. Exported so a test

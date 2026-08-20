@@ -35,6 +35,7 @@
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseParentToken } from "@/app/lib/supabase/parent-token";
+import { COVER_DATA_URL_MAX } from "@/app/lib/fp/cover-store-rules";
 import {
   buildStudentCreateUserPayload,
   validateStudentPassword,
@@ -100,6 +101,15 @@ const childSchema = z
     coverLook: z.enum(FP_STORY_LOOK_IDS).optional(),
     heroVibe: z.enum(FP_HERO_VIBES).optional(),
     heroGender: z.enum(FP_HERO_GENDERS).optional(),
+    // (fpv04 U7d) The GENERATED cover artifact + spend count, previously sent
+    // by the FP client and silently .strip()ed here. `.catch(undefined)` is
+    // load-bearing on both: these are DECORATION, and a malformed or oversized
+    // value must degrade to "no cover carried" — never 401 a mint the family
+    // has already earned. The authoritative content gate (prefix whitelist,
+    // COVER_DATA_URL_MAX bound) runs in child-core via asStoredCoverDataUrl;
+    // this bound only keeps a hostile mega-string from riding to the core.
+    coverDataUrl: z.string().max(COVER_DATA_URL_MAX).optional().catch(undefined),
+    coverGenerationCount: z.number().int().min(0).max(999).optional().catch(undefined),
   })
   // .strip() (the zod default), NOT .strict(): the canonical body is now
   // `{ attemptId, childFirstName, childPassword, childGrade? }`. As of U15 the FP
@@ -276,6 +286,8 @@ export async function POST(req: Request): Promise<Response> {
       childPassword,
       coverLook: data.coverLook,
       heroVibe: data.heroVibe,
+      coverDataUrl: data.coverDataUrl,
+      coverGenerationCount: data.coverGenerationCount,
       heroGender: data.heroGender,
     });
 

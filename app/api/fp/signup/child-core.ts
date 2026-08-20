@@ -65,6 +65,7 @@ import { ensurePlayerProfile } from "../login/profile-core";
 import { ensurePathFamilyForParent } from "@/app/lib/fp/provision-core";
 import { validateStudentPassword } from "@/app/lib/fp/provision-rules";
 import { mintUsernameFromNames, usernameLocalPart } from "@/app/lib/fp/fp-username-rules";
+import { asStoredCoverDataUrl, decideCoverStatusWrite } from "@/app/lib/fp/cover-store-rules";
 import { gradeVerdict } from "@/app/lib/funnel/child-rules";
 import { APPLICANT_ENTRY_STATE } from "@/app/lib/funnel/applicant-rules";
 
@@ -164,6 +165,25 @@ export type CreateChildInput = {
    *  cover draw needs to know). Best-effort decoration — never fails a mint. */
   heroVibe?: string | null;
   heroGender?: string | null;
+  /**
+   * fpv04 U7d — the GENERATED cover artifact from the FP signup track's
+   * CoverDraftStudio (the Gemini-drawn "Day 1 of Building My Empire" cover the
+   * parent locked in), as a raster data URL. Until this field existed the FP
+   * client already SENT it and the route's `.strip()` silently discarded it —
+   * the kid's account never received the cover their family chose.
+   *
+   * Persisted the DERIVED way (cover-store-rules: source "derived", no blob
+   * key): the bytes live in `children.fp_cover_data_url` beside
+   * `fp_cover_status: "final"`, which is exactly the pair both sign-in doors
+   * (`deriveCoverSessionFields`) already serve verbatim. Validated through
+   * `asStoredCoverDataUrl` — the storage authority's own whitelist/bound — and
+   * on ANY validation failure the mint proceeds coverless. Best-effort
+   * decoration: a cover must never cost a family their account.
+   */
+  coverDataUrl?: string | null;
+  /** Rides the artifact: how many paid generations the signup spent (the FP
+   *  three-draft budget). Insane values degrade to 1, never refuse. */
+  coverGenerationCount?: number | null;
 };
 
 export type CreateChildRefusal =
@@ -502,6 +522,50 @@ export async function createChild(
         console.error(
           `[fp/signup/child] hero redraw-inputs write failed (non-fatal): ${deco.error.message}`
         );
+      }
+    }
+
+    // 8c. fpv04 U7d — persist the GENERATED cover artifact onto the child row,
+    //     the same best-effort decoration posture as 8b. The gate is the
+    //     storage authority's own: `asStoredCoverDataUrl` (whitelisted prefix,
+    //     bounded length) narrows the value or drops it, and
+    //     `decideCoverStatusWrite` (source: "derived" — bytes in the row, no
+    //     blob key to name) authorizes the "final" status the sign-in doors key
+    //     on. Both doors (`deriveCoverSessionFields`) then serve this exact
+    //     string verbatim on the kid's first sign-in. Any failure here mints a
+    //     coverless child, never a failed mint.
+    const coverArtifact = asStoredCoverDataUrl(input.coverDataUrl);
+    if (coverArtifact) {
+      const allowed = decideCoverStatusWrite({
+        status: "final",
+        scope: "child",
+        ownerId: childId,
+        coverBlobKey: null,
+        blobConfirmed: false,
+        source: "derived",
+      });
+      if (!allowed.ok) {
+        console.error(
+          `[fp/signup/child] cover artifact status write refused (non-fatal): ${allowed.detail}`
+        );
+      } else {
+        const generationCount =
+          Number.isInteger(input.coverGenerationCount) && (input.coverGenerationCount as number) > 0
+            ? (input.coverGenerationCount as number)
+            : 1;
+        const cover = await admin
+          .from("children")
+          .update({
+            fp_cover_data_url: coverArtifact,
+            fp_cover_status: "final",
+            fp_cover_generation_count: generationCount,
+          })
+          .eq("id", childId);
+        if (cover.error) {
+          console.error(
+            `[fp/signup/child] cover artifact write failed (non-fatal): ${cover.error.message}`
+          );
+        }
       }
     }
 

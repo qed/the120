@@ -930,6 +930,70 @@ describe("createChild — fpv04 U5a cover seed + hero redraw inputs", () => {
   });
 });
 
+/* ------------------------- fpv04 U7d: the GENERATED cover artifact carry */
+
+describe("createChild — fpv04 U7d generated cover artifact", () => {
+  const coverWrite = (calls: State[]) =>
+    calls.find(
+      (c) =>
+        c.client === "admin" &&
+        c.table === "children" &&
+        c.op === "update" &&
+        c.row !== undefined &&
+        "fp_cover_data_url" in (c.row as Record<string, unknown>)
+    );
+
+  it("a valid raster artifact lands on the child row as a served 'final' cover", async () => {
+    const { deps, calls } = build();
+    const res = await createChild(deps, {
+      ...input,
+      coverDataUrl: "data:image/png;base64,QUJDRA==",
+      coverGenerationCount: 2,
+    });
+    expect(res.ok).toBe(true);
+    const write = coverWrite(calls);
+    expect(write?.row).toEqual({
+      fp_cover_data_url: "data:image/png;base64,QUJDRA==",
+      fp_cover_status: "final",
+      fp_cover_generation_count: 2,
+    });
+    expect(write?.filters).toMatchObject({ id: "child1" });
+  });
+
+  it("a non-whitelisted or bare-prefix artifact mints a COVERLESS child, never a refused one", async () => {
+    const { deps, calls } = build();
+    const res = await createChild(deps, {
+      ...input,
+      // A document, not an image — asStoredCoverDataUrl must drop it.
+      coverDataUrl: "data:text/html;base64,QUJDRA==",
+    });
+    expect(res.ok).toBe(true);
+    expect(coverWrite(calls)).toBeUndefined();
+
+    const { deps: deps2, calls: calls2 } = build();
+    // Prefix-only (no bytes): half a data URL is a broken image, dropped too.
+    const res2 = await createChild(deps2, { ...input, coverDataUrl: "data:image/png;base64," });
+    expect(res2.ok).toBe(true);
+    expect(coverWrite(calls2)).toBeUndefined();
+  });
+
+  it("an insane generation count degrades to 1 (a cover is never refused over its counter)", async () => {
+    const { deps, calls } = build();
+    await createChild(deps, {
+      ...input,
+      coverDataUrl: "data:image/jpeg;base64,QUJDRA==",
+      coverGenerationCount: -7,
+    });
+    expect((coverWrite(calls)?.row as Record<string, unknown>).fp_cover_generation_count).toBe(1);
+  });
+
+  it("no artifact → no cover write (pre-U7d parity, byte-identical mint)", async () => {
+    const { deps, calls } = build();
+    await createChild(deps, input);
+    expect(coverWrite(calls)).toBeUndefined();
+  });
+});
+
 /* ------------- fpv04 U5a: the INSERT-path seed survives a stale UPDATE ---- */
 
 /**

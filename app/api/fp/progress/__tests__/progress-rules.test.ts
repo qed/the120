@@ -639,6 +639,38 @@ describe("progress rules — shapeProgress happy path", () => {
     }
   });
 
+  it("carries bounded relational parent contact only when a grouping key exists", () => {
+    const [withContact, withoutKey] = shapeProgress(
+      [
+        child({
+          id: "c-1",
+          follow_up_parent_key: " parent-1 ",
+          follow_up_parent_name: " Morgan Lee ",
+          follow_up_parent_phone: " 416-555-0100 ",
+          follow_up_child_name: " Alex Lee ",
+        }),
+        child({
+          id: "c-2",
+          fp_username: "sam.fp",
+          follow_up_parent_key: "",
+          follow_up_parent_name: "Should not leak",
+          follow_up_parent_phone: "416-555-0199",
+          follow_up_child_name: "Sam",
+        }),
+      ],
+      [],
+      [],
+      ASK_ALL,
+    );
+    expect(withContact?.followUpContact).toEqual({
+      parentKey: "parent-1",
+      parentName: "Morgan Lee",
+      parentPhone: "416-555-0100",
+      childName: "Alex Lee",
+    });
+    expect(withoutKey).not.toHaveProperty("followUpContact");
+  });
+
   it("first row wins on a duplicate profile or save (unreachable per schema; intent pinned)", () => {
     const profiles = [
       { id: "p-first", child_id: "c-1" },

@@ -63,7 +63,7 @@
  * re-use of this one.
  *
  * ── Reads, not embeds ──
- * Three batched id-set reads (children → fp_player_profiles → fp_player_saves),
+ * The roster is followed by batched parent-contact, profile and save reads,
  * never a PostgREST embedded select: the same proven pattern the suggestions
  * route uses, and the one the in-memory fake-supabase harness can actually
  * exercise. All reads run with the SERVICE ROLE; the staff gate is the sole
@@ -170,6 +170,35 @@ type PageResult<T> = {
   data: T[] | null;
   error: { message: string } | null;
 };
+
+type ProgressParentContactRow = {
+  id: string;
+  first_name?: unknown;
+  last_name?: unknown;
+  phone?: unknown;
+};
+
+type ProgressChildContactRow = ProgressChildRowLike & {
+  parent_id?: unknown;
+  first_name?: unknown;
+  last_name?: unknown;
+};
+
+function joinedName(first: unknown, last: unknown): string | null {
+  const parts = [first, last]
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return null;
+  const joined = parts.join(" ");
+  return joined.length <= 160 ? joined : null;
+}
+
+function boundedPhone(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.length <= 40 ? trimmed : null;
+}
 
 /**
  * A read either succeeded or refused, and WHY it refused is load-bearing even
@@ -565,19 +594,18 @@ export async function GET(req: Request): Promise<Response> {
 
     // ── 1. The roster. `fp_username is not null` is the enrolled-in-FP filter
     // (the column is server-managed and only set at provisioning), and
-    // shapeProgress re-checks it as the fail-closed second half. No `parent_id`
-    // (the test-family exclusion is gone — see the header) and no `birth_year` /
-    // `grade` (band left the wire shape in the 2026-08-05 redesign): this
-    // endpoint has no business reading a child's date of birth under the service
-    // role for a column nothing consumes.
-    const childrenRead = await readAllPages<ProgressChildRowLike>(
+    // shapeProgress re-checks it as the fail-closed second half. Parent and child
+    // names plus the parent's phone support the staff-only follow-up disclosure;
+    // no `birth_year` / `grade` is needed because band left the wire shape in the
+    // 2026-08-05 redesign.
+    const childrenRead = await readAllPages<ProgressChildContactRow>(
       "children read",
       PROGRESS_PAGE_SIZE,
       (row) => row.id,
       (after, limit) => {
         let q = admin
           .from("children")
-          .select("id, fp_username")
+          .select("id, parent_id, first_name, last_name, fp_username")
           .not("fp_username", "is", null);
         if (after !== null) q = q.gt("id", after);
         return q.order("id", { ascending: true }).limit(limit);
@@ -586,7 +614,56 @@ export async function GET(req: Request): Promise<Response> {
     );
     if (!childrenRead.ok) return refuseRead(childrenRead.reason);
 
-    // ── 2. Profiles by child id. A child with no profile row is KEPT by the
+    // ── 2. Parent contacts for the ACTIONABLE follow-up disclosure. The main
+    // Watchtower remains aggregate-only; the client projects these fields out
+    // of every aggregate calculation and renders them only after staff opens a
+    // "Needs follow-up" count. Phone is intentionally the only contact method
+    // read: it answers the owner's proactive-call requirement without turning
+    // the dashboard into a general family export.
+    const parentIds = [
+      ...new Set(
+        childrenRead.rows
+          .map((child) => child.parent_id)
+          .filter((id): id is string => typeof id === "string" && id.length > 0),
+      ),
+    ];
+    const parentsRead = await readByIdSet<ProgressParentContactRow>(
+      "parent contacts read",
+      parentIds,
+      PROGRESS_PAGE_SIZE,
+      (row) => row.id,
+      (chunk, after, limit) => {
+        let q = admin
+          .from("parents")
+          .select("id, first_name, last_name, phone")
+          .in("id", chunk);
+        if (after !== null) q = q.gt("id", after);
+        return q.order("id", { ascending: true }).limit(limit);
+      },
+      { rowsRead: 0, roundTrips: 0, deadlineAt }
+    );
+    if (!parentsRead.ok) return refuseRead(parentsRead.reason);
+    const parentById = new Map(parentsRead.rows.map((parent) => [parent.id, parent]));
+    const childrenWithContacts: ProgressChildRowLike[] = childrenRead.rows.map((child) => {
+      const parentId = typeof child.parent_id === "string" ? child.parent_id : null;
+      const parent = parentId ? parentById.get(parentId) : undefined;
+      return {
+        id: child.id,
+        fp_username: child.fp_username,
+        ...(parentId
+          ? {
+              follow_up_parent_key: parentId,
+              follow_up_parent_name: parent
+                ? joinedName(parent.first_name, parent.last_name)
+                : null,
+              follow_up_parent_phone: parent ? boundedPhone(parent.phone) : null,
+              follow_up_child_name: joinedName(child.first_name, child.last_name),
+            }
+          : {}),
+      };
+    });
+
+    // ── 3. Profiles by child id. A child with no profile row is KEPT by the
     // pure module with empty ideas — that is the "never signed in" signal, and
     // dropping it would hide exactly the child this board exists to notice.
     const childIds = childrenRead.rows.map((c) => c.id);
@@ -607,7 +684,7 @@ export async function GET(req: Request): Promise<Response> {
     );
     if (!profilesRead.ok) return refuseRead(profilesRead.reason);
 
-    // ── 3. Saves by profile id. `profile_id` IS the primary key here, so it is
+    // ── 4. Saves by profile id. `profile_id` IS the primary key here, so it is
     // the stable keyset cursor. This read gets its OWN, much smaller page size:
     // it is the only one carrying `doc`, which is bounded in COMPRESSED bytes,
     // not rows (see PROGRESS_SAVES_PAGE_SIZE).
@@ -636,7 +713,7 @@ export async function GET(req: Request): Promise<Response> {
     const now = new Date();
     const walkNotes: ProgressWalkNote[] = [];
     const children = shapeProgress(
-      childrenRead.rows,
+      childrenWithContacts,
       profilesRead.rows,
       savesRead.rows,
       requested.ids,

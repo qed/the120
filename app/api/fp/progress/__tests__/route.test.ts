@@ -172,19 +172,24 @@ const IN_REQUEST_STAMP = 1_700_000_001_000;
 const OUTSIDE_STAMP = 1_700_000_002_000;
 
 /**
- * The roster fixture. No `parent_id` and no `families` table: the test-family
- * exclusion left this route entirely (`families.is_test` is a CRM/nurture flag,
- * not an FP-enrolment flag). No `birth_year` / `grade` either — band left the
- * wire shape in the 2026-08-05 redesign.
+ * The roster fixture. There is no `families` table: the test-family exclusion
+ * left this route entirely (`families.is_test` is a CRM/nurture flag, not an
+ * FP-enrolment flag). Parent linkage supports the staff follow-up disclosure.
+ * No `birth_year` / `grade` either — band left the wire shape in the
+ * 2026-08-05 redesign.
  */
 function seed(): void {
   store.value = {
     staff: [{ id: STAFF_ID, email: "peter@the120.school", role: "admin", is_active: true }],
+    parents: [
+      { id: "parent-1", first_name: "Morgan", last_name: "Lee", phone: "416-555-0100" },
+      { id: "parent-2", first_name: "Ari", last_name: "Chen", phone: "" },
+    ],
     children: [
-      { id: "c-1", fp_username: "alex" },
-      { id: "c-3", fp_username: "cy" },
+      { id: "c-1", parent_id: "parent-1", first_name: "Alex", last_name: "Lee", fp_username: "alex" },
+      { id: "c-3", parent_id: "parent-2", first_name: "Cy", last_name: "Chen", fp_username: "cy" },
       // never signed in: roster row, no profile, no save
-      { id: "c-5", fp_username: "eve" },
+      { id: "c-5", parent_id: "parent-1", first_name: "Eve", last_name: "Lee", fp_username: "eve" },
       // not provisioned into FP at all → never in the query
       { id: "c-6", fp_username: null },
     ],
@@ -239,7 +244,17 @@ const get = (opts?: { origin?: string; token?: string | null; tasks?: string | n
 
 type Body = {
   ok: boolean;
-  children: { username: string; ideas: unknown[]; businesses: unknown[] }[];
+  children: {
+    username: string;
+    ideas: unknown[];
+    businesses: unknown[];
+    followUpContact?: {
+      parentKey: string;
+      parentName: string | null;
+      parentPhone: string | null;
+      childName: string | null;
+    };
+  }[];
 };
 
 const usernames = async (res: Response): Promise<string[]> =>
@@ -396,6 +411,12 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     const alex = body.children.find((c) => c.username === "alex")!;
     expect(alex).toEqual({
       username: "alex",
+      followUpContact: {
+        parentKey: "parent-1",
+        parentName: "Morgan Lee",
+        parentPhone: "416-555-0100",
+        childName: "Alex Lee",
+      },
       truncated: false,
       docUnreadable: false,
       ideas: [
@@ -437,6 +458,12 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     const eve = body.children.find((c) => c.username === "eve")!;
     expect(eve).toEqual({
       username: "eve",
+      followUpContact: {
+        parentKey: "parent-1",
+        parentName: "Morgan Lee",
+        parentPhone: "416-555-0100",
+        childName: "Eve Lee",
+      },
       truncated: false,
       docUnreadable: false,
       ideas: [],
@@ -463,14 +490,20 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     expect(leaves.has("Dog Treats")).toBe(false);
   });
 
-  it("reads NO parent_id and NO families table — the test-family exclusion is gone", async () => {
+  it("does not consult the CRM families table for FP enrolment or contact data", async () => {
     // `families.is_test` is a CRM/nurture-visibility flag: stamping a REAL beta
     // family to stop nurture mail must never delete their children from this
     // board. The read simply does not exist any more.
     await get();
     expect(callLog).not.toContain("db:families");
     expect(new Set(callLog.filter((c) => c.startsWith("db:")))).toEqual(
-      new Set(["db:staff", "db:children", "db:fp_player_profiles", "db:fp_player_saves"])
+      new Set([
+        "db:staff",
+        "db:children",
+        "db:parents",
+        "db:fp_player_profiles",
+        "db:fp_player_saves",
+      ])
     );
   });
 
@@ -833,7 +866,7 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
 
   it("a DB outage at EACH read site releases BOTH buckets — not one, not neither", async () => {
     const { userKey, ipKey } = deriveProgressRateLimitKeys("unknown", STAFF_ID);
-    for (const table of ["staff", "children", "fp_player_profiles", "fp_player_saves"]) {
+    for (const table of ["staff", "children", "parents", "fp_player_profiles", "fp_player_saves"]) {
       rateRef.released = [];
       faults.value = { [`select:${table}`]: { kind: "error", error: { message: "boom" } } };
       const res = await get();
@@ -850,7 +883,7 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     // refunded it. The refund policy must not depend on which way supabase-js
     // chose to report the same failure.
     const { userKey, ipKey } = deriveProgressRateLimitKeys("unknown", STAFF_ID);
-    for (const table of ["children", "fp_player_profiles", "fp_player_saves"]) {
+    for (const table of ["children", "parents", "fp_player_profiles", "fp_player_saves"]) {
       rateRef.released = [];
       throwingTables.clear();
       throwingTables.add(table);
@@ -1105,9 +1138,9 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
 
   // ── The queries as ISSUED, not merely their rows ──
 
-  it("asks the roster for EXACTLY `id, fp_username`, filtered to FP-enrolled children", async () => {
+  it("reads only the roster and parent fields needed for progress and proactive calls", async () => {
     // Asserted against the QUERY, not the body: the fake used to discard the
-    // select list, so re-adding `birth_year, grade, parent_id` changed no
+    // select list, so re-adding `birth_year, grade` changed no
     // response anywhere and survived the suite. Reading a child's date of birth
     // under the service role for a column nothing consumes is precisely what
     // this route's header promises it does not do — a claim the body cannot
@@ -1117,7 +1150,7 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     const roster = dbCalls.filter((c) => c.table === "children");
     expect(roster.length).toBeGreaterThan(0);
     for (const call of roster) {
-      expect(call.columns).toBe("id, fp_username");
+      expect(call.columns).toBe("id, parent_id, first_name, last_name, fp_username");
       expect(call.filters).toContainEqual({
         op: "not.is",
         col: "fp_username",
@@ -1125,8 +1158,9 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
       });
       expect(call.order).toEqual({ col: "id", ascending: true });
     }
-    // The other two reads carry only what the shaper needs, too.
+    // The other reads carry only what the shaper or parent follow-up card needs.
     for (const [table, columns] of [
+      ["parents", "id, first_name, last_name, phone"],
       ["fp_player_profiles", "id, child_id"],
       ["fp_player_saves", "profile_id, doc"],
     ] as const) {
@@ -1134,10 +1168,9 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
       expect(reads.length, table).toBeGreaterThan(0);
       for (const call of reads) expect(call.columns, table).toBe(columns);
     }
-    // No column anywhere in the whole invocation names a child's identity or
-    // family beyond the FP username the board displays.
+    // Sensitive child demographic columns and wildcard reads remain absent.
     const asked = dbCalls.flatMap((c) => (c.columns ?? "").split(",").map((s) => s.trim()));
-    for (const forbidden of ["birth_year", "grade", "parent_id", "*"]) {
+    for (const forbidden of ["birth_year", "grade", "*"]) {
       expect(asked, forbidden).not.toContain(forbidden);
     }
   });
@@ -1273,7 +1306,7 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     expect(first.snap.headers.some((h) => h.startsWith("retry-after"))).toBe(false);
   });
 
-  it("every TIMEOUT site refuses identically to every other 401 — all five of them", async () => {
+  it("every required-read TIMEOUT site refuses identically to every other 401", async () => {
     // Timeouts live in the 401 family (a stall is an outage), and each site is a
     // separate `withFwTimeout` call that could drift on its own. Driven under
     // fake timers because the whole point is that nothing ever settles.
@@ -1287,6 +1320,9 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
       }],
       ["children read", () => {
         faults.value["select:children"] = { kind: "hang" };
+      }],
+      ["parent contacts read", () => {
+        faults.value["select:parents"] = { kind: "hang" };
       }],
       ["profiles read", () => {
         faults.value["select:fp_player_profiles"] = { kind: "hang" };

@@ -871,6 +871,19 @@ export type ProgressChild = {
    */
   username: string;
   /**
+   * Parent contact is present only for the staff-only follow-up disclosure.
+   * It is deliberately grouped under one optional key so an older backend can
+   * coexist with a newer Watchtower client without fabricating "missing phone"
+   * from a field that was never loaded. `parentKey` is an opaque grouping key;
+   * the client must never render it.
+   */
+  followUpContact?: {
+    parentKey: string;
+    parentName: string | null;
+    parentPhone: string | null;
+    childName: string | null;
+  };
+  /**
    * A walk bound fired somewhere in THIS CHILD'S DOC — it exceeded an entry cap,
    * a map-key length, or an id length (see the module header).
    *
@@ -903,6 +916,11 @@ export type ProgressChild = {
 export type ProgressChildRowLike = {
   id: string;
   fp_username?: unknown;
+  /** Server-projected staff contact fields. They are not read from a save doc. */
+  follow_up_parent_key?: unknown;
+  follow_up_parent_name?: unknown;
+  follow_up_parent_phone?: unknown;
+  follow_up_child_name?: unknown;
 };
 
 export type ProgressProfileRowLike = { id: string; child_id: string };
@@ -1499,8 +1517,18 @@ export function shapeProgress(
         docUnreadable: walked.docUnreadable,
       });
     }
+    const parentKey = boundedContactText(child.follow_up_parent_key, 128);
+    const followUpContact = parentKey
+      ? {
+          parentKey,
+          parentName: boundedContactText(child.follow_up_parent_name, 160),
+          parentPhone: boundedContactText(child.follow_up_parent_phone, 40),
+          childName: boundedContactText(child.follow_up_child_name, 160),
+        }
+      : undefined;
     out.push({
       username: child.fp_username,
+      ...(followUpContact ? { followUpContact } : {}),
       truncated: walked.truncated,
       docUnreadable: walked.docUnreadable,
       ideas: walked.ideas.map((idea) => projectIdea(idea, taskIds)),
@@ -1508,4 +1536,17 @@ export function shapeProgress(
     });
   }
   return out;
+}
+
+/**
+ * Staff contact text comes from ordinary relational columns rather than the
+ * child-authored save, but it is still untrusted database input. Keep the wire
+ * bounded, trim whitespace-only placeholders to null, and never truncate an
+ * opaque grouping key into a collision.
+ */
+function boundedContactText(value: unknown, maxChars: number): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > maxChars) return null;
+  return trimmed;
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildRoundOneCheckoutSession,
   deriveRoundOneRateLimitKeys,
@@ -151,8 +151,6 @@ describe("Stripe Checkout shape", () => {
       productVersion: 1,
       priceId: "price_round_one_test",
       customerEmail: "parent@example.com",
-      origin: "https://firstprofit.school",
-      nowEpochSeconds: 1_800_000_000,
     };
     const built = buildRoundOneCheckoutSession(input);
     expect(built.idempotencyKey).toBe(`fp-round-one-order:${ORDER_ID}:v1`);
@@ -178,13 +176,31 @@ describe("Stripe Checkout shape", () => {
       product_version: "1",
     });
     expect(built.params.payment_intent_data?.metadata).toEqual(built.params.metadata);
-    expect(built.params.expires_at).toBe(1_800_001_800);
+    expect("expires_at" in built.params).toBe(false);
     expect(built.params.success_url).toBe(
       `https://firstprofit.school/parent?roundOne=success&child=${CHILD_ID}&session_id={CHECKOUT_SESSION_ID}`
     );
     expect(built.params.cancel_url).toBe(
       `https://firstprofit.school/parent?roundOne=cancelled&child=${CHILD_ID}`
     );
+  });
+
+  it("keeps every Stripe creation parameter stable when wall-clock time advances", () => {
+    const input = {
+      orderId: ORDER_ID,
+      parentId: PARENT_ID,
+      childId: CHILD_ID,
+      productVersion: 1,
+      priceId: "price_round_one_test",
+      customerEmail: "parent@example.com",
+    };
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+    const first = buildRoundOneCheckoutSession(input);
+    clock.mockReturnValue(1_800_000_900_000);
+    const retry = buildRoundOneCheckoutSession(input);
+    clock.mockRestore();
+    expect(retry).toEqual(first);
+    expect("expires_at" in retry.params).toBe(false);
   });
 
   it("reuses only a live Stripe-hosted open session", () => {

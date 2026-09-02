@@ -28,6 +28,9 @@ export const ROUND_ONE_LAST_INCLUDED_TASK_ID = "1.5.5";
 export const ROUND_ONE_AMOUNT_CENTS = 25_000;
 export const ROUND_ONE_CURRENCY = "cad";
 export const ROUND_ONE_STRIPE_API_VERSION = "2026-07-29.dahlia" as const;
+/** One canonical return host keeps Stripe idempotency parameters stable even
+ * when the parent starts on `www` or an allowed preview origin. */
+export const ROUND_ONE_RETURN_ORIGIN = "https://firstprofit.school";
 
 /**
  * Stripe recommends a human-readable integration label with an eight-letter
@@ -216,9 +219,6 @@ export type BuildRoundOneCheckoutInput = {
   productVersion: number;
   priceId: string;
   customerEmail: string | null | undefined;
-  /** Exact-match origin already approved by the CORS gate. */
-  origin: string;
-  nowEpochSeconds: number;
 };
 
 export function buildRoundOneCheckoutSession(
@@ -259,18 +259,20 @@ export function buildRoundOneCheckoutSession(
         metadata,
       },
       success_url:
-        `${input.origin}/parent?roundOne=success&child=${child}`
+        `${ROUND_ONE_RETURN_ORIGIN}/parent?roundOne=success&child=${child}`
         + "&session_id={CHECKOUT_SESSION_ID}",
-      cancel_url: `${input.origin}/parent?roundOne=cancelled&child=${child}`,
+      cancel_url: `${ROUND_ONE_RETURN_ORIGIN}/parent?roundOne=cancelled&child=${child}`,
       custom_text: {
         submit: {
           message:
             "First Profit Round 1 is a one-child, non-refundable CAD $250 total today. Your phone number is used for First Profit program-support calls about this child.",
         },
       },
-      // Stripe's minimum. This narrows the abandoned/double-checkout window;
-      // the DB's partial unique index provides the real concurrency arbiter.
-      expires_at: input.nowEpochSeconds + 30 * 60,
+      // Deliberately omit `expires_at` and accept Stripe's assigned expiry.
+      // The persisted order is the idempotency anchor: if Stripe creates the
+      // Session but our response is lost before the DB attachment commits, a
+      // retry must send byte-for-byte identical parameters under the same key.
+      // A request-time expiry would drift and Stripe would reject the retry.
     },
     // The persisted order id anchors retries. A network failure after Stripe
     // creates the session returns that same session on the next request.

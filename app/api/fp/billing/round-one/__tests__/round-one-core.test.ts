@@ -82,7 +82,6 @@ const checkoutInput = () => ({
   ...statusInput(),
   customerEmail: "parent@example.com",
   priceId: "price_round_one_test",
-  origin: "https://firstprofit.school",
   nowEpochSeconds: 1_800_000_000,
 });
 
@@ -253,6 +252,38 @@ describe("startRoundOneCheckout", () => {
     expect(await startRoundOneCheckout(deps, stripe, checkoutInput())).toEqual({
       kind: "unavailable",
     });
+  });
+
+  it("replays identical Stripe creation after a lost attachment response", async () => {
+    const created = {
+      id: "cs_lost_response",
+      url: "https://checkout.stripe.com/c/pay/cs_lost_response",
+      expires_at: 1_800_086_400,
+      status: "open" as const,
+    };
+    vi.mocked(stripe.createSession).mockResolvedValue(created);
+    vi.mocked(deps.attachCheckout)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    expect(await startRoundOneCheckout(deps, stripe, checkoutInput())).toEqual({
+      kind: "unavailable",
+    });
+    expect(
+      await startRoundOneCheckout(deps, stripe, {
+        ...checkoutInput(),
+        nowEpochSeconds: 1_800_000_900,
+      }),
+    ).toEqual({
+      kind: "checkout",
+      url: created.url,
+      reused: false,
+    });
+
+    expect(stripe.createSession).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(stripe.createSession).mock.calls[1]).toEqual(
+      vi.mocked(stripe.createSession).mock.calls[0],
+    );
   });
 
   it("refuses a mismatched Stripe Price before creating an order or collecting money", async () => {

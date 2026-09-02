@@ -176,12 +176,16 @@ A completed session whose webhook is still in flight returns `202`:
 { "ok": true, "status": "pending", "accessGranted": false }
 ```
 
-The return URLs land on `/parent?roundOne=success|cancelled&child=...`; neither
-browser return grants access. The parent panel must poll status.
+The return URLs always use the canonical `https://firstprofit.school` host and
+land on `/parent?roundOne=success|cancelled&child=...`; neither browser return
+grants access. Stripe assigns the Session expiry. Keeping the return host and
+creation parameters independent of request time/origin makes a lost-response
+retry byte-for-byte identical under the persisted order's idempotency key. The
+parent panel must poll status.
 If a parent uses Stripe's Back/Cancel link while the Checkout session is still
 open, the same panel offers Continue and the checkout route returns that exact
 session. A completed session returns `202` instead. It must never make the
-parent wait for the 30-minute expiry or create a second payment session.
+parent wait for the session to expire or create a second payment session.
 
 ### Parent status
 

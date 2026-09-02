@@ -92,7 +92,6 @@ export async function POST(req: Request): Promise<Response> {
           productKey: ROUND_ONE_PRODUCT_KEY,
           productVersion,
           priceId,
-          origin: ctx.origin,
           nowEpochSeconds: Math.floor(Date.now() / 1000),
         }
       );

@@ -131,7 +131,6 @@ export async function startRoundOneCheckout(
     productKey: string;
     productVersion: number;
     priceId: string;
-    origin: string;
     nowEpochSeconds: number;
   }
 ): Promise<StartRoundOneCheckoutResult> {
@@ -211,8 +210,6 @@ export async function startRoundOneCheckout(
       productVersion: input.productVersion,
       priceId: input.priceId,
       customerEmail: input.customerEmail,
-      origin: input.origin,
-      nowEpochSeconds: input.nowEpochSeconds,
     });
     let session;
     try {

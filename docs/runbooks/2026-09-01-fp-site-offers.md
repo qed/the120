@@ -32,7 +32,11 @@ password, card details, API key, or webhook secret.
   readiness message remain available even if delivery is parked.
 - Drafts may be prepared early, but checkout activation is server-authoritative:
   the child must have an active `phase:sell` Round One entitlement and task
-  1.2.1 must contain a confirmed, positive saved Price Picker value.
+  1.2.1 must contain a confirmed, positive saved Price Picker value. The exact
+  entitled catalog version must also have
+  `storefront_checkout_enabled = true`. That database switch starts `false`
+  and is independent from both paid course access and task-completion
+  enforcement.
 
 ## Required deployment order
 
@@ -49,9 +53,25 @@ password, card details, API key, or webhook secret.
 4. Deploy The120 with `app/api/fp/parent/site-offer/*` before exposing the
    parent UI.
 5. Deploy First Profit with the server-renderer and checkout handoff changes.
-6. Only after steps 1-5 pass the smoke test, set
+6. Keep the catalog row's `storefront_checkout_enabled` switch `false` while
+   verifying that drafts can be saved but neither an entitled parent nor the
+   anonymous public RPC can activate checkout. This is the fail-off smoke.
+7. Only after steps 1-6 pass, set
    `VITE_FP_SITE_OFFERS=true` in the First Profit target environment and rebuild
    the SPA. This is a build-time flag.
+8. After the rebuilt parent UI, First Profit renderer, and same-origin handoff
+   are all deployed, enable public checkout for the exact configured catalog
+   version:
+
+   ```sql
+   update public.fp_billing_products
+   set storefront_checkout_enabled = true
+   where product_key = 'round_one_sell'
+     and version = 1;
+   ```
+
+   Verify exactly one row changed. Do not enable a different or unverified
+   version. Then run the complete production smoke test below.
 
 ## Environment contract
 
@@ -108,11 +128,21 @@ account supports it.
    the new current parent receives only a fresh child-derived draft.
 10. Run family erasure. Confirm `fp_public_sites` is deleted before the player
     profile, including all offer, Payment Link and approval fields.
+11. Set `storefront_checkout_enabled = false` for the exact catalog version.
+    Confirm the approved offer remains visible, course access remains active,
+    `checkout_ready` becomes false, and the fresh handoff returns no URL. Turn
+    it back on only if the remainder of the matrix is green.
 
 ## Rollback / fail-off
 
 - Set `VITE_FP_SITE_OFFERS=false` (or remove it) and rebuild First Profit to
   hide the parent controls.
+- For the immediate server-authoritative fail-off, set
+  `fp_billing_products.storefront_checkout_enabled = false` for the exact
+  `round_one_sell` version. Both public RPCs re-check this row; the approved
+  offer may stay visible, but no CTA or Stripe destination is released. This
+  does not revoke Round One curriculum access or alter orders, entitlements,
+  or completion enforcement.
 - Existing public pages continue to render their original child projection.
 - Disable an individual checkout by setting it off through the authenticated
   parent flow; do not edit the public RPC to return cached destinations.

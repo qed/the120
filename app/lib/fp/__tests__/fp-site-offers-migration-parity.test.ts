@@ -109,4 +109,13 @@ describe("migration parity: fp_site_offers.sql", () => {
       ),
     ).toBe(true);
   });
+
+  it("binds both public checkout decisions to the entitled catalog version and its global fail-off", () => {
+    for (const body of [publicSite, checkout]) {
+      expect(body).toMatch(
+        /join\s+public\.fp_billing_products\s+b\s+on\s+b\.product_key\s*=\s*e\.product_key\s+and\s+b\.version\s*=\s*e\.product_version/i,
+      );
+      expect(body).toMatch(/b\.storefront_checkout_enabled\s*=\s*true/i);
+    }
+  });
 });

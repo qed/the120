@@ -180,10 +180,14 @@ as $$
 	       and exists (
 	         select 1
 	         from public.fp_billing_entitlements e
+	         join public.fp_billing_products b
+	           on b.product_key = e.product_key
+	          and b.version = e.product_version
 	         where e.child_id = c.id
 	           and e.product_key = 'round_one_sell'
 	           and e.access_code = 'phase:sell'
 	           and e.status = 'active'
+	           and b.storefront_checkout_enabled = true
 	       ))
     end
   from public.fp_public_sites s
@@ -224,10 +228,14 @@ as $$
     and exists (
       select 1
       from public.fp_billing_entitlements e
+      join public.fp_billing_products b
+        on b.product_key = e.product_key
+       and b.version = e.product_version
       where e.child_id = c.id
         and e.product_key = 'round_one_sell'
         and e.access_code = 'phase:sell'
         and e.status = 'active'
+        and b.storefront_checkout_enabled = true
     );
 $$;
 

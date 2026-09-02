@@ -207,23 +207,44 @@ async function readCheckoutContext(
     deps.log("[fp/site-offer] Round One product version is unavailable");
     return { seed, readiness: "unavailable" };
   }
-  const entitlement = await db
-    .from("fp_billing_entitlements")
-    .select("child_id")
-    .eq("child_id", childId)
-    .eq("product_key", ROUND_ONE_PRODUCT_KEY)
-    .eq("product_version", deps.roundOneProductVersion)
-    .eq("access_code", ROUND_ONE_ACCESS_CODE)
-    .eq("status", "active")
-    .maybeSingle();
+  const [entitlement, product] = await Promise.all([
+    db
+      .from("fp_billing_entitlements")
+      .select("child_id")
+      .eq("child_id", childId)
+      .eq("product_key", ROUND_ONE_PRODUCT_KEY)
+      .eq("product_version", deps.roundOneProductVersion)
+      .eq("access_code", ROUND_ONE_ACCESS_CODE)
+      .eq("status", "active")
+      .maybeSingle(),
+    db
+      .from("fp_billing_products")
+      .select("storefront_checkout_enabled")
+      .eq("product_key", ROUND_ONE_PRODUCT_KEY)
+      .eq("version", deps.roundOneProductVersion)
+      .maybeSingle(),
+  ]);
   if (entitlement.error) {
     deps.log(`[fp/site-offer] Round One entitlement read failed: ${entitlement.error.message}`);
   }
-  if (save.error || entitlement.error) return { seed, readiness: "unavailable" };
+  if (product.error) {
+    deps.log(`[fp/site-offer] storefront rollout read failed: ${product.error.message}`);
+  }
+  if (save.error || entitlement.error || product.error) {
+    return { seed, readiness: "unavailable" };
+  }
 
   const accessGranted =
     (entitlement.data as { child_id?: unknown } | null)?.child_id === childId;
   if (!accessGranted) return { seed, readiness: "round-one-required" };
+
+  // This DB-owned switch is the global emergency fail-off. It is deliberately
+  // independent from course access so disabling storefront checkout never
+  // revokes paid curriculum access or strands a learner inside Sell.
+  const storefrontEnabled =
+    (product.data as { storefront_checkout_enabled?: unknown } | null)
+      ?.storefront_checkout_enabled === true;
+  if (!storefrontEnabled) return { seed, readiness: "unavailable" };
 
   // Price Picker confirmation is not merely a prefill convenience here. The
   // saved child evidence must contain a positive, bounded price before a

@@ -26,6 +26,10 @@ create table if not exists public.fp_billing_products (
   amount integer not null check (amount > 0),
   currency text not null check (currency ~ '^[a-z]{3}$'),
   active boolean not null default true,
+  -- Separate from course access and completion enforcement. This is the
+  -- authoritative global fail-off for every public storefront checkout RPC;
+  -- it starts false and is enabled only after the hosted-site smoke matrix.
+  storefront_checkout_enabled boolean not null default false,
   -- Independent, server-owned rollout switch for the save trigger below. It
   -- starts false so applying this migration before the new client cannot strand
   -- an existing learner behind a gate the old UI cannot explain.
@@ -35,7 +39,8 @@ create table if not exists public.fp_billing_products (
 );
 
 alter table public.fp_billing_products
-  add column if not exists completion_enforcement_enabled boolean not null default false;
+  add column if not exists completion_enforcement_enabled boolean not null default false,
+  add column if not exists storefront_checkout_enabled boolean not null default false;
 
 -- The price is deliberately versioned. A future price is a new catalog row,
 -- never a mutation of the financial truth attached to historic orders.
@@ -51,6 +56,7 @@ insert into public.fp_billing_products (
   amount,
   currency,
   active,
+  storefront_checkout_enabled,
   completion_enforcement_enabled
 )
 values (
@@ -65,6 +71,7 @@ values (
   25000,
   'cad',
   true,
+  false,
   false
 )
 on conflict (product_key, version) do nothing;

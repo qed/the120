@@ -31,6 +31,15 @@ describe("Round One migration parity", () => {
     expect(sql).toContain("'sell'");
   });
 
+  it("seeds the public storefront fail-off independently and disabled", () => {
+    expect(sql).toContain(
+      "storefront_checkout_enabled boolean not null default false"
+    );
+    expect(sql).toMatch(
+      /insert into public\.fp_billing_products\s*\([\s\S]*?storefront_checkout_enabled[\s\S]*?completion_enforcement_enabled[\s\S]*?\)\s*values\s*\([\s\S]*?'round_one_sell'[\s\S]*?true,\s*false,\s*false\s*\)/
+    );
+  });
+
   it("models orders and entitlements separately from the legacy deposit lifecycle", () => {
     expect(sql).toContain("create table if not exists public.fp_billing_orders");
     expect(sql).toContain("create table if not exists public.fp_billing_entitlements");

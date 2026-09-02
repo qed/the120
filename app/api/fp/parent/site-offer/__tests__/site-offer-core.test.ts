@@ -31,6 +31,8 @@ function makeDeps(options: {
   saveError?: string;
   entitlement?: unknown;
   entitlementError?: string;
+  product?: unknown;
+  productError?: string;
   productVersion?: number | null;
   written?: unknown[];
 }) {
@@ -64,6 +66,12 @@ function makeDeps(options: {
       : { child_id: CHILD_ID },
     error: options.entitlementError ? { message: options.entitlementError } : null,
   });
+  const products = readChain({
+    data: Object.prototype.hasOwnProperty.call(options, "product")
+      ? options.product
+      : { storefront_checkout_enabled: true },
+    error: options.productError ? { message: options.productError } : null,
+  });
   const updateSelect = vi.fn(async () => ({ data: options.written ?? [], error: null }));
   const updateEq = vi.fn(() => ({ select: updateSelect }));
   const update = vi.fn((payload: Record<string, unknown>) => {
@@ -79,6 +87,7 @@ function makeDeps(options: {
       }
       if (table === "fp_player_saves") return saves;
       if (table === "fp_billing_entitlements") return entitlements;
+      if (table === "fp_billing_products") return products;
       throw new Error(`unexpected table ${table}`);
     }),
   } as unknown as SupabaseClient;
@@ -196,6 +205,42 @@ describe("site offer core", () => {
       ok: true,
       offer: { checkoutReadiness: "price-picker-required" },
     });
+  });
+
+  it("keeps drafts readable but globally fails checkout off without revoking course access", async () => {
+    const { deps } = makeDeps({
+      site: siteRow(),
+      product: { storefront_checkout_enabled: false },
+    });
+    const result = await loadSiteOfferForParent(deps, PARENT_ID, CHILD_ID);
+    expect(result).toMatchObject({
+      ok: true,
+      offer: {
+        enabled: true,
+        approved: true,
+        checkoutReadiness: "unavailable",
+      },
+    });
+
+    const saved = await saveSiteOfferForParent(deps, PARENT_ID, INPUT);
+    expect(saved).toEqual({
+      ok: false,
+      reason: "checkout-not-ready",
+      checkoutReadiness: "unavailable",
+    });
+  });
+
+  it.each([
+    ["missing", { product: null }],
+    ["unreadable", { productError: "schema cache not ready" }],
+  ])("fails activation closed when the storefront rollout row is %s", async (_label, options) => {
+    const { deps, captured } = makeDeps(options);
+    await expect(saveSiteOfferForParent(deps, PARENT_ID, INPUT)).resolves.toEqual({
+      ok: false,
+      reason: "checkout-not-ready",
+      checkoutReadiness: "unavailable",
+    });
+    expect(captured.update).toBeUndefined();
   });
 
   it("fails closed after a family transfer and does not disclose the former parent's link", async () => {

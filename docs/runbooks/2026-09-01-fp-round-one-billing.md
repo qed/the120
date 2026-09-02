@@ -14,6 +14,9 @@ change, deployment, or live payment was performed while authoring this work.
 - Free through: task `1.1.1`
 - Opens: tasks `1.1.2` through `1.5.5`
 - Access code: `phase:sell`
+- Storefront checkout: independently seeded off with
+  `storefront_checkout_enabled=false`; enabling paid curriculum access never
+  enables a public customer checkout by itself
 
 This is not The 120 seat deposit. It has no seat, admissions, refund-window,
 or provisioning semantics. Do not point it at the legacy deposit Price.
@@ -94,6 +97,12 @@ locks paid tasks closed; it never grants fallback access.
    verify that unpaid task 1.1.1 still saves, unpaid task 1.1.2 is refused, and a
    paid/coupon child can save 1.1.2. Reverting the switch to `false` is the
    completion-enforcement kill switch; it does not alter orders or entitlements.
+
+   `completion_enforcement_enabled` and `storefront_checkout_enabled` are
+   separate controls. The first gates paid task completion. The second gates
+   every public storefront checkout decision for the exact entitled product
+   version and stays `false` until the hosted-storefront deployment and smoke
+   matrix in `2026-09-01-fp-site-offers.md` are complete.
 
 Use Stripe test cards only until the test matrix below is complete. The
 customer-facing fee is non-refundable. If staff nevertheless issues an

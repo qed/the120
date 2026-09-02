@@ -76,9 +76,18 @@ export async function POST(req: Request): Promise<Response> {
   const charge = event.type === "charge.refunded"
     ? (event.data.object as Stripe.Charge)
     : null;
+  const dispute = event.type === "charge.dispute.created"
+    || event.type === "charge.dispute.closed"
+    ? (event.data.object as Stripe.Dispute)
+    : null;
 
   let metadata = metadataFrom(session?.metadata);
   let paymentIntentId = stripeObjectId(session?.payment_intent);
+  let processorObjectId: string | null = null;
+  let processorStatus: string | null = null;
+  let processorReason: string | null = null;
+  let processorAmount: number | null = null;
+  let processorTotalAmount: number | null = null;
   const needsCatalogProof = !!session && (
     event.type === "checkout.session.completed"
     || event.type === "checkout.session.async_payment_succeeded"
@@ -118,6 +127,10 @@ export async function POST(req: Request): Promise<Response> {
 
   if (charge) {
     paymentIntentId = stripeObjectId(charge.payment_intent);
+    processorObjectId = charge.id;
+    processorStatus = charge.refunded ? "fully_refunded" : "partially_refunded";
+    processorAmount = charge.amount_refunded;
+    processorTotalAmount = charge.amount;
     amountSubtotal = null;
     amountTotal = null;
     amountDiscount = null;
@@ -141,11 +154,59 @@ export async function POST(req: Request): Promise<Response> {
     }
   }
 
+  if (dispute) {
+    paymentIntentId = stripeObjectId(dispute.payment_intent);
+    processorObjectId = dispute.id;
+    processorStatus = dispute.status;
+    processorReason = dispute.reason;
+    processorAmount = dispute.amount;
+    currency = dispute.currency;
+
+    // Round One Checkout always creates a PaymentIntent. The current Dispute
+    // object exposes that expandable id directly; the Charge fallback covers a
+    // webhook snapshot where it is absent without ever trusting Dispute
+    // metadata as order identity.
+    if (!paymentIntentId) {
+      const chargeId = stripeObjectId(dispute.charge);
+      if (!chargeId) {
+        console.error("[fp/billing/round-one/webhook] dispute had no charge identity");
+        return Response.json({ error: "Payment lookup failed" }, { status: 500 });
+      }
+      try {
+        const disputedCharge = await stripe.charges.retrieve(chargeId);
+        paymentIntentId = stripeObjectId(disputedCharge.payment_intent);
+      } catch (err) {
+        console.error(
+          `[fp/billing/round-one/webhook] disputed charge lookup failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+        return Response.json({ error: "Payment lookup failed" }, { status: 500 });
+      }
+    }
+    if (!paymentIntentId) {
+      console.error("[fp/billing/round-one/webhook] dispute had no PaymentIntent identity");
+      return Response.json({ error: "Payment lookup failed" }, { status: 500 });
+    }
+    try {
+      const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+      metadata = metadataFrom(intent.metadata);
+    } catch (err) {
+      console.error(
+        `[fp/billing/round-one/webhook] disputed PaymentIntent lookup failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return Response.json({ error: "Payment lookup failed" }, { status: 500 });
+    }
+  }
+
   const plan = planRoundOneWebhook({
     eventId: event.id,
     eventType: event.type,
     paymentStatus: session?.payment_status ?? null,
     fullRefund: charge?.refunded === true,
+    processorObjectId,
+    processorStatus,
+    processorReason,
+    processorAmount,
+    processorTotalAmount,
     metadata,
     sessionId: session?.id ?? null,
     paymentIntentId,
@@ -158,14 +219,6 @@ export async function POST(req: Request): Promise<Response> {
   });
 
   if (plan.kind === "ignore") {
-    if (plan.reason === "partial_refund") {
-      // Stripe emits charge.refunded for partial refunds too. Preserve access,
-      // but leave an operator signal after PaymentIntent metadata proves this
-      // event belongs to Round One rather than another Stripe product.
-      console.error(
-        "[fp/billing/round-one/webhook] partial Round One refund observed; access preserved and staff ledger review required"
-      );
-    }
     return Response.json({ received: true });
   }
   if (plan.kind === "invalid") {
@@ -184,6 +237,20 @@ export async function POST(req: Request): Promise<Response> {
   if (applied.outcome === "duplicate_paid") {
     console.error(
       "[fp/billing/round-one/webhook] duplicate paid order detected; access preserved and staff refund review required"
+    );
+  }
+  if (applied.outcome === "partial_refund_review") {
+    console.error(
+      "[fp/billing/round-one/webhook] partial Round One refund recorded; access preserved and staff review required"
+    );
+  }
+  if (
+    applied.outcome === "dispute_suspended"
+    || applied.outcome === "dispute_stands"
+    || applied.outcome === "dispute_closed_review"
+  ) {
+    console.error(
+      "[fp/billing/round-one/webhook] Round One dispute recorded; access remains suspended pending staff review"
     );
   }
   if (plan.effect === "paid") {

@@ -299,19 +299,25 @@ export type RoundOneAccessState =
   | "not_started"
   | "pending"
   | "paid"
+  | "suspended"
   | "cancelled"
   | "failed"
   | "refunded"
   | "comped"
   | "grandfathered";
 
-export type RoundOneOrderStatus = Exclude<RoundOneAccessState, "not_started">;
+export type RoundOneOrderStatus = Exclude<
+  RoundOneAccessState,
+  "not_started" | "suspended"
+>;
 
 export type RoundOneEntitlementRow = {
-  status: "active" | "revoked";
+  status: "active" | "suspended" | "revoked";
   grant_kind: "paid" | "comped" | "grandfathered";
   access_code: string;
   granted_at: string;
+  suspended_at: string | null;
+  suspension_reason: "stripe_dispute" | null;
   revoked_at: string | null;
 };
 
@@ -352,16 +358,21 @@ export function shapeRoundOneStatus(input: {
 }): RoundOneStatusBody {
   const active = input.entitlement?.status === "active"
     && input.entitlement.access_code === input.product.access_code;
+  const suspended = input.entitlement?.status === "suspended"
+    && input.entitlement.access_code === input.product.access_code
+    && input.entitlement.suspension_reason === "stripe_dispute";
   const latestState = input.latestOrder?.status ?? "not_started";
   // A revoked complimentary order remains comped/grandfathered in the audit
   // ledger, but it must not present as an active complimentary state to the
   // parent or child. `access.granted` is authoritative either way.
   const state: RoundOneAccessState = active
     ? input.entitlement!.grant_kind
-    : input.entitlement?.status === "revoked"
-      && (latestState === "comped" || latestState === "grandfathered")
-      ? "cancelled"
-      : latestState;
+    : suspended
+      ? "suspended"
+      : input.entitlement?.status === "revoked"
+        && (latestState === "comped" || latestState === "grandfathered")
+        ? "cancelled"
+        : latestState;
   return {
     ok: true,
     subject: { type: "child", id: input.childId },
@@ -386,7 +397,9 @@ export function shapeRoundOneStatus(input: {
     // from or a completed Checkout whose webhook is still in flight. The
     // checkout core safely distinguishes those cases: it reuses the same open
     // session or returns awaiting_webhook, never creates a second charge path.
-    canStartCheckout: !active,
+    // A dispute suspension is also not a fresh chance to pay: staff must review
+    // the existing payment instead of sending the family through Checkout again.
+    canStartCheckout: !active && !suspended,
   };
 }
 
@@ -414,6 +427,11 @@ export type RoundOneWebhookInput = {
   eventType: string;
   paymentStatus?: string | null;
   fullRefund?: boolean;
+  processorObjectId?: string | null;
+  processorStatus?: string | null;
+  processorReason?: string | null;
+  processorAmount?: number | null;
+  processorTotalAmount?: number | null;
   metadata: RoundOneWebhookMetadata;
   sessionId: string | null;
   paymentIntentId: string | null;
@@ -426,11 +444,19 @@ export type RoundOneWebhookInput = {
 };
 
 export type RoundOneWebhookPlan =
-  | { kind: "ignore"; reason: "foreign" | "unsupported" | "partial_refund" }
+  | { kind: "ignore"; reason: "foreign" | "unsupported" }
   | { kind: "invalid" }
   | {
       kind: "apply";
-      effect: "pending" | "paid" | "cancelled" | "failed" | "refunded";
+      effect:
+        | "pending"
+        | "paid"
+        | "cancelled"
+        | "failed"
+        | "refunded"
+        | "partial_refund"
+        | "dispute_opened"
+        | "dispute_closed";
       eventId: string;
       eventType: string;
       orderId: string;
@@ -442,6 +468,10 @@ export type RoundOneWebhookPlan =
       paymentIntentId: string | null;
       amount: number | null;
       currency: string | null;
+      processorObjectId: string | null;
+      processorStatus: string | null;
+      processorReason: string | null;
+      processorAmount: number | null;
     };
 
 const uuid = z.string().uuid();
@@ -468,7 +498,7 @@ export function planRoundOneWebhook(input: RoundOneWebhookInput): RoundOneWebhoo
     return { kind: "invalid" };
   }
 
-  let effect: "pending" | "paid" | "cancelled" | "failed" | "refunded";
+  let effect: Extract<RoundOneWebhookPlan, { kind: "apply" }>["effect"];
   switch (input.eventType) {
     case "checkout.session.completed":
       // Stripe reports a legitimate 100%-discount Checkout as
@@ -489,8 +519,13 @@ export function planRoundOneWebhook(input: RoundOneWebhookInput): RoundOneWebhoo
       effect = "cancelled";
       break;
     case "charge.refunded":
-      if (!input.fullRefund) return { kind: "ignore", reason: "partial_refund" };
-      effect = "refunded";
+      effect = input.fullRefund ? "refunded" : "partial_refund";
+      break;
+    case "charge.dispute.created":
+      effect = "dispute_opened";
+      break;
+    case "charge.dispute.closed":
+      effect = "dispute_closed";
       break;
     default:
       return { kind: "ignore", reason: "unsupported" };
@@ -519,6 +554,53 @@ export function planRoundOneWebhook(input: RoundOneWebhookInput): RoundOneWebhoo
     }
   }
 
+  const isProcessorReview = effect === "partial_refund"
+    || effect === "dispute_opened"
+    || effect === "dispute_closed";
+  if (effect === "refunded" || isProcessorReview) {
+    const processorId = input.processorObjectId?.trim() ?? "";
+    if (
+      !input.paymentIntentId
+      || processorId.length === 0
+      || processorId.length > 255
+      || !input.currency
+      || !/^[a-z]{3}$/i.test(input.currency)
+    ) {
+      return { kind: "invalid" };
+    }
+  }
+
+  if (effect === "partial_refund") {
+    if (
+      !Number.isSafeInteger(input.processorAmount)
+      || !Number.isSafeInteger(input.processorTotalAmount)
+      || input.processorAmount! <= 0
+      || input.processorTotalAmount! <= 0
+      || input.processorAmount! >= input.processorTotalAmount!
+    ) {
+      return { kind: "invalid" };
+    }
+  }
+
+  if (effect === "dispute_opened" || effect === "dispute_closed") {
+    const status = input.processorStatus?.trim() ?? "";
+    const reason = input.processorReason?.trim() ?? "";
+    if (
+      status.length === 0
+      || status.length > 80
+      || reason.length === 0
+      || reason.length > 80
+      || !Number.isSafeInteger(input.processorAmount)
+      || input.processorAmount! <= 0
+      || (
+        effect === "dispute_closed"
+        && !["lost", "warning_closed", "won"].includes(status)
+      )
+    ) {
+      return { kind: "invalid" };
+    }
+  }
+
   return {
     kind: "apply",
     effect,
@@ -536,6 +618,10 @@ export function planRoundOneWebhook(input: RoundOneWebhookInput): RoundOneWebhoo
     // original subtotal, never the post-coupon amount.
     amount: input.amountSubtotal,
     currency: input.currency?.toLowerCase() ?? null,
+    processorObjectId: input.processorObjectId?.trim() || null,
+    processorStatus: input.processorStatus?.trim() || null,
+    processorReason: input.processorReason?.trim() || null,
+    processorAmount: input.processorAmount ?? null,
   };
 }
 
@@ -545,6 +631,10 @@ export function webhookRpcOutcomeIsSuccess(outcome: unknown): boolean {
     "pending",
     "granted",
     "duplicate_paid",
+    "dispute_stands",
+    "dispute_suspended",
+    "dispute_closed_review",
+    "partial_refund_review",
     "refund_stands",
     "cancelled",
     "failed",

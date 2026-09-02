@@ -106,6 +106,8 @@ describe("readRoundOneStatus", () => {
       grant_kind: "comped",
       access_code: ROUND_ONE_ACCESS_CODE,
       granted_at: "2026-01-01T00:00:00Z",
+      suspended_at: null,
+      suspension_reason: null,
       revoked_at: null,
     });
     const result = await readRoundOneStatus(deps, statusInput());
@@ -128,6 +130,8 @@ describe("readRoundOneStatus", () => {
       grant_kind: "paid",
       access_code: ROUND_ONE_ACCESS_CODE,
       granted_at: "2026-01-01T00:00:00Z",
+      suspended_at: null,
+      suspension_reason: null,
       revoked_at: null,
     });
     vi.mocked(deps.readLatestOrder).mockResolvedValue({
@@ -154,6 +158,8 @@ describe("readRoundOneStatus", () => {
       grant_kind: "paid",
       access_code: ROUND_ONE_ACCESS_CODE,
       granted_at: "2026-01-01T00:00:00Z",
+      suspended_at: null,
+      suspension_reason: null,
       revoked_at: "2026-01-03T00:00:00Z",
     });
     vi.mocked(deps.readLatestOrder).mockResolvedValue({
@@ -233,6 +239,17 @@ describe("startRoundOneCheckout", () => {
       });
     }
     expect(stripe.createSession).not.toHaveBeenCalled();
+  });
+
+  it("does not reopen checkout while a dispute suspension awaits review", async () => {
+    vi.mocked(deps.beginOrder).mockResolvedValue(
+      newOrder({ outcome: "access_suspended", grant_kind: "paid" })
+    );
+    await expect(startRoundOneCheckout(deps, stripe, checkoutInput())).resolves.toEqual({
+      kind: "suspended",
+    });
+    expect(stripe.createSession).not.toHaveBeenCalled();
+    expect(deps.attachCheckout).not.toHaveBeenCalled();
   });
 
   it("reuses an existing live session rather than risking a second charge", async () => {

@@ -258,6 +258,10 @@ export const ERASURE_TABLE_LEDGER: Record<string, TableLedgerEntry> = {
     disposition: "erased-by-cascade",
     note: "parent_id -> parents ON DELETE CASCADE and the owned-child FK (child_id, parent_id) -> children ON DELETE CASCADE. Complimentary-access notes can describe a child and therefore go with the family; actor_id only attributes the staff action and does not preserve the family-linked row.",
   },
+  fp_billing_review_items: {
+    disposition: "erased-by-cascade",
+    note: "parent_id -> parents ON DELETE CASCADE, the owned-child FK (child_id, parent_id) -> children ON DELETE CASCADE, and the scoped order FK -> fp_billing_orders ON DELETE CASCADE. Review cases contain family linkage plus processor dispute/refund facts and therefore disappear with either child or family; the separate webhook event ledger remains de-identified after its order_id is SET NULL.",
+  },
   fp_parent_notification_outbox: {
     disposition: "erased-by-cascade",
     note: "parent_id -> parents ON DELETE CASCADE and the owned-child FK (child_id, parent_id) -> children ON DELETE CASCADE. Pending/sent parent addresses and snapshotted names are family PII, so notification delivery state disappears with either the child or family.",

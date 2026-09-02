@@ -69,13 +69,19 @@ export async function POST(req: Request): Promise<Response> {
       ctx.releaseStrikes();
       return ctx.unavailable();
     }
-    if (changed.outcome === "paid_stands" || changed.outcome === "paid_requires_refund") {
+    if (
+      changed.outcome === "paid_stands"
+      || changed.outcome === "paid_requires_refund"
+      || changed.outcome === "dispute_requires_review"
+    ) {
       return new Response(
         JSON.stringify({
           ok: false,
           error: changed.outcome === "paid_requires_refund"
             ? "Paid access can only be removed through the refund workflow."
-            : "Paid access is already active and was not replaced.",
+            : changed.outcome === "dispute_requires_review"
+              ? "Disputed access is suspended and requires billing review."
+              : "Paid access is already active and was not replaced.",
         }),
         { status: 409, headers: ctx.headers }
       );

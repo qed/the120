@@ -12,8 +12,12 @@ import { escapeHtml } from "@/app/crm/lib/library-rules";
 import { FP_PARENT_DASHBOARD_URL } from "@/app/lib/fp/retired-parent-surfaces";
 import { headerSafe, type RenderedEmail } from "@/app/lib/fp/parent-email/rules";
 
-export const ROUND_ONE_STRIPE_SETUP_GUIDE_URL =
-  "https://parents.foundersweekends.com/setup-stripe";
+export const ROUND_ONE_STRIPE_ACCOUNT_SETUP_URL =
+  "https://docs.stripe.com/get-started/account/set-up";
+export const ROUND_ONE_STRIPE_CANADA_VERIFICATION_URL =
+  "https://docs.stripe.com/acceptable-verification-documents?country=CA";
+export const ROUND_ONE_STRIPE_US_VERIFICATION_URL =
+  "https://docs.stripe.com/acceptable-verification-documents?country=US";
 export const ROUND_ONE_STRIPE_PAYMENT_LINKS_URL =
   "https://dashboard.stripe.com/payment-links";
 
@@ -51,13 +55,12 @@ export function buildRoundOneStripeSetupEmail(input: {
   <p style="margin: 0 0 12px;">Sharing the instructions for how to set up your own parent-managed Stripe account to keep the business sales going.</p>
   <p style="margin: 0 0 8px;"><strong>Before you start, have:</strong></p>
   <ul style="margin: 0 0 16px; padding-left: 22px;">
-    <li style="margin: 0 0 8px;">The parent's legal name, date of birth, home address (not a PO box), and phone number.</li>
-    <li style="margin: 0 0 8px;">The government tax or identity information Stripe requests for your country.</li>
-    <li style="margin: 0 0 8px;">A bank account in the parent's name for payouts.</li>
-    <li style="margin: 0 0 8px;">A public, non-password-protected page for the shop, such as a First Profit page, Instagram, or X. Its name should match the business name entered in Stripe.</li>
+    <li style="margin: 0 0 8px;">The parent account representative's contact and identity information. Stripe will show what is required after you select your country.</li>
+    <li style="margin: 0 0 8px;">The business details and public page that accurately describe what the business sells.</li>
+    <li style="margin: 0 0 8px;">A payout account Stripe supports for the country and currency shown during setup.</li>
   </ul>
-  <p style="margin: 0 0 12px;"><a href="${ROUND_ONE_STRIPE_SETUP_GUIDE_URL}" style="display: inline-block; background: #1a2233; color: #ffffff; padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: 600;">Follow the Stripe setup instructions</a></p>
-  <p style="margin: 0 0 16px;"><a href="${instructionsUrl}">Open your child-specific First Profit parent checklist</a></p>
+  <p style="margin: 0 0 12px;"><a href="${instructionsUrl}" style="display: inline-block; background: #1a2233; color: #ffffff; padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: 600;">Open your child-specific First Profit parent checklist</a></p>
+  <p style="margin: 0 0 16px;">Review Stripe's official <a href="${ROUND_ONE_STRIPE_ACCOUNT_SETUP_URL}">account setup guide</a> and acceptable verification documents for <a href="${ROUND_ONE_STRIPE_CANADA_VERIFICATION_URL}">Canada</a> or the <a href="${ROUND_ONE_STRIPE_US_VERIFICATION_URL}">United States</a>.</p>
   <p style="margin: 0 0 16px;">Stripe will show the exact identity and banking requirements for your country. The family owns the Stripe relationship and receives customer payments directly. First Profit does not take a percentage of those sales.</p>
   <p style="margin: 0; font-size: 13px; color: #687386;">For your security, never email us a password, verification code, bank detail, or API key. If you get stuck, use the help option in your parent dashboard.</p>
   <p style="margin: 24px 0 0; font-size: 12px; color: #8a93a6;">First Profit at The 120</p>
@@ -71,13 +74,14 @@ export function buildRoundOneStripeSetupEmail(input: {
     "Sharing the instructions for how to set up your own parent-managed Stripe account to keep the business sales going.",
     "",
     "Before you start, have:",
-    "- The parent's legal name, date of birth, home address (not a PO box), and phone number.",
-    "- The government tax or identity information Stripe requests for your country.",
-    "- A bank account in the parent's name for payouts.",
-    "- A public, non-password-protected page for the shop, such as a First Profit page, Instagram, or X. Its name should match the business name entered in Stripe.",
+    "- The parent account representative's contact and identity information. Stripe will show what is required after you select your country.",
+    "- The business details and public page that accurately describe what the business sells.",
+    "- A payout account Stripe supports for the country and currency shown during setup.",
     "",
-    `Follow the Stripe setup instructions: ${ROUND_ONE_STRIPE_SETUP_GUIDE_URL}`,
     `Open your child-specific First Profit parent checklist: ${instructionsUrl}`,
+    `Stripe account setup guide: ${ROUND_ONE_STRIPE_ACCOUNT_SETUP_URL}`,
+    `Stripe verification guidance for Canada: ${ROUND_ONE_STRIPE_CANADA_VERIFICATION_URL}`,
+    `Stripe verification guidance for the United States: ${ROUND_ONE_STRIPE_US_VERIFICATION_URL}`,
     "",
     "Stripe will show the exact identity and banking requirements for your country. The family owns the Stripe relationship and receives customer payments directly. First Profit does not take a percentage of those sales.",
     "",

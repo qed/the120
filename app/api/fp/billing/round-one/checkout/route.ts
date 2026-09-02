@@ -117,6 +117,16 @@ export async function POST(req: Request): Promise<Response> {
             }),
             { status: 200, headers: ctx.headers }
           );
+        case "suspended":
+          return new Response(
+            JSON.stringify({
+              ok: false,
+              status: "suspended",
+              accessGranted: false,
+              error: "Round 1 access is suspended pending staff review.",
+            }),
+            { status: 409, headers: ctx.headers }
+          );
         case "awaiting_webhook":
           return new Response(
             JSON.stringify({ ok: true, status: "pending", accessGranted: false }),

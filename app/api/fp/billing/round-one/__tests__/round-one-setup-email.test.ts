@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildRoundOneOfferReadyEmail,
   buildRoundOneStripeSetupEmail,
+  ROUND_ONE_STRIPE_ACCOUNT_SETUP_URL,
+  ROUND_ONE_STRIPE_CANADA_VERIFICATION_URL,
   ROUND_ONE_STRIPE_PAYMENT_LINKS_URL,
-  ROUND_ONE_STRIPE_SETUP_GUIDE_URL,
+  ROUND_ONE_STRIPE_US_VERIFICATION_URL,
   roundOneOfferReadyEmailIdempotencyKey,
   roundOneStripeInstructionsUrl,
   roundOneSetupEmailIdempotencyKey,
@@ -30,13 +32,19 @@ describe("Round One Stripe setup email", () => {
     );
     expect(mail.subject).toBe("Set up Stripe for Kai's First Profit business");
     for (const part of [mail.html, mail.text]) {
-      expect(part).toContain(ROUND_ONE_STRIPE_SETUP_GUIDE_URL);
+      expect(part).toContain(ROUND_ONE_STRIPE_ACCOUNT_SETUP_URL);
+      expect(part).toContain(ROUND_ONE_STRIPE_CANADA_VERIFICATION_URL);
+      expect(part).toContain(ROUND_ONE_STRIPE_US_VERIFICATION_URL);
       expect(part).toContain(instructionsUrl);
       expect(part).toContain("can keep building");
-      expect(part).toContain("home address (not a PO box)");
-      expect(part).toContain("bank account in the parent's name");
+      expect(part).toContain("select your country");
+      expect(part).toContain("payout account Stripe supports");
       expect(part).toContain("does not take a percentage");
       expect(part).toContain("never email us a password");
+      expect(part).not.toContain("not a PO box");
+      expect(part).not.toContain("bank account in the parent's name");
+      expect(part).not.toContain("SSN");
+      expect(part).not.toContain("routing number");
       expect(part.toLowerCase()).not.toContain("secret key");
       expect(part.toLowerCase()).not.toContain("api_key");
       expect(part).not.toContain("—");

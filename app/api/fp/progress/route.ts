@@ -27,7 +27,7 @@
  *
  *   200 {ok: true, children: [ProgressChild], analyticsScope: {
  *          revision, includedFamilies, excludedFamilies
- *        }, round1Payments?} — the child shape is documented in full at the
+ *        }, round1Payments?, round1BillingReviews?} — the child shape is documented in full at the
  *   top of ./progress-rules.ts. `revision` is an opaque cohort merge token:
  *   criterion responses with different revisions must never be combined.
  *   `round1Payments`, when present, is exactly
@@ -37,7 +37,13 @@
  *   details — and is omitted when the provisional billing schema/read is
  *   unavailable rather than fabricated as zeros. The server sends completion
  *   maps essentially raw, filtered to the requested task ids; the CLIENT owns
- *   every progress semantic.
+ *   every progress semantic. `round1BillingReviews`, when present, is an
+ *   independent staff-only queue:
+ *   `{unit:"review_item",openCount,items:[{reviewKey,parentKey,parentName,
+ *   parentPhone,childUsername,childName,reason,observedAt}]}`. `reason` is only
+ *   `partial_refund` or `stripe_dispute`. It intentionally contains no Stripe
+ *   object, order, amount, currency, status, or processor detail, and is
+ *   independently omitted on an unavailable or malformed review read.
  *
  *   401 — byte-identical for EVERY AUTHORIZATION-shaped refusal (missing/bad
  *   token, a genuine non-staff session, rate limit, outage). 403 only for a
@@ -166,6 +172,11 @@ import {
   type RoundOnePaymentReadErrorCategory,
   type RoundOnePaymentSummary,
 } from "./round-one-payment-rules";
+import {
+  deriveRoundOneBillingReviews,
+  type RoundOneBillingReviewRowLike,
+  type RoundOneBillingReviewSummary,
+} from "./round-one-billing-review-rules";
 
 export const dynamic = "force-dynamic";
 
@@ -415,7 +426,7 @@ type OptionalBillingReadResult<T> =
  * is enough to distinguish a schema-cache rollout gap.
  */
 async function readOptionalBillingByIdSet<T>(
-  label: "entitlements" | "orders",
+  label: "entitlements" | "orders" | "reviews",
   ids: readonly string[],
   keyOf: (row: T) => string,
   page: (
@@ -913,6 +924,48 @@ export async function GET(req: Request): Promise<Response> {
       }
     }
 
+    // ── 6. Optional, independently fail-closed billing review queue. This is
+    // deliberately not nested under round1Payments: a schema/read/malformed-row
+    // failure here must not erase the six-field aggregate already available to
+    // staff. Read only the internal case key, roster join key, bounded reason,
+    // state and timestamp. Raw Stripe/order/financial columns remain server-only.
+    let round1BillingReviews: RoundOneBillingReviewSummary | undefined;
+    const omitRoundOneBillingReviews = (category: string): void => {
+      console.error(`[fp/progress] Round One billing reviews omitted: ${category}`);
+    };
+    const reviewRead = await readOptionalBillingByIdSet<
+      RoundOneBillingReviewRowLike & { id: string; child_id: string }
+    >(
+      "reviews",
+      childIds,
+      (row) => row.id,
+      (chunk, after, limit) => {
+        let q = admin
+          .from("fp_billing_review_items")
+          .select("id, child_id, review_kind, review_state, last_observed_at")
+          .eq("product_key", ROUND_ONE_PRODUCT_KEY)
+          .eq("product_version", ROUND_ONE_PRODUCT_VERSION)
+          .eq("review_state", "open")
+          .in("child_id", chunk);
+        if (after !== null) q = q.gt("id", after);
+        return q.order("id", { ascending: true }).limit(limit);
+      },
+      { rowsRead: 0, roundTrips: 0, deadlineAt }
+    );
+    if (!reviewRead.ok) {
+      omitRoundOneBillingReviews(reviewRead.category);
+    } else {
+      const shapedReviews = deriveRoundOneBillingReviews(
+        childrenWithContacts,
+        reviewRead.rows
+      );
+      if (shapedReviews.ok) {
+        round1BillingReviews = shapedReviews.value;
+      } else {
+        omitRoundOneBillingReviews("invalid_rows");
+      }
+    }
+
     // ONE clock for the whole response: it stamps the audit breadcrumb below AND
     // is the ceiling every child's future-dated stamps are clamped to. Two
     // `new Date()` calls would clamp two children against different instants,
@@ -989,7 +1042,21 @@ export async function GET(req: Request): Promise<Response> {
       roundOneFragment = "";
     }
 
-    const finalSuffix = `],"analyticsScope":${analyticsScopePart}${roundOneFragment}}`;
+    let reviewFragment = round1BillingReviews
+      ? `,"round1BillingReviews":${JSON.stringify(round1BillingReviews)}`
+      : "";
+    if (
+      reviewFragment
+      && bytes
+        + Buffer.byteLength(roundOneFragment, "utf8")
+        + Buffer.byteLength(reviewFragment, "utf8")
+        > PROGRESS_MAX_RESPONSE_BYTES
+    ) {
+      omitRoundOneBillingReviews("capacity");
+      reviewFragment = "";
+    }
+
+    const finalSuffix = `],"analyticsScope":${analyticsScopePart}${roundOneFragment}${reviewFragment}}`;
     return new Response(
       `${responsePrefix}${parts.join(",")}${finalSuffix}`,
       {

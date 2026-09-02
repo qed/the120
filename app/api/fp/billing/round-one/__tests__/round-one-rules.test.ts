@@ -301,6 +301,8 @@ describe("status shaping", () => {
           grant_kind: grant,
           access_code: ROUND_ONE_ACCESS_CODE,
           granted_at: "2026-01-01T00:00:00Z",
+          suspended_at: null,
+          suspension_reason: null,
           revoked_at: null,
         },
         latestOrder: null,
@@ -324,6 +326,8 @@ describe("status shaping", () => {
         grant_kind: "comped",
         access_code: ROUND_ONE_ACCESS_CODE,
         granted_at: "2026-01-01T00:00:00Z",
+        suspended_at: null,
+        suspension_reason: null,
         revoked_at: "2026-01-02T00:00:00Z",
       },
       latestOrder: {
@@ -344,6 +348,8 @@ describe("status shaping", () => {
         grant_kind: "paid" as const,
         access_code: ROUND_ONE_ACCESS_CODE,
         granted_at: "x",
+        suspended_at: null,
+        suspension_reason: null,
         revoked_at: "y",
       },
       {
@@ -351,6 +357,8 @@ describe("status shaping", () => {
         grant_kind: "paid" as const,
         access_code: "phase:build",
         granted_at: "x",
+        suspended_at: null,
+        suspension_reason: null,
         revoked_at: null,
       },
     ]) {
@@ -359,6 +367,32 @@ describe("status shaping", () => {
           .access.granted
       ).toBe(false);
     }
+  });
+
+  it("fails a Stripe-disputed entitlement closed without offering another checkout", () => {
+    const body = shapeRoundOneStatus({
+      childId: CHILD_ID,
+      product: product(),
+      entitlement: {
+        status: "suspended",
+        grant_kind: "paid",
+        access_code: ROUND_ONE_ACCESS_CODE,
+        granted_at: "2026-01-01T00:00:00Z",
+        suspended_at: "2026-01-02T00:00:00Z",
+        suspension_reason: "stripe_dispute",
+        revoked_at: null,
+      },
+      latestOrder: {
+        status: "paid",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-02T00:00:00Z",
+      },
+    });
+    expect(body).toMatchObject({
+      state: "suspended",
+      access: { granted: false, code: null, reason: null },
+      canStartCheckout: false,
+    });
   });
 });
 
@@ -413,20 +447,71 @@ describe("signed webhook planning", () => {
     }
   });
 
-  it("does not revoke access on a partial refund", () => {
-    expect(
-      planRoundOneWebhook({
-        ...input(),
-        eventType: "charge.refunded",
-        fullRefund: false,
-      })
-    ).toEqual({ kind: "ignore", reason: "partial_refund" });
+  it("preserves access while making a partial refund a durable review effect", () => {
+    const partial = planRoundOneWebhook({
+      ...input(),
+      eventType: "charge.refunded",
+      fullRefund: false,
+      processorObjectId: "ch_1",
+      processorAmount: 5_000,
+      processorTotalAmount: ROUND_ONE_AMOUNT_CENTS,
+    });
+    expect(partial).toMatchObject({
+      kind: "apply",
+      effect: "partial_refund",
+      processorObjectId: "ch_1",
+      processorAmount: 5_000,
+    });
     const full = planRoundOneWebhook({
       ...input(),
       eventType: "charge.refunded",
       fullRefund: true,
+      processorObjectId: "ch_1",
     });
     expect(full.kind === "apply" && full.effect).toBe("refunded");
+  });
+
+  it.each([
+    ["charge.dispute.created", "needs_response", "dispute_opened"],
+    ["charge.dispute.closed", "won", "dispute_closed"],
+    ["charge.dispute.closed", "lost", "dispute_closed"],
+    ["charge.dispute.closed", "warning_closed", "dispute_closed"],
+  ])("maps %s/%s to the sticky suspension effect %s", (eventType, status, effect) => {
+    const plan = planRoundOneWebhook({
+      ...input(),
+      eventType,
+      processorObjectId: "dp_1",
+      processorStatus: status,
+      processorReason: "fraudulent",
+      processorAmount: ROUND_ONE_AMOUNT_CENTS,
+    });
+    expect(plan).toMatchObject({
+      kind: "apply",
+      effect,
+      processorObjectId: "dp_1",
+      processorStatus: status,
+      processorReason: "fraudulent",
+    });
+  });
+
+  it("fails closed on malformed dispute evidence and non-terminal closure status", () => {
+    for (const patch of [
+      { processorObjectId: null },
+      { processorStatus: "" },
+      { processorReason: "" },
+      { processorAmount: 0 },
+      { processorStatus: "needs_response" },
+    ]) {
+      expect(planRoundOneWebhook({
+        ...input(),
+        eventType: "charge.dispute.closed",
+        processorObjectId: "dp_1",
+        processorStatus: "won",
+        processorReason: "fraudulent",
+        processorAmount: ROUND_ONE_AMOUNT_CENTS,
+        ...patch,
+      })).toEqual({ kind: "invalid" });
+    }
   });
 
   it("accepts a reconciled promotion discount, including a zero-total checkout", () => {
@@ -471,6 +556,10 @@ describe("signed webhook planning", () => {
       "pending",
       "granted",
       "duplicate_paid",
+      "dispute_stands",
+      "dispute_suspended",
+      "dispute_closed_review",
+      "partial_refund_review",
       "refund_stands",
       "cancelled",
       "failed",

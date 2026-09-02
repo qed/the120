@@ -70,6 +70,8 @@ locks paid tasks closed; it never grants fallback access.
    - `checkout.session.async_payment_failed`
    - `checkout.session.expired`
    - `charge.refunded`
+   - `charge.dispute.created`
+   - `charge.dispute.closed`
 5. Put that endpoint's signing secret in
    `FP_ROUND_ONE_STRIPE_WEBHOOK_SECRET`. It is intentionally not the legacy
    deposit webhook secret.
@@ -107,8 +109,12 @@ locks paid tasks closed; it never grants fallback access.
 Use Stripe test cards only until the test matrix below is complete. The
 customer-facing fee is non-refundable. If staff nevertheless issues an
 exceptional full refund in Stripe, access is removed automatically. Partial
-refunds remain an unresolved exception: they are retained in Stripe but do not
-automatically revoke access.
+refunds preserve access and create a durable open Watchtower billing-review
+case. Any Stripe dispute/chargeback suspends Round One access immediately and
+creates an open review case. A later `charge.dispute.closed`, including a won
+dispute, updates and reopens that case but does not automatically restore
+access. Restoration remains a deliberate future staff workflow; v1 exposes no
+automatic or manual restoration action.
 
 Checkout enables Stripe Promotion Codes. Before granting access, the webhook
 retrieves the signed Session's line items and requires exactly one quantity of
@@ -219,10 +225,12 @@ from the verified child token/profile. Both status routes return the same shape:
 }
 ```
 
-`state` is one of `not_started`, `pending`, `paid`, `cancelled`, `failed`,
+`state` is one of `not_started`, `pending`, `paid`, `suspended`, `cancelled`, `failed`,
 `refunded`, `comped`, or `grandfathered`. A delayed method that is still
 processing stays `pending`; Stripe's terminal `async_payment_failed` event
 becomes `failed`, while an abandoned/expired Checkout becomes `cancelled`.
+`suspended` means a Stripe dispute was observed; access is false and checkout
+cannot be restarted while the case awaits staff review.
 The task runner must use only
 `access.granted === true` and `access.code === "phase:sell"` to open paid tasks.
 Do not infer access from `state`, a query string, local storage, or a Stripe
@@ -253,6 +261,41 @@ billing read is unavailable, the entire object is omitted rather than returned
 with plausible-looking zeroes. The client rejects the old mixed four-field
 shape instead of relabelling it as revenue.
 
+### Watchtower billing review queue
+
+The same staff progress response may independently add
+`round1BillingReviews`:
+
+```json
+{
+  "unit": "review_item",
+  "openCount": 2,
+  "items": [
+    {
+      "reviewKey": "uuid",
+      "parentKey": "uuid",
+      "parentName": "Pat Lee",
+      "parentPhone": "+14165550123",
+      "childUsername": "kai",
+      "childName": "Kai Lee",
+      "reason": "stripe_dispute",
+      "observedAt": "2026-09-02T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+Client wiring: render this as a separate staff follow-up queue, use
+`openCount` for its badge, and display items in the supplied order. Label
+`partial_refund` as “Partial refund review” and `stripe_dispute` as “Stripe
+dispute — access suspended.” `reviewKey` is an opaque internal case key; do not
+construct processor URLs from it. The contract deliberately exposes no Stripe
+object, order, amount, currency, processor reason, or processor status. A
+missing field means the independent optional read was unavailable, malformed,
+or over capacity; hide this queue's totals and empty state rather than treating
+the omission as zero. `round1Payments` remains available when only this queue
+is omitted.
+
 ### Emergency access seam (not a cohort workflow)
 
 `POST /api/fp/billing/round-one/admin-access` requires both the server-set
@@ -277,6 +320,9 @@ the parent, records actor/note/action,
 and prevents this path from revoking paid access. Paid access is removed only
 by the signature-verified full-refund path. Do not build cohort onboarding,
 marketing, or routine staff operations around this endpoint.
+The same seam cannot grant, replace, or revoke a dispute-suspended entitlement;
+it returns `409` and records the `dispute_requires_review` no-op in the access
+audit ledger.
 
 Successful grant/revoke/no-op:
 
@@ -303,9 +349,15 @@ That same transaction inserts a durable post-payment Stripe-setup notification
 row. The webhook immediately tries the row, using the persisted order id as
 Resend's idempotency key, and the existing ten-minute notification cron retries
 transient failures with a stale-claim recovery and a five-attempt ceiling. The
-message follows the supplied parent template, links
-`https://parents.foundersweekends.com/setup-stripe`, lists the information to
-prepare, and links the child-specific First Profit parent checklist. Delivery
+message makes the child-specific First Profit parent checklist its primary
+action, uses country-safe preparation copy, and links Stripe's official
+verification guidance for
+[account setup](https://docs.stripe.com/get-started/account/set-up), acceptable
+verification documents for
+[Canada](https://docs.stripe.com/acceptable-verification-documents?country=CA)
+and the
+[United States](https://docs.stripe.com/acceptable-verification-documents?country=US).
+Delivery
 failure cannot roll back access or make a successful
 financial webhook fail; the parent dashboard is the durable fallback.
 
@@ -339,7 +391,17 @@ validation, and approval of the Buy, Order, or Book button.
   surfaced as missing-contact follow-up work.
 - A full refund revokes the matching paid grant and a redelivered paid event
   cannot resurrect it.
-- A partial refund does not silently apply the full-refund policy.
+- A partial refund preserves access, upserts one open review case per Charge,
+  and redelivery remains idempotent.
+- `charge.dispute.created` immediately suspends access and upserts one open
+  review case per Dispute. A late paid event cannot restore access.
+- `charge.dispute.closed` updates/reopens the review case without restoring
+  access for `won`, `lost`, or `warning_closed`; a late `created` delivery
+  cannot overwrite terminal processor status.
+- A full refund remains final even if dispute events arrive before or after it.
+- Watchtower exposes only case/contact/reason/timestamp review fields; an
+  unavailable or malformed review read omits that queue without erasing the
+  unchanged six-field payment summary.
 - The hidden emergency comped/grandfathered seam requires active staff and
   records actor/note; its revoke action cannot revoke a paid entitlement.
 - Post-payment email failure still returns a successful webhook response and
@@ -352,9 +414,11 @@ validation, and approval of the Buy, Order, or Book button.
 
 ## Open product decisions
 
-- Partial-refund access policy. The fee is presented as non-refundable and full
-  exceptional refunds revoke access, but the desired treatment of a manually
-  issued partial refund was not specified.
+- Dispute restoration policy. Peter selected immediate suspension. This v1
+  intentionally keeps access suspended after every dispute closure, including
+  a win, and leaves the case open for staff review. Before adding restoration,
+  specify which outcome authorizes it and add a separately audited action; do
+  not infer restoration from processor closure alone.
 - A later real payment upgrades an active complimentary/grandfathered grant to
   paid. A genuinely second paid order remains an explicit `duplicate_paid`
   outcome for staff refund review.
@@ -369,13 +433,6 @@ validation, and approval of the Buy, Order, or Book button.
   and the signed webhook proof before enabling checkout. Until then the product
   remains test-mode-only and customer copy says only “CAD $250 total today.”
 
-- **Country-specific Stripe guide.** The supplied Founders Weekends setup page
-  originated as a US checklist, while Round One charges CAD and may include
-  Canadian families. The email safely tells Stripe to determine the exact
-  country-specific identity/tax/bank requirements. Proof the linked page for
-  Canadian applicability before sending it broadly; do not tell a Canadian
-  parent they need a US SSN or US bank account.
-
 - **Notification operations.** `fp_parent_notification_outbox` is the durable
   delivery ledger. `/api/cron/path-notifications` drains it every ten minutes,
   alongside the existing Path queue. Rows still unsent after five attempts are
@@ -384,11 +441,12 @@ validation, and approval of the Buy, Order, or Book button.
   `null`, and preserving its `dedupe_key`; never mint a replacement key. The
   authenticated parent dashboard remains the fallback even while a row is
   parked.
-- **Disputes/chargebacks.** This v1 subscribes to refunds, not Stripe dispute
-  events. Decide whether a dispute suspends access and how a won/lost dispute
-  restores or revokes it, then add and test those events. Until then, live-mode
-  disputes require an explicit Stripe-dashboard monitoring and manual-response
-  owner; they do not automatically change First Profit access.
+- **Disputes/chargebacks.** Subscribe to both exact dispute events above.
+  Immediate access suspension and the durable review case are automatic.
+  Processor closure deliberately does not restore access. V1 has no review-
+  resolution or restoration mutation, so cases remain open and staff must track
+  follow-up without manually editing the billing ledger until an audited policy
+  and API are designed.
 - **Product-version access.** The current status/checkout APIs intentionally
   read the configured product version. Do not point the environment at a v2
   Price until the business decides whether a v1 Sell purchase permanently

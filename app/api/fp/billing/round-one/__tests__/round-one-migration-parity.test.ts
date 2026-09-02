@@ -136,6 +136,34 @@ describe("Round One migration parity", () => {
     );
   });
 
+  it("preserves partial-refund access and makes refund/dispute review durable", () => {
+    expect(sql).toContain("create table if not exists public.fp_billing_review_items");
+    expect(sql).toContain("unique (review_kind, stripe_object_id)");
+    expect(sql).toMatch(/alter table public\.fp_billing_review_items enable row level security/);
+    expect(sql).toMatch(
+      /revoke all on public\.fp_billing_review_items from anon, authenticated/
+    );
+    expect(sql).toMatch(
+      /elsif p_effect = 'partial_refund' then[\s\S]*?v_outcome := 'partial_refund_review'[\s\S]*?elsif p_effect in \('dispute_opened', 'dispute_closed'\)/
+    );
+    expect(sql).toMatch(
+      /p_effect in \('dispute_opened', 'dispute_closed'\)[\s\S]*?set dispute_suspended_at = coalesce\(dispute_suspended_at, now\(\)\)[\s\S]*?set status = 'suspended'[\s\S]*?suspension_reason = 'stripe_dispute'/
+    );
+    expect(sql).toMatch(
+      /insert into public\.fp_billing_review_items[\s\S]*?on conflict \(review_kind, stripe_object_id\) do update[\s\S]*?insert into public\.fp_billing_webhook_events/
+    );
+    expect(sql).toContain("p_effect = 'dispute_closed' then 'dispute_closed_review'");
+    expect(sql).toMatch(
+      /v_order\.dispute_suspended_at is not null[\s\S]*?v_outcome := 'dispute_stands'/
+    );
+  });
+
+  it("does not let the emergency access seam clear a dispute suspension", () => {
+    expect(sql).toMatch(
+      /v_entitlement\.status = 'suspended' then[\s\S]*?v_outcome := 'dispute_requires_review'/
+    );
+  });
+
   it("audits complimentary controls and forbids them from revoking paid access", () => {
     expect(sql).toContain("create table if not exists public.fp_billing_access_events");
     expect(sql).toContain("request_id uuid not null unique");
@@ -237,6 +265,24 @@ describe("Round One migration parity", () => {
     expect(sql).toMatch(
       /else[\s\S]*?set status = 'revoked', revoked_at = now\(\)[\s\S]*?e\.source_order_id = v_order\.id/
     );
+  });
+
+  it("keeps the runbook webhook destination aligned with every implemented financial event", () => {
+    const runbook = readFileSync(
+      path.resolve(process.cwd(), "docs/runbooks/2026-09-01-fp-round-one-billing.md"),
+      "utf8"
+    );
+    const subscription = runbook.match(/subscribe only to:([\s\S]*?)\n5\./)?.[1] ?? "";
+    const listed = [...subscription.matchAll(/`([^`]+)`/g)].map((match) => match[1]);
+    expect(listed).toEqual([
+      "checkout.session.completed",
+      "checkout.session.async_payment_succeeded",
+      "checkout.session.async_payment_failed",
+      "checkout.session.expired",
+      "charge.refunded",
+      "charge.dispute.created",
+      "charge.dispute.closed",
+    ]);
   });
 
   it("serializes complimentary grants with the signed payment state machine", () => {

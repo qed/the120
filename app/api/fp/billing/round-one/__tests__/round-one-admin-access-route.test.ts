@@ -126,4 +126,22 @@ describe("Round One staff access route", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error).toContain("refund workflow");
   });
+
+  it("will not replace or clear a dispute suspension", async () => {
+    refs.outcome.value = {
+      ok: true,
+      outcome: "dispute_requires_review",
+      orderId: "33333333-3333-4333-8333-333333333333",
+      parentId: "55555555-5555-4555-8555-555555555555",
+    };
+    const { POST } = await import("../admin-access/route");
+    const res = await POST(post({
+      fpUsername: "kai",
+      action: "comped",
+      note: "Attempted exception while dispute is open",
+      requestId: REQUEST_ID,
+    }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("requires billing review");
+  });
 });

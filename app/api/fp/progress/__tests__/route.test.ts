@@ -223,6 +223,7 @@ function seed(): void {
     ],
     fp_billing_entitlements: [],
     fp_billing_orders: [],
+    fp_billing_review_items: [],
     fp_watchtower_family_scope: [],
   } as Store;
 }
@@ -277,6 +278,20 @@ type Body = {
     unpaid: number;
     refundedPaid: number;
     revokedComplimentary: number;
+  };
+  round1BillingReviews?: {
+    unit: "review_item";
+    openCount: number;
+    items: Array<{
+      reviewKey: string;
+      parentKey: string;
+      parentName: string | null;
+      parentPhone: string | null;
+      childUsername: string;
+      childName: string | null;
+      reason: "partial_refund" | "stripe_dispute";
+      observedAt: string;
+    }>;
   };
   analyticsScope: {
     revision: string;
@@ -513,6 +528,86 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
       refundedPaid: 0,
       revokedComplimentary: 0,
     });
+    expect(body.round1BillingReviews).toEqual({
+      unit: "review_item",
+      openCount: 0,
+      items: [],
+    });
+  });
+
+  it("adds an independently actionable and processor-private Round One review queue", async () => {
+    store.value.fp_billing_review_items = [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        parent_id: "parent-1",
+        child_id: "c-1",
+        product_key: "round_one_sell",
+        product_version: 1,
+        order_id: "order-must-not-leave",
+        review_kind: "stripe_dispute",
+        stripe_object_id: "dp_must_not_leave",
+        processor_amount: 25_000,
+        processor_currency: "cad",
+        review_state: "open",
+        last_observed_at: "2026-09-02T12:00:00Z",
+      },
+    ];
+
+    const res = await get();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Body;
+    expect(body.round1BillingReviews).toEqual({
+      unit: "review_item",
+      openCount: 1,
+      items: [{
+        reviewKey: "11111111-1111-4111-8111-111111111111",
+        parentKey: "parent-1",
+        parentName: "Morgan Lee",
+        parentPhone: "416-555-0100",
+        childUsername: "alex",
+        childName: "Alex Lee",
+        reason: "stripe_dispute",
+        observedAt: "2026-09-02T12:00:00.000Z",
+      }],
+    });
+    expect(body.round1Payments).toBeDefined();
+    const wire = JSON.stringify(body.round1BillingReviews);
+    for (const privateValue of ["dp_must_not_leave", "order-must-not-leave", "25000", "cad"]) {
+      expect(wire).not.toContain(privateValue);
+    }
+    const read = dbCalls.find((call) => call.table === "fp_billing_review_items");
+    expect(read?.columns).toBe("id, child_id, review_kind, review_state, last_observed_at");
+  });
+
+  it("independently omits unavailable or malformed review data without erasing payments", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    faults.value["select:fp_billing_review_items"] = {
+      kind: "error",
+      error: { code: "PGRST205", message: "private-schema-error" },
+    };
+    const unavailable = (await (await get()).json()) as Body;
+    expect(unavailable).not.toHaveProperty("round1BillingReviews");
+    expect(unavailable.round1Payments).toBeDefined();
+
+    seed();
+    faults.value = {};
+    store.value.fp_billing_review_items = [{
+      id: "11111111-1111-4111-8111-111111111111",
+      child_id: "c-1",
+      product_key: "round_one_sell",
+      product_version: 1,
+      review_kind: "unexpected-private-reason",
+      review_state: "open",
+      last_observed_at: "2026-09-02T12:00:00Z",
+    }];
+    const malformed = (await (await get()).json()) as Body;
+    expect(malformed).not.toHaveProperty("round1BillingReviews");
+    expect(malformed.round1Payments).toBeDefined();
+    const logs = error.mock.calls.flat().map(String).join("\n");
+    expect(logs).toContain("schema_absent");
+    expect(logs).toContain("invalid_rows");
+    expect(logs).not.toContain("private-schema-error");
+    expect(logs).not.toContain("unexpected-private-reason");
   });
 
   it("adds the exact aggregate Round One child contract with one bucket per child", async () => {
@@ -708,6 +803,7 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
         "db:fp_player_saves",
         "db:fp_billing_entitlements",
         "db:fp_billing_orders",
+        "db:fp_billing_review_items",
       ])
     );
   });
@@ -820,6 +916,11 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
         unpaid: 0,
         refundedPaid: 0,
         revokedComplimentary: 0,
+      },
+      round1BillingReviews: {
+        unit: "review_item",
+        openCount: 0,
+        items: [],
       },
       analyticsScope: {
         revision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),

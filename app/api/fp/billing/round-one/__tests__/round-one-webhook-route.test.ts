@@ -17,6 +17,8 @@ const refs = vi.hoisted(() => ({
     value: { metadata: {} } as Record<string, unknown>,
   },
   paymentIntentIds: [] as string[],
+  charge: { value: { payment_intent: "pi_round_one" } as Record<string, unknown> },
+  chargeIds: [] as string[],
   lineItems: {
     value: {
       data: [{ quantity: 1, price: { id: "price_round_one_test" } }],
@@ -41,6 +43,12 @@ vi.mock("stripe", () => ({
       retrieve: async (id: string) => {
         refs.paymentIntentIds.push(id);
         return refs.paymentIntent.value;
+      },
+    };
+    charges = {
+      retrieve: async (id: string) => {
+        refs.chargeIds.push(id);
+        return refs.charge.value;
       },
     };
     checkout = {
@@ -122,6 +130,8 @@ describe("Round One webhook route", () => {
     refs.phoneStored.value = true;
     refs.paymentIntent.value = { metadata: {} };
     refs.paymentIntentIds.length = 0;
+    refs.charge.value = { payment_intent: "pi_round_one" };
+    refs.chargeIds.length = 0;
     refs.lineItems.value = {
       data: [{ quantity: 1, price: { id: "price_round_one_test" } }],
     };
@@ -321,6 +331,8 @@ describe("Round One webhook route", () => {
         object: {
           id: "ch_round_one",
           refunded: false,
+          amount: 25_000,
+          amount_refunded: 5_000,
           currency: "cad",
           payment_intent: "pi_round_one",
           metadata: {},
@@ -331,13 +343,93 @@ describe("Round One webhook route", () => {
       metadata: (paidEvent().data as { object: { metadata: Record<string, string> } })
         .object.metadata,
     };
+    refs.applied.value = { ok: true, outcome: "partial_refund_review" };
 
     const { POST } = await import("../webhook/route");
     const res = await POST(request());
 
     expect(res.status).toBe(200);
     expect(refs.paymentIntentIds).toEqual(["pi_round_one"]);
-    expect(refs.plans).toEqual([]);
+    expect(refs.plans[0]).toMatchObject({
+      effect: "partial_refund",
+      processorObjectId: "ch_round_one",
+      processorAmount: 5_000,
+    });
+    expect(refs.emails).toEqual([]);
+  });
+
+  it("suspends access for a signed dispute using the Charge fallback identity", async () => {
+    refs.event.value = {
+      id: "evt_round_one_dispute_created",
+      type: "charge.dispute.created",
+      data: {
+        object: {
+          id: "dp_round_one",
+          charge: "ch_round_one",
+          payment_intent: null,
+          status: "needs_response",
+          reason: "fraudulent",
+          amount: 25_000,
+          currency: "cad",
+        },
+      },
+    };
+    refs.paymentIntent.value = {
+      metadata: (paidEvent().data as { object: { metadata: Record<string, string> } })
+        .object.metadata,
+    };
+    refs.applied.value = { ok: true, outcome: "dispute_suspended" };
+
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(200);
+    expect(refs.chargeIds).toEqual(["ch_round_one"]);
+    expect(refs.paymentIntentIds).toEqual(["pi_round_one"]);
+    expect(refs.plans[0]).toMatchObject({
+      effect: "dispute_opened",
+      orderId: ORDER_ID,
+      paymentIntentId: "pi_round_one",
+      processorObjectId: "dp_round_one",
+      processorStatus: "needs_response",
+      processorReason: "fraudulent",
+      processorAmount: 25_000,
+    });
+    expect(refs.emails).toEqual([]);
+  });
+
+  it("keeps a closed won dispute suspended for explicit staff review", async () => {
+    refs.event.value = {
+      id: "evt_round_one_dispute_closed",
+      type: "charge.dispute.closed",
+      data: {
+        object: {
+          id: "dp_round_one",
+          charge: "ch_round_one",
+          payment_intent: "pi_round_one",
+          status: "won",
+          reason: "fraudulent",
+          amount: 25_000,
+          currency: "cad",
+        },
+      },
+    };
+    refs.paymentIntent.value = {
+      metadata: (paidEvent().data as { object: { metadata: Record<string, string> } })
+        .object.metadata,
+    };
+    refs.applied.value = { ok: true, outcome: "dispute_closed_review" };
+
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(200);
+    expect(refs.chargeIds).toEqual([]);
+    expect(refs.plans[0]).toMatchObject({
+      effect: "dispute_closed",
+      processorObjectId: "dp_round_one",
+      processorStatus: "won",
+    });
     expect(refs.emails).toEqual([]);
   });
 

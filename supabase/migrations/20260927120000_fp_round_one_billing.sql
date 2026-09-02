@@ -101,6 +101,10 @@ create table if not exists public.fp_billing_orders (
   cancelled_at timestamptz,
   failed_at timestamptz,
   refunded_at timestamptz,
+  -- Sticky once any Stripe dispute event is observed for this payment. Stripe
+  -- dispute closure never clears it: restoration requires a separately audited
+  -- staff policy/action that v1 intentionally does not yet expose.
+  dispute_suspended_at timestamptz,
   grant_note text,
   granted_by uuid references auth.users (id) on delete set null,
   created_at timestamptz not null default now(),
@@ -131,6 +135,8 @@ create index if not exists fp_billing_orders_parent_idx
   on public.fp_billing_orders (parent_id, created_at desc);
 create index if not exists fp_billing_orders_child_idx
   on public.fp_billing_orders (child_id, product_key, product_version, created_at desc);
+create unique index if not exists fp_billing_orders_review_scope_uq
+  on public.fp_billing_orders (id, parent_id, child_id, product_key, product_version);
 
 -- At most one payable session may be open for one child's one product version.
 -- Multiple historical paid/refunded/cancelled rows remain valid audit truth.
@@ -146,10 +152,12 @@ create table if not exists public.fp_billing_entitlements (
   product_key text not null,
   product_version integer not null,
   access_code text not null,
-  status text not null check (status in ('active', 'revoked')),
+  status text not null check (status in ('active', 'suspended', 'revoked')),
   grant_kind text not null check (grant_kind in ('paid', 'comped', 'grandfathered')),
   source_order_id uuid references public.fp_billing_orders (id) on delete set null,
   granted_at timestamptz not null default now(),
+  suspended_at timestamptz,
+  suspension_reason text check (suspension_reason in ('stripe_dispute')),
   revoked_at timestamptz,
   updated_at timestamptz not null default now(),
   primary key (child_id, product_key, product_version),
@@ -161,9 +169,21 @@ create table if not exists public.fp_billing_entitlements (
     foreign key (product_key, product_version)
     references public.fp_billing_products (product_key, version)
     on delete restrict,
-  constraint fp_billing_entitlements_revoked_shape check (
-    (status = 'revoked' and revoked_at is not null)
-    or (status = 'active' and revoked_at is null)
+  constraint fp_billing_entitlements_state_shape check (
+    (
+      status = 'active'
+      and revoked_at is null
+      and suspended_at is null
+      and suspension_reason is null
+    ) or (
+      status = 'suspended'
+      and revoked_at is null
+      and suspended_at is not null
+      and suspension_reason = 'stripe_dispute'
+    ) or (
+      status = 'revoked'
+      and revoked_at is not null
+    )
   )
 );
 
@@ -182,6 +202,70 @@ create table if not exists public.fp_billing_webhook_events (
   outcome text not null,
   processed_at timestamptz not null default now()
 );
+
+-- An actionable, server-only review queue distinct from the de-identified
+-- webhook replay ledger. One Stripe Charge can emit several cumulative partial
+-- refund events and one Dispute emits created/closed events, so the provider
+-- object (not the delivery id) is the case identity. Every delivery still lands
+-- separately in fp_billing_webhook_events for immutable replay/audit truth.
+create table if not exists public.fp_billing_review_items (
+  id uuid primary key default gen_random_uuid(),
+  parent_id uuid not null references public.parents (id) on delete cascade,
+  child_id uuid not null,
+  product_key text not null,
+  product_version integer not null,
+  order_id uuid not null,
+  review_kind text not null check (review_kind in ('partial_refund', 'stripe_dispute')),
+  stripe_object_id text not null check (char_length(stripe_object_id) between 1 and 255),
+  last_stripe_event_id text not null check (char_length(last_stripe_event_id) between 1 and 255),
+  processor_status text check (
+    processor_status is null or char_length(processor_status) between 1 and 80
+  ),
+  processor_reason text check (
+    processor_reason is null or char_length(processor_reason) between 1 and 80
+  ),
+  processor_amount integer check (processor_amount is null or processor_amount > 0),
+  processor_currency text check (
+    processor_currency is null or processor_currency ~ '^[a-z]{3}$'
+  ),
+  processor_closed_at timestamptz,
+  review_state text not null default 'open' check (review_state in ('open', 'resolved')),
+  first_observed_at timestamptz not null default now(),
+  last_observed_at timestamptz not null default now(),
+  resolved_at timestamptz,
+  resolved_by uuid references public.staff (id) on delete restrict,
+  resolution_note text,
+  constraint fp_billing_review_items_owned_child_fk
+    foreign key (child_id, parent_id)
+    references public.children (id, parent_id)
+    on delete cascade,
+  constraint fp_billing_review_items_product_fk
+    foreign key (product_key, product_version)
+    references public.fp_billing_products (product_key, version)
+    on delete restrict,
+  constraint fp_billing_review_items_order_scope_fk
+    foreign key (order_id, parent_id, child_id, product_key, product_version)
+    references public.fp_billing_orders (id, parent_id, child_id, product_key, product_version)
+    on delete cascade,
+  constraint fp_billing_review_items_resolution_shape check (
+    (
+      review_state = 'open'
+      and resolved_at is null
+      and resolved_by is null
+      and resolution_note is null
+    ) or (
+      review_state = 'resolved'
+      and resolved_at is not null
+      and resolved_by is not null
+      and char_length(trim(coalesce(resolution_note, ''))) between 3 and 1000
+    )
+  ),
+  unique (review_kind, stripe_object_id)
+);
+
+create index if not exists fp_billing_review_items_open_child_idx
+  on public.fp_billing_review_items (child_id, last_observed_at desc)
+  where review_state = 'open';
 
 -- Durable parent communications for the two Round One setup moments. The
 -- financial/curriculum transition and its notification row commit together;
@@ -263,6 +347,7 @@ alter table public.fp_billing_products enable row level security;
 alter table public.fp_billing_orders enable row level security;
 alter table public.fp_billing_entitlements enable row level security;
 alter table public.fp_billing_webhook_events enable row level security;
+alter table public.fp_billing_review_items enable row level security;
 alter table public.fp_parent_notification_outbox enable row level security;
 alter table public.fp_billing_access_events enable row level security;
 
@@ -282,6 +367,7 @@ revoke all on public.fp_billing_products from anon, authenticated;
 revoke all on public.fp_billing_orders from anon, authenticated;
 revoke all on public.fp_billing_entitlements from anon, authenticated;
 revoke all on public.fp_billing_webhook_events from anon, authenticated;
+revoke all on public.fp_billing_review_items from anon, authenticated;
 revoke all on public.fp_parent_notification_outbox from anon, authenticated;
 revoke all on public.fp_billing_access_events from anon, authenticated;
 grant select on public.fp_billing_products to authenticated;
@@ -543,11 +629,16 @@ begin
   where e.child_id = p_child_id
     and e.product_key = p_product_key
     and e.product_version = p_product_version
-    and e.status = 'active'
   for update;
-  if found then
+  if found and v_entitlement.status = 'active' then
     return query
       select 'already_entitled', v_entitlement.source_order_id, null::text, null::timestamptz, v_entitlement.grant_kind;
+    return;
+  elsif found and v_entitlement.status = 'suspended' then
+    -- A chargeback is an operational review, not permission to pay twice. The
+    -- parent/child status routes expose the suspension while Checkout stays shut.
+    return query
+      select 'access_suspended', v_entitlement.source_order_id, null::text, null::timestamptz, v_entitlement.grant_kind;
     return;
   end if;
 
@@ -669,7 +760,11 @@ create or replace function public.fp_billing_apply_stripe_event(
   p_product_key text,
   p_product_version integer,
   p_amount integer,
-  p_currency text
+  p_currency text,
+  p_processor_object_id text,
+  p_processor_status text,
+  p_processor_reason text,
+  p_processor_amount integer
 )
 returns text
 language plpgsql
@@ -680,6 +775,8 @@ declare
   v_order public.fp_billing_orders%rowtype;
   v_product public.fp_billing_products%rowtype;
   v_entitlement public.fp_billing_entitlements%rowtype;
+  v_review public.fp_billing_review_items%rowtype;
+  v_review_kind text;
   v_outcome text;
   v_replacement_order_id uuid;
 begin
@@ -749,6 +846,85 @@ begin
     end if;
   end if;
 
+  if p_effect in ('refunded', 'partial_refund', 'dispute_opened', 'dispute_closed') then
+    if p_payment_intent_id is null
+       or nullif(trim(coalesce(p_processor_object_id, '')), '') is null
+       or char_length(p_processor_object_id) > 255 then
+      return 'processor_identity_mismatch';
+    end if;
+    if lower(coalesce(p_currency, '')) <> v_order.currency then
+      return 'amount_mismatch';
+    end if;
+    if exists (
+      select 1 from public.fp_billing_orders other
+      where other.stripe_payment_intent_id = p_payment_intent_id
+        and other.id <> v_order.id
+    ) then
+      return 'processor_identity_mismatch';
+    end if;
+  end if;
+
+  if p_effect = 'partial_refund' and (
+    p_processor_amount is null
+    or p_processor_amount <= 0
+    or p_processor_amount >= v_order.amount
+  ) then
+    return 'amount_mismatch';
+  end if;
+
+  if p_effect in ('dispute_opened', 'dispute_closed') and (
+    p_processor_amount is null
+    or p_processor_amount <= 0
+    or nullif(trim(coalesce(p_processor_status, '')), '') is null
+    or char_length(p_processor_status) > 80
+    or nullif(trim(coalesce(p_processor_reason, '')), '') is null
+    or char_length(p_processor_reason) > 80
+    or (
+      p_effect = 'dispute_closed'
+      and p_processor_status not in ('lost', 'warning_closed', 'won')
+    )
+  ) then
+    return 'invalid_processor_state';
+  end if;
+
+  if p_effect in ('partial_refund', 'dispute_opened', 'dispute_closed') then
+    v_review_kind := case
+      when p_effect = 'partial_refund' then 'partial_refund'
+      else 'stripe_dispute'
+    end;
+    -- Different Stripe deliveries for one Charge/Dispute share one review
+    -- case. Lock that provider object before validating its immutable order
+    -- provenance, then keep the lock through the eventual upsert below.
+    perform pg_advisory_xact_lock(
+      hashtextextended(concat_ws(':', v_review_kind, p_processor_object_id), 2)
+    );
+    select * into v_review
+    from public.fp_billing_review_items review
+    where review.review_kind = v_review_kind
+      and review.stripe_object_id = p_processor_object_id
+    for update;
+    if found and (
+      v_review.order_id <> v_order.id
+      or v_review.parent_id <> v_order.parent_id
+      or v_review.child_id <> v_order.child_id
+      or v_review.product_key <> v_order.product_key
+      or v_review.product_version <> v_order.product_version
+    ) then
+      return 'processor_identity_mismatch';
+    end if;
+  end if;
+
+  if p_effect in ('refunded', 'partial_refund', 'dispute_opened', 'dispute_closed') then
+    update public.fp_billing_orders
+    set stripe_payment_intent_id = coalesce(stripe_payment_intent_id, p_payment_intent_id),
+        updated_at = now()
+    where id = v_order.id;
+    v_order.stripe_payment_intent_id := coalesce(
+      v_order.stripe_payment_intent_id,
+      p_payment_intent_id
+    );
+  end if;
+
   if p_effect = 'pending' then
     if v_order.status = 'pending' then
       update public.fp_billing_orders
@@ -780,7 +956,43 @@ begin
         and e.product_version = v_order.product_version
       for update;
 
-      if found and v_entitlement.status = 'active'
+      if v_order.dispute_suspended_at is not null or exists (
+        select 1 from public.fp_billing_review_items review
+        where review.child_id = v_order.child_id
+          and review.product_key = v_order.product_key
+          and review.product_version = v_order.product_version
+          and review.review_kind = 'stripe_dispute'
+          and review.review_state = 'open'
+      ) then
+        -- A dispute may arrive before the Checkout completion. Record the
+        -- payment as financial truth, but never let the late paid event reopen
+        -- access or enqueue the setup email while the sticky dispute stands.
+        insert into public.fp_billing_entitlements (
+          parent_id, child_id, product_key, product_version, access_code,
+          status, grant_kind, source_order_id, granted_at, suspended_at,
+          suspension_reason, revoked_at, updated_at
+        ) values (
+          v_order.parent_id, v_order.child_id, v_order.product_key,
+          v_order.product_version, v_product.access_code,
+          'suspended', 'paid', v_order.id, now(),
+          coalesce(v_order.dispute_suspended_at, now()),
+          'stripe_dispute', null, now()
+        )
+        on conflict (child_id, product_key, product_version) do update
+        set parent_id = excluded.parent_id,
+            access_code = excluded.access_code,
+            status = 'suspended',
+            grant_kind = 'paid',
+            source_order_id = excluded.source_order_id,
+            suspended_at = coalesce(
+              fp_billing_entitlements.suspended_at,
+              excluded.suspended_at
+            ),
+            suspension_reason = 'stripe_dispute',
+            revoked_at = null,
+            updated_at = now();
+        v_outcome := 'dispute_stands';
+      elsif found and v_entitlement.status = 'active'
          and v_entitlement.grant_kind = 'paid'
          and v_entitlement.source_order_id is distinct from v_order.id then
         -- The charge is real, but access was already granted by another paid
@@ -792,11 +1004,12 @@ begin
       else
         insert into public.fp_billing_entitlements (
           parent_id, child_id, product_key, product_version, access_code,
-          status, grant_kind, source_order_id, granted_at, revoked_at, updated_at
+          status, grant_kind, source_order_id, granted_at, suspended_at,
+          suspension_reason, revoked_at, updated_at
         ) values (
           v_order.parent_id, v_order.child_id, v_order.product_key,
           v_order.product_version, v_product.access_code,
-          'active', 'paid', v_order.id, now(), null, now()
+          'active', 'paid', v_order.id, now(), null, null, null, now()
         )
         on conflict (child_id, product_key, product_version) do update
         set parent_id = excluded.parent_id,
@@ -805,6 +1018,8 @@ begin
             grant_kind = 'paid',
             source_order_id = excluded.source_order_id,
             granted_at = now(),
+            suspended_at = null,
+            suspension_reason = null,
             revoked_at = null,
             updated_at = now();
         v_outcome := 'granted';
@@ -831,8 +1046,47 @@ begin
       v_outcome := 'terminal_stands';
     end if;
 
+  elsif p_effect = 'partial_refund' then
+    -- The signed Charge carries a cumulative amount_refunded below its full
+    -- amount. Preserve order and entitlement state; the review row written
+    -- below is the durable, staff-actionable effect of this event.
+    if v_order.status = 'refunded' or v_order.refunded_at is not null then
+      v_outcome := 'refund_stands';
+    else
+      v_outcome := 'partial_refund_review';
+    end if;
+
+  elsif p_effect in ('dispute_opened', 'dispute_closed') then
+    if v_order.status = 'refunded' or v_order.refunded_at is not null then
+      -- A later dispute delivery cannot weaken full-refund finality. It is
+      -- still recorded in both audit/review ledgers below for staff visibility.
+      v_outcome := 'refund_stands';
+    else
+      update public.fp_billing_orders
+      set dispute_suspended_at = coalesce(dispute_suspended_at, now()),
+          updated_at = now()
+      where id = v_order.id;
+
+      update public.fp_billing_entitlements entitlement
+      set status = 'suspended',
+          suspended_at = coalesce(entitlement.suspended_at, now()),
+          suspension_reason = 'stripe_dispute',
+          revoked_at = null,
+          updated_at = now()
+      where entitlement.child_id = v_order.child_id
+        and entitlement.product_key = v_order.product_key
+        and entitlement.product_version = v_order.product_version
+        and entitlement.status in ('active', 'suspended');
+
+      v_outcome := case
+        when p_effect = 'dispute_closed' then 'dispute_closed_review'
+        else 'dispute_suspended'
+      end;
+    end if;
+
   elsif p_effect = 'refunded' then
-    -- Full refunds only reach this branch; the route keeps partial refunds out.
+    -- Full refunds only reach this branch. Partial refunds preserve access and
+    -- create an open review item in their separate branch above.
     if v_order.status <> 'refunded' then
       update public.fp_billing_orders
       set status = 'refunded', refunded_at = now(), updated_at = now()
@@ -857,7 +1111,7 @@ begin
       where e.child_id = v_order.child_id
         and e.product_key = v_order.product_key
         and e.product_version = v_order.product_version
-        and e.status = 'active'
+        and e.status in ('active', 'suspended')
         and e.grant_kind = 'paid'
         and e.source_order_id = v_order.id;
     else
@@ -866,13 +1120,61 @@ begin
       where e.child_id = v_order.child_id
         and e.product_key = v_order.product_key
         and e.product_version = v_order.product_version
-        and e.status = 'active'
-        and e.grant_kind = 'paid'
-        and e.source_order_id = v_order.id;
+        and e.status in ('active', 'suspended')
+        and (
+          (e.grant_kind = 'paid' and e.source_order_id = v_order.id)
+          or (e.status = 'suspended' and e.suspension_reason = 'stripe_dispute')
+        );
     end if;
     v_outcome := 'refunded';
   else
     return 'unsupported_effect';
+  end if;
+
+  if p_effect in ('partial_refund', 'dispute_opened', 'dispute_closed') then
+    insert into public.fp_billing_review_items (
+      parent_id, child_id, product_key, product_version, order_id,
+      review_kind, stripe_object_id, last_stripe_event_id,
+      processor_status, processor_reason, processor_amount,
+      processor_currency, processor_closed_at, review_state,
+      first_observed_at, last_observed_at
+    ) values (
+      v_order.parent_id, v_order.child_id, v_order.product_key,
+      v_order.product_version, v_order.id, v_review_kind,
+      p_processor_object_id, p_event_id, p_processor_status,
+      p_processor_reason, p_processor_amount, lower(p_currency),
+      case when p_effect = 'dispute_closed' then now() else null end,
+      'open', now(), now()
+    )
+    on conflict (review_kind, stripe_object_id) do update
+    set last_stripe_event_id = excluded.last_stripe_event_id,
+        -- Stripe does not guarantee event order. A late `created` delivery must
+        -- not overwrite the terminal status already learned from `closed`.
+        processor_status = case
+          when fp_billing_review_items.processor_closed_at is not null
+               and p_effect = 'dispute_opened'
+            then fp_billing_review_items.processor_status
+          else excluded.processor_status
+        end,
+        processor_reason = case
+          when fp_billing_review_items.processor_closed_at is not null
+               and p_effect = 'dispute_opened'
+            then fp_billing_review_items.processor_reason
+          else excluded.processor_reason
+        end,
+        processor_amount = excluded.processor_amount,
+        processor_currency = excluded.processor_currency,
+        processor_closed_at = coalesce(
+          fp_billing_review_items.processor_closed_at,
+          excluded.processor_closed_at
+        ),
+        -- A new signed processor event is new work even if staff had resolved
+        -- an earlier snapshot of this case. Reopen it, but never restore access.
+        review_state = 'open',
+        resolved_at = null,
+        resolved_by = null,
+        resolution_note = null,
+        last_observed_at = now();
   end if;
 
   -- The email provider is deliberately outside this financial transaction,
@@ -995,7 +1297,13 @@ begin
     and e.product_version = v_product.version
   for update;
 
-  if p_action in ('comped', 'grandfathered') then
+  -- A processor dispute is a sticky security/financial hold. Neither a grant
+  -- nor a revoke action may silently clear or rewrite it; staff must resolve
+  -- the open billing review case through an explicit future workflow.
+  if found and v_entitlement.status = 'suspended' then
+    v_outcome := 'dispute_requires_review';
+    v_order_id := v_entitlement.source_order_id;
+  elsif p_action in ('comped', 'grandfathered') then
     if found and v_entitlement.status = 'active' and v_entitlement.grant_kind = 'paid' then
       v_outcome := 'paid_stands';
       v_order_id := v_entitlement.source_order_id;
@@ -1013,10 +1321,12 @@ begin
 
       insert into public.fp_billing_entitlements (
         parent_id, child_id, product_key, product_version, access_code,
-        status, grant_kind, source_order_id, granted_at, revoked_at, updated_at
+        status, grant_kind, source_order_id, granted_at, suspended_at,
+        suspension_reason, revoked_at, updated_at
       ) values (
         v_parent_id, p_child_id, v_product.product_key, v_product.version,
-        v_product.access_code, 'active', p_action, v_order_id, now(), null, now()
+        v_product.access_code, 'active', p_action, v_order_id, now(), null,
+        null, null, now()
       )
       on conflict (child_id, product_key, product_version) do update
       set parent_id = excluded.parent_id,
@@ -1025,6 +1335,8 @@ begin
           grant_kind = excluded.grant_kind,
           source_order_id = excluded.source_order_id,
           granted_at = now(),
+          suspended_at = null,
+          suspension_reason = null,
           revoked_at = null,
           updated_at = now();
       v_outcome := 'granted';
@@ -1066,7 +1378,8 @@ revoke all on function public.fp_billing_attach_checkout(uuid, text, timestamptz
 revoke all on function public.fp_billing_fill_parent_phone(uuid, text)
   from public, anon, authenticated;
 revoke all on function public.fp_billing_apply_stripe_event(
-  text, text, text, uuid, text, text, uuid, uuid, text, integer, integer, text
+  text, text, text, uuid, text, text, uuid, uuid, text, integer, integer, text,
+  text, text, text, integer
 ) from public, anon, authenticated;
 revoke all on function public.fp_billing_set_round_one_access(uuid, text, text, uuid, uuid)
   from public, anon, authenticated;
@@ -1082,7 +1395,8 @@ grant execute on function public.fp_billing_attach_checkout(uuid, text, timestam
 grant execute on function public.fp_billing_fill_parent_phone(uuid, text)
   to service_role;
 grant execute on function public.fp_billing_apply_stripe_event(
-  text, text, text, uuid, text, text, uuid, uuid, text, integer, integer, text
+  text, text, text, uuid, text, text, uuid, uuid, text, integer, integer, text,
+  text, text, text, integer
 ) to service_role;
 grant execute on function public.fp_billing_set_round_one_access(uuid, text, text, uuid, uuid)
   to service_role;

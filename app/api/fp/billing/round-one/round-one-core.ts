@@ -15,7 +15,12 @@ import {
 } from "./round-one-rules";
 
 export type RoundOneBeginRow = {
-  outcome: "checkout" | "already_entitled" | "product_unavailable" | "not_owned";
+  outcome:
+    | "checkout"
+    | "already_entitled"
+    | "access_suspended"
+    | "product_unavailable"
+    | "not_owned";
   order_id: string | null;
   stripe_session_id: string | null;
   stripe_session_expires_at: string | null;
@@ -116,6 +121,7 @@ export async function readRoundOneStatus(
 export type StartRoundOneCheckoutResult =
   | { kind: "checkout"; url: string; reused: boolean }
   | { kind: "already_granted"; grantKind: "paid" | "comped" | "grandfathered" }
+  | { kind: "suspended" }
   | { kind: "awaiting_webhook" }
   | { kind: "refused" }
   | { kind: "unavailable" };
@@ -174,6 +180,7 @@ export async function startRoundOneCheckout(
       return { kind: "unavailable" };
     }
     if (begun.outcome === "not_owned") return { kind: "refused" };
+    if (begun.outcome === "access_suspended") return { kind: "suspended" };
     if (begun.outcome === "already_entitled") {
       return begun.grant_kind
         ? { kind: "already_granted", grantKind: begun.grant_kind }

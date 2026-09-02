@@ -50,7 +50,9 @@ export function buildRoundOneCoreDeps(db: SupabaseClient): RoundOneCoreDeps {
     readEntitlement: async (parentId, childId, productKey, version) => {
       const { data, error } = await db
         .from("fp_billing_entitlements")
-        .select("status, grant_kind, access_code, granted_at, revoked_at")
+        .select(
+          "status, grant_kind, access_code, granted_at, suspended_at, suspension_reason, revoked_at"
+        )
         .eq("parent_id", parentId)
         .eq("child_id", childId)
         .eq("product_key", productKey)
@@ -144,6 +146,10 @@ export async function applyRoundOneWebhookPlan(
       p_product_version: plan.productVersion,
       p_amount: plan.amount,
       p_currency: plan.currency,
+      p_processor_object_id: plan.processorObjectId,
+      p_processor_status: plan.processorStatus,
+      p_processor_reason: plan.processorReason,
+      p_processor_amount: plan.processorAmount,
     });
     if (error) {
       console.error(`[fp/billing/round-one] webhook rpc failed: ${error.message}`);
@@ -189,7 +195,8 @@ export type RoundOneStaffAccessOutcome =
   | "already_active"
   | "already_revoked"
   | "paid_stands"
-  | "paid_requires_refund";
+  | "paid_requires_refund"
+  | "dispute_requires_review";
 
 export async function setRoundOneComplimentaryAccess(
   db: SupabaseClient,
@@ -231,6 +238,7 @@ export async function setRoundOneComplimentaryAccess(
       "already_revoked",
       "paid_stands",
       "paid_requires_refund",
+      "dispute_requires_review",
     ]);
     if (
       !row

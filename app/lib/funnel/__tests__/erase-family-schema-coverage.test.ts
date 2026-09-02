@@ -101,6 +101,7 @@ describe("R28 erasure coverage — the ledger matches the real schema", () => {
       "fp_billing_orders",
       "fp_billing_entitlements",
       "fp_billing_access_events",
+      "fp_billing_review_items",
       "fp_parent_notification_outbox",
     ]) {
       expect(ERASURE_TABLE_LEDGER[table]?.disposition, `${table} must follow family erasure`).toBe(

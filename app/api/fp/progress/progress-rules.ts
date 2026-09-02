@@ -210,6 +210,9 @@ export function shapeProgressRefusal(
  */
 export type ProgressBadRequestReason =
   | RequestedTaskIdsRefusal
+  /** `scope` was absent or not exactly `included` / `all`. It is required so a
+   *  new client can never silently merge an unscoped legacy response. */
+  | "invalid_scope"
   /**
    * A read matched more rows than PROGRESS_MAX_ROWS, or exhausted its page /
    * round-trip budget. Deliberately DISTINCT from `outage`: an outage is a blip

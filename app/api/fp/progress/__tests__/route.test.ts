@@ -148,6 +148,8 @@ vi.mock("@/app/api/fp/progress/progress-rules", async (importOriginal) => {
 
 const ORIGIN = "http://localhost:5173";
 const STAFF_ID = "staff-peter-1";
+const SCOPE_REVISION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const SCOPE_UPDATED_AT = "2026-09-01T12:00:00.000Z";
 /** A criterion view: five tasks on screen plus the ONE predecessor id. */
 const TASKS = ["1.1.5", "1.2.1", "1.2.2", "1.2.3", "1.2.4", "1.2.5"];
 
@@ -221,27 +223,37 @@ function seed(): void {
     ],
     fp_billing_entitlements: [],
     fp_billing_orders: [],
+    fp_watchtower_family_scope: [],
   } as Store;
 }
 
-const urlFor = (tasks: string | null): string =>
-  tasks === null
-    ? "http://localhost/api/fp/progress"
-    : `http://localhost/api/fp/progress?tasks=${encodeURIComponent(tasks)}`;
+const urlFor = (tasks: string | null, scope: string | null): string => {
+  const url = new URL("http://localhost/api/fp/progress");
+  if (tasks !== null) url.searchParams.set("tasks", tasks);
+  if (scope !== null) url.searchParams.set("scope", scope);
+  return url.toString();
+};
 
 const requestFor = (opts?: {
   origin?: string;
   token?: string | null;
   tasks?: string | null;
+  scope?: string | null;
 }): Request => {
   const headers: Record<string, string> = { origin: opts?.origin ?? ORIGIN };
   const token = opts?.token === undefined ? TOKEN : opts.token;
   if (token !== null) headers.authorization = `Bearer ${token}`;
   const tasks = opts?.tasks === undefined ? TASKS.join(",") : opts.tasks;
-  return new Request(urlFor(tasks), { method: "GET", headers });
+  const scope = opts?.scope === undefined ? "included" : opts.scope;
+  return new Request(urlFor(tasks, scope), { method: "GET", headers });
 };
 
-const get = (opts?: { origin?: string; token?: string | null; tasks?: string | null }) =>
+const get = (opts?: {
+  origin?: string;
+  token?: string | null;
+  tasks?: string | null;
+  scope?: string | null;
+}) =>
   import("@/app/api/fp/progress/route").then((m) => m.GET(requestFor(opts)));
 
 type Body = {
@@ -265,6 +277,11 @@ type Body = {
     unpaid: number;
     refundedPaid: number;
     revokedComplimentary: number;
+  };
+  analyticsScope: {
+    revision: string;
+    includedFamilies: number;
+    excludedFamilies: number;
   };
 };
 
@@ -319,6 +336,7 @@ const getUnderFakeClock = async (opts?: {
 function seedRoster(n: number): void {
   store.value.children = Array.from({ length: n }, (_, i) => ({
     id: `kid-${String(i).padStart(6, "0")}`,
+    parent_id: "parent-bulk",
     fp_username: `kid${i}`,
   }));
   store.value.fp_player_profiles = [];
@@ -341,6 +359,7 @@ function seedIdSetRows(totalProfiles: number): void {
   const pad = (i: number): string => String(i).padStart(6, "0");
   store.value.children = Array.from({ length: children }, (_, i) => ({
     id: `kid-${pad(i)}`,
+    parent_id: "parent-bulk",
     fp_username: `kid${i}`,
   }));
   store.value.fp_player_profiles = Array.from({ length: totalProfiles }, (_, i) => ({
@@ -371,6 +390,7 @@ function oversizedCohort(): string {
   const n = 60;
   store.value.children = Array.from({ length: n }, (_, i) => ({
     id: `kid-${String(i).padStart(6, "0")}`,
+    parent_id: "parent-bulk",
     fp_username: `kid${i}`,
   }));
   store.value.fp_player_profiles = Array.from({ length: n }, (_, i) => ({
@@ -678,6 +698,7 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     expect(new Set(callLog.filter((c) => c.startsWith("db:")))).toEqual(
       new Set([
         "db:staff",
+        "db:fp_watchtower_family_scope",
         "db:children",
         "db:parents",
         "db:fp_player_profiles",
@@ -690,6 +711,79 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
 
   it("excludes a child with no fp_username — the roster filter is the FP-enrolment filter", async () => {
     expect(await usernames(await get())).toEqual(["alex", "cy", "eve"]);
+  });
+
+  it("scope=included removes an excluded family before parent/profile/save reads", async () => {
+    store.value.fp_watchtower_family_scope = [
+      {
+        parent_id: "parent-1",
+        excluded_from_analytics: true,
+        revision: SCOPE_REVISION,
+        updated_at: SCOPE_UPDATED_AT,
+      },
+    ];
+    const res = await get({ scope: "included" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Body;
+    expect(body.children.map((child) => child.username)).toEqual(["cy"]);
+    expect(body.analyticsScope).toMatchObject({
+      includedFamilies: 1,
+      excludedFamilies: 1,
+      revision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+    });
+
+    const parentRead = dbCalls.find((call) => call.table === "parents");
+    const profileRead = dbCalls.find((call) => call.table === "fp_player_profiles");
+    const saveRead = dbCalls.find((call) => call.table === "fp_player_saves");
+    expect(parentRead?.filters.find((filter) => filter.op === "in")?.value).toEqual([
+      "parent-2",
+    ]);
+    expect(profileRead?.filters.find((filter) => filter.op === "in")?.value).toEqual(["c-3"]);
+    expect(saveRead?.filters.find((filter) => filter.op === "in")?.value).toEqual(["p-3"]);
+  });
+
+  it("scope=all explicitly includes QA families while preserving the same scope metadata", async () => {
+    store.value.fp_watchtower_family_scope = [
+      {
+        parent_id: "parent-1",
+        excluded_from_analytics: true,
+        revision: SCOPE_REVISION,
+        updated_at: SCOPE_UPDATED_AT,
+      },
+    ];
+    const included = (await (await get({ scope: "included" })).json()) as Body;
+    const all = (await (await get({ scope: "all" })).json()) as Body;
+    expect(all.children.map((child) => child.username).sort()).toEqual(["alex", "cy", "eve"]);
+    expect(all.analyticsScope).toEqual(included.analyticsScope);
+  });
+
+  it("requires scope after both staff gates, refunds the bad request, and exposes no parser oracle", async () => {
+    const missing = await get({ scope: null });
+    expect(missing.status).toBe(400);
+    expect(rateRef.released).toHaveLength(2);
+    expect(callLog).not.toContain("db:fp_watchtower_family_scope");
+    expect(callLog).not.toContain("db:children");
+
+    const malformed = await get({ scope: "Included" });
+    expect(malformed.status).toBe(400);
+    const unauthenticated = await get({ scope: "Included", token: null });
+    expect(unauthenticated.status).toBe(401);
+  });
+
+  it("fails closed when a scope row is malformed", async () => {
+    store.value.fp_watchtower_family_scope = [
+      {
+        parent_id: "parent-1",
+        excluded_from_analytics: true,
+        revision: "bad-revision",
+        updated_at: SCOPE_UPDATED_AT,
+      },
+    ];
+    const res = await get();
+    expect(res.status).toBe(401);
+    expect(rateRef.released).toHaveLength(2);
+    expect(callLog).not.toContain("db:fp_player_profiles");
+    expect(callLog).not.toContain("db:fp_player_saves");
   });
 
   it("an empty roster answers {ok, children: []} without downstream round trips", async () => {
@@ -712,6 +806,11 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
         unpaid: 0,
         refundedPaid: 0,
         revokedComplimentary: 0,
+      },
+      analyticsScope: {
+        revision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+        includedFamilies: 0,
+        excludedFamilies: 0,
       },
     });
   });
@@ -1193,6 +1292,7 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     const n = PROGRESS_ID_CHUNK + 100;
     store.value.children = Array.from({ length: n }, (_, i) => ({
       id: `kid-${String(i).padStart(6, "0")}`,
+      parent_id: "parent-bulk",
       fp_username: `kid${i}`,
     }));
     store.value.fp_player_profiles = Array.from({ length: n }, (_, i) => ({
@@ -1232,6 +1332,7 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     const n = PROGRESS_SAVES_PAGE_SIZE + 50;
     store.value.children = Array.from({ length: n }, (_, i) => ({
       id: `kid-${String(i).padStart(6, "0")}`,
+      parent_id: "parent-bulk",
       fp_username: `kid${i}`,
     }));
     store.value.fp_player_profiles = Array.from({ length: n }, (_, i) => ({
@@ -1276,6 +1377,7 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     const n = PROGRESS_ID_CHUNK + 100;
     store.value.children = Array.from({ length: n }, (_, i) => ({
       id: `kid-${String(i).padStart(6, "0")}`,
+      parent_id: "parent-bulk",
       fp_username: `kid${i}`,
     }));
     store.value.fp_player_profiles = Array.from({ length: n }, (_, i) => ({
@@ -1401,6 +1503,7 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     const pad = (i: number): string => String(i).padStart(6, "0");
     store.value.children = Array.from({ length: n }, (_, i) => ({
       id: `kid-${pad(i)}`,
+      parent_id: "parent-bulk",
       fp_username: `kid${i}`,
     }));
     store.value.fp_player_profiles = Array.from({ length: n }, (_, i) => ({
@@ -1443,6 +1546,25 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     expect(res.headers.get("access-control-allow-origin")).toBe(ORIGIN);
     const badList = await get({ tasks: "garbage" });
     expect(await res.text()).toBe(await badList.text());
+  });
+
+  it("counts the analyticsScope suffix and JSON envelope in the response-byte budget", async () => {
+    const emptyChild = JSON.stringify({
+      username: "",
+      truncated: false,
+      docUnreadable: false,
+      ideas: [],
+      businesses: [],
+    });
+    // The child part alone sits 50 bytes under the limit. Only the required
+    // envelope + analyticsScope suffix can push the real response over it.
+    const usernameLength = PROGRESS_MAX_RESPONSE_BYTES - 50 - Buffer.byteLength(emptyChild);
+    store.value.children = [
+      { id: "hostile-kid", fp_username: "x".repeat(usernameLength) },
+    ];
+    store.value.fp_player_profiles = [];
+    store.value.fp_player_saves = [];
+    expect((await get({ scope: "all" })).status).toBe(400);
   });
 
   it("the byte-budget refusal does NOT release strikes — deterministic, like the row cap", async () => {

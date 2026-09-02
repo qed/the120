@@ -10,7 +10,7 @@
  * is commented here.
  *
  * ── CONTRACT (for the FP staff client) ──
- *   GET /api/fp/progress?tasks=1.1.5,1.2.1,1.2.2,1.2.3,1.2.4,1.2.5
+ *   GET /api/fp/progress?tasks=1.1.5,1.2.1,...&scope=included
  *   Origin: an allowed FP origin (exact match — the child-gateway CORS list)
  *   Authorization: Bearer <staff Supabase session access token>
  *
@@ -21,16 +21,23 @@
  *   `deriveRequestedTaskIds` for why an explicit list replaced an earlier
  *   criterion-PREFIX design.
  *
- *   200 {ok: true, children: [ProgressChild], round1Payments?} — the progress
- *   shape is documented in full at the top of ./progress-rules.ts (username,
- *   truncated, docUnreadable, ideas[], businesses[]). `round1Payments`, when
- *   present, is exactly
+ *   `scope` is REQUIRED and must be exactly `included` (the normal Watchtower)
+ *   or `all` (the explicit QA-inclusive comparison). Excluded parent families
+ *   are removed before parent/profile/save reads, not hidden after shaping.
+ *
+ *   200 {ok: true, children: [ProgressChild], analyticsScope: {
+ *          revision, includedFamilies, excludedFamilies
+ *        }, round1Payments?} — the child shape is documented in full at the
+ *   top of ./progress-rules.ts. `revision` is an opaque cohort merge token:
+ *   criterion responses with different revisions must never be combined.
+ *   `round1Payments`, when present, is exactly
  *   `{unit:"child",paidPurchases,complimentaryAccess,pending,unpaid,
- *   refundedPaid,revokedComplimentary}`. It contains counts only — no
- *   child names, ids, order ids, amounts or Stripe details — and is omitted when
- *   the provisional billing schema/read is unavailable rather than fabricated
- *   as zeros. The server sends completion maps essentially raw, filtered to the
- *   requested task ids; the CLIENT owns every progress semantic.
+ *   refundedPaid,revokedComplimentary}` for the requested analytics scope. It
+ *   contains counts only — no child names, ids, order ids, amounts or Stripe
+ *   details — and is omitted when the provisional billing schema/read is
+ *   unavailable rather than fabricated as zeros. The server sends completion
+ *   maps essentially raw, filtered to the requested task ids; the CLIENT owns
+ *   every progress semantic.
  *
  *   401 — byte-identical for EVERY AUTHORIZATION-shaped refusal (missing/bad
  *   token, a genuine non-staff session, rate limit, outage). 403 only for a
@@ -39,7 +46,7 @@
  *
  *   400 — the ONE documented exception, generic-bodied, and reachable ONLY by an
  *   ALREADY-AUTHENTICATED staff caller. Two things reach it:
- *     - an unusable `tasks` list (missing, malformed, oversized, non-list), and
+ *     - an unusable `tasks` list or `scope` value, and
  *     - a CAPACITY bound: more rows than PROGRESS_MAX_ROWS, more round trips
  *       than PROGRESS_MAX_ROUND_TRIPS, or a body past
  *       PROGRESS_MAX_RESPONSE_BYTES.
@@ -56,17 +63,13 @@
  *   deterministic, and refunding would make the most expensive path free to
  *   loop).
  *
- * ── No test-family exclusion ──
- * `families.is_test` is a CRM/NURTURE-VISIBILITY flag, not an FP-enrolment flag:
- * app/crm/lib/test-family-filter.ts calls itself "the ONE place" that rule
- * lives, and scripts/provision-fp-cohort.ts records that provisioning "NEVER
- * stamps families.is_test — these are real". An earlier draft of this route
- * joined against it, which would have meant that stamping a real beta family
- * purely to stop nurture mail SILENTLY DELETED their children from the very
- * dashboard that exists to notice children who are stuck — no error, no way to
- * see it. Two independent meanings must not share one column. If test-row skew
- * ever becomes a real problem the fix is an explicit FP-scoped marker, not a
- * re-use of this one.
+ * ── Dedicated analytics scope, never the CRM test flag ──
+ * `families.is_test` remains a CRM/NURTURE-VISIBILITY flag and is never read
+ * here. Watchtower exclusions live only in `fp_watchtower_family_scope`, keyed
+ * by the First Profit parent's id and changed only by the staff-only
+ * `/api/fp/qa-families` POST. This keeps nurture suppression from silently
+ * changing product analytics. The route reads that decision snapshot first,
+ * then removes excluded families BEFORE contact/profile/save reads.
  *
  * ── Reads, not embeds ──
  * The roster is followed by batched parent-contact, profile, save and optional
@@ -126,6 +129,11 @@ import {
   ROUND_ONE_PRODUCT_KEY,
   ROUND_ONE_PRODUCT_VERSION,
 } from "../billing/round-one/round-one-rules";
+import {
+  deriveAnalyticsScope,
+  deriveAnalyticsScopeMode,
+} from "../qa-families/qa-families-rules";
+import { readWatchtowerScopeRows } from "../qa-families/scope-store";
 import {
   deriveProgressRateLimitKeys,
   deriveRequestedTaskIds,
@@ -671,7 +679,8 @@ export async function GET(req: Request): Promise<Response> {
     // caller must not be able to probe which ids parse — no oracle) and BEFORE
     // any cohort read (a bad request costs nothing). The refusal is 400-class
     // and generic; the submitted value reaches neither the body nor a log.
-    const requested = deriveRequestedTaskIds(new URL(req.url).searchParams.get("tasks"));
+    const requestUrl = new URL(req.url);
+    const requested = deriveRequestedTaskIds(requestUrl.searchParams.get("tasks"));
     if (!requested.ok) {
       // REFUND both strikes. This request touched no cohort read at all, and a
       // client-side regression that sends a malformed list on every render would
@@ -683,6 +692,18 @@ export async function GET(req: Request): Promise<Response> {
       releaseStrikes();
       return badRequest(requested.reason);
     }
+    const requestedScope = deriveAnalyticsScopeMode(requestUrl.searchParams.get("scope"));
+    if (!requestedScope.ok) {
+      releaseStrikes();
+      return badRequest(requestedScope.reason);
+    }
+
+    // Read the complete scope decision set BEFORE the roster. A concurrent
+    // toggle after this read therefore yields a self-consistent old snapshot
+    // and revision; the next criterion request receives a new revision and the
+    // client discards rather than merges the old cache.
+    const scopeRowsRead = await readWatchtowerScopeRows(admin, deadlineAt);
+    if (!scopeRowsRead.ok) return refuseRead(scopeRowsRead.reason);
 
     // ── 1. The roster. `fp_username is not null` is the enrolled-in-FP filter
     // (the column is server-managed and only set at provisioning), and
@@ -706,6 +727,35 @@ export async function GET(req: Request): Promise<Response> {
     );
     if (!childrenRead.ok) return refuseRead(childrenRead.reason);
 
+    const derivedScope = deriveAnalyticsScope(
+      scopeRowsRead.rows,
+      childrenRead.rows
+        .filter(
+          (child) =>
+            typeof child.parent_id === "string" &&
+            typeof child.fp_username === "string" &&
+            child.fp_username.length > 0
+        )
+        .map((child) => ({
+          parentId: child.parent_id as string,
+          childId: child.id,
+          username: child.fp_username as string,
+        }))
+    );
+    if (!derivedScope.ok) {
+      console.error("[fp/progress] invalid Watchtower scope row");
+      releaseStrikes();
+      return refuse("outage");
+    }
+    const scopedChildren =
+      requestedScope.scope === "all"
+        ? childrenRead.rows
+        : childrenRead.rows.filter(
+            (child) =>
+              typeof child.parent_id === "string" &&
+              !derivedScope.value.excludedParentIds.has(child.parent_id)
+          );
+
     // ── 2. Parent contacts for the ACTIONABLE follow-up disclosure. The main
     // Watchtower remains aggregate-only; the client projects these fields out
     // of every aggregate calculation and renders them only after staff opens a
@@ -714,7 +764,7 @@ export async function GET(req: Request): Promise<Response> {
     // the dashboard into a general family export.
     const parentIds = [
       ...new Set(
-        childrenRead.rows
+        scopedChildren
           .map((child) => child.parent_id)
           .filter((id): id is string => typeof id === "string" && id.length > 0),
       ),
@@ -736,7 +786,7 @@ export async function GET(req: Request): Promise<Response> {
     );
     if (!parentsRead.ok) return refuseRead(parentsRead.reason);
     const parentById = new Map(parentsRead.rows.map((parent) => [parent.id, parent]));
-    const childrenWithContacts: ProgressChildRowLike[] = childrenRead.rows.map((child) => {
+    const childrenWithContacts: ProgressChildRowLike[] = scopedChildren.map((child) => {
       const parentId = typeof child.parent_id === "string" ? child.parent_id : null;
       const parent = parentId ? parentById.get(parentId) : undefined;
       return {
@@ -758,7 +808,7 @@ export async function GET(req: Request): Promise<Response> {
     // ── 3. Profiles by child id. A child with no profile row is KEPT by the
     // pure module with empty ideas — that is the "never signed in" signal, and
     // dropping it would hide exactly the child this board exists to notice.
-    const childIds = childrenRead.rows.map((c) => c.id);
+    const childIds = scopedChildren.map((c) => c.id);
     const profilesRead = await readByIdSet<ProgressProfileRowLike>(
       "profiles read",
       childIds,
@@ -896,10 +946,13 @@ export async function GET(req: Request): Promise<Response> {
     // CORS-less 500, which is a different response shape and therefore an
     // oracle. Deterministic like the row cap, so strikes are NOT refunded.
     const parts: string[] = [];
-    let bytes = 0;
+    const analyticsScopePart = JSON.stringify(derivedScope.value.scope);
+    const responsePrefix = `{"ok":true,"children":[`;
+    const responseSuffix = `],"analyticsScope":${analyticsScopePart}}`;
+    let bytes = Buffer.byteLength(responsePrefix + responseSuffix, "utf8");
     for (const child of children) {
       const part = JSON.stringify(child);
-      bytes += Buffer.byteLength(part, "utf8") + 1; // +1 for the joining comma
+      bytes += Buffer.byteLength(part, "utf8") + (parts.length === 0 ? 0 : 1);
       if (bytes > PROGRESS_MAX_RESPONSE_BYTES) {
         console.error(
           `[fp/progress] shaped body exceeded ${PROGRESS_MAX_RESPONSE_BYTES} bytes`
@@ -936,8 +989,9 @@ export async function GET(req: Request): Promise<Response> {
       roundOneFragment = "";
     }
 
+    const finalSuffix = `],"analyticsScope":${analyticsScopePart}${roundOneFragment}}`;
     return new Response(
-      `{"ok":true,"children":[${parts.join(",")}]${roundOneFragment}}`,
+      `${responsePrefix}${parts.join(",")}${finalSuffix}`,
       {
         status: 200,
         headers,

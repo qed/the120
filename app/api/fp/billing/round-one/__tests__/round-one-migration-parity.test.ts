@@ -83,6 +83,59 @@ describe("Round One migration parity", () => {
     expect(sql).toContain("fp_billing_orders_one_pending_uq");
   });
 
+  it("preserves the pending order until Stripe-aware checkout reconciliation", () => {
+    const beginStart = sql.indexOf(
+      "create or replace function public.fp_billing_begin_order"
+    );
+    const attachStart = sql.indexOf(
+      "create or replace function public.fp_billing_attach_checkout"
+    );
+    const beginOrder = sql.slice(beginStart, attachStart);
+    expect(beginStart).toBeGreaterThanOrEqual(0);
+    expect(attachStart).toBeGreaterThan(beginStart);
+    expect(beginOrder).not.toContain("update public.fp_billing_orders");
+    expect(beginOrder).not.toContain("interval '1 hour'");
+    expect(beginOrder).toContain("exception when unique_violation");
+    expect(beginOrder).toContain("and o.status = 'pending'");
+  });
+
+  it("serializes duplicate and out-of-order events before changing order state", () => {
+    const eventLock = sql.indexOf(
+      "pg_advisory_xact_lock(hashtextextended(p_event_id, 0))"
+    );
+    const replayRead = sql.indexOf(
+      "select 1 from public.fp_billing_webhook_events w"
+    );
+    const childLock = sql.indexOf(
+      "concat_ws(':', p_child_id::text, p_product_key, p_product_version::text)"
+    );
+    const orderMutation = sql.indexOf("if p_effect = 'pending' then");
+    const eventStamp = sql.indexOf(
+      "insert into public.fp_billing_webhook_events"
+    );
+    expect(eventLock).toBeGreaterThanOrEqual(0);
+    expect(replayRead).toBeGreaterThan(eventLock);
+    expect(childLock).toBeGreaterThan(replayRead);
+    expect(orderMutation).toBeGreaterThan(childLock);
+    expect(eventStamp).toBeGreaterThan(orderMutation);
+  });
+
+  it("keeps terminal and refund transitions monotonic", () => {
+    expect(sql).toMatch(
+      /if v_order\.status = 'refunded' or v_order\.refunded_at is not null then\s+v_outcome := 'refund_stands'/
+    );
+    for (const effect of ["cancelled", "failed"]) {
+      expect(sql).toMatch(
+        new RegExp(
+          `elsif p_effect = '${effect}' then[\\s\\S]*?if v_order\\.status = 'pending' then[\\s\\S]*?v_outcome := '${effect}'[\\s\\S]*?else[\\s\\S]*?v_outcome := 'terminal_stands'`
+        )
+      );
+    }
+    expect(sql).toMatch(
+      /elsif p_effect = 'refunded' then[\s\S]*?set status = 'refunded'[\s\S]*?o\.status = 'paid'[\s\S]*?source_order_id = v_replacement_order_id[\s\S]*?set status = 'revoked'/
+    );
+  });
+
   it("audits complimentary controls and forbids them from revoking paid access", () => {
     expect(sql).toContain("create table if not exists public.fp_billing_access_events");
     expect(sql).toContain("request_id uuid not null unique");

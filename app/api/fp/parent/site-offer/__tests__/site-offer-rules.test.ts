@@ -17,6 +17,19 @@ describe("site offer request rules", () => {
     expect(isApprovedStripePaymentLink("https://buy.stripe.com/a/nested-path")).toBe(false);
     expect(isApprovedStripePaymentLink("https://BUY.stripe.com/test_123")).toBe(false);
     expect(isApprovedStripePaymentLink("https://buy.stripe.com/test_123?prefilled_email=a%40b.test")).toBe(true);
+    for (const hostile of [
+      "https://parent@buy.stripe.com/test_123",
+      "https://buy.stripe.com:444/test_123",
+      "https://buy.stripe.com./test_123",
+      "https://buy.stripe.com//test_123",
+      "https://buy.stripe.com/test_123/",
+      "https://buy.stripe.com/test_123%2Fhidden",
+      "https://buy.stripe.com/test_123#continue",
+      "https://buy.stripe.com/test_123\nLocation:https://evil.test",
+      " https://buy.stripe.com/test_123",
+    ]) {
+      expect(isApprovedStripePaymentLink(hostile), hostile).toBe(false);
+    }
   });
 
   it("requires a complete parent-approved offer before enabling checkout", () => {

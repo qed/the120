@@ -551,19 +551,12 @@ begin
     return;
   end if;
 
-  -- Heal a missed `checkout.session.expired` delivery before looking for the
-  -- one permitted pending row. A session-less row gets one hour for the route
-  -- to finish attaching Stripe's session before it is considered abandoned.
-  update public.fp_billing_orders o
-  set status = 'cancelled', cancelled_at = now(), updated_at = now()
-  where o.child_id = p_child_id
-    and o.product_key = p_product_key
-    and o.product_version = p_product_version
-    and o.status = 'pending'
-    and (
-      (o.stripe_session_expires_at is not null and o.stripe_session_expires_at <= now())
-      or (o.stripe_checkout_session_id is null and o.created_at <= now() - interval '1 hour')
-    );
+  -- Never age out a pending order here. It is the Stripe idempotency anchor:
+  -- a session-less row may mean Stripe created the Session but our attachment
+  -- response was lost, while an attached row must be inspected (and, if still
+  -- open, explicitly expired) at Stripe before a replacement can exist. The
+  -- checkout core performs that reconciliation; the signed expiry webhook may
+  -- also make the order terminal before the next parent retry.
 
   select * into v_order
   from public.fp_billing_orders o

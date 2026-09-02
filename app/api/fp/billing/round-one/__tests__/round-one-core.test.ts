@@ -68,6 +68,7 @@ beforeEach(() => {
       status: "open",
     }),
     retrieveSession: vi.fn(),
+    expireSession: vi.fn(),
   };
 });
 
@@ -119,6 +120,58 @@ describe("readRoundOneStatus", () => {
       ROUND_ONE_PRODUCT_KEY,
       1
     );
+  });
+
+  it("restores paid access from the entitlement even when the latest order was refunded", async () => {
+    vi.mocked(deps.readEntitlement).mockResolvedValue({
+      status: "active",
+      grant_kind: "paid",
+      access_code: ROUND_ONE_ACCESS_CODE,
+      granted_at: "2026-01-01T00:00:00Z",
+      revoked_at: null,
+    });
+    vi.mocked(deps.readLatestOrder).mockResolvedValue({
+      status: "refunded",
+      created_at: "2026-01-02T00:00:00Z",
+      updated_at: "2026-01-03T00:00:00Z",
+    });
+
+    const result = await readRoundOneStatus(deps, statusInput());
+
+    expect(result).toMatchObject({
+      kind: "ok",
+      body: {
+        state: "paid",
+        access: { granted: true, reason: "paid" },
+        canStartCheckout: false,
+      },
+    });
+  });
+
+  it("does not restore access after the durable entitlement is revoked", async () => {
+    vi.mocked(deps.readEntitlement).mockResolvedValue({
+      status: "revoked",
+      grant_kind: "paid",
+      access_code: ROUND_ONE_ACCESS_CODE,
+      granted_at: "2026-01-01T00:00:00Z",
+      revoked_at: "2026-01-03T00:00:00Z",
+    });
+    vi.mocked(deps.readLatestOrder).mockResolvedValue({
+      status: "refunded",
+      created_at: "2026-01-02T00:00:00Z",
+      updated_at: "2026-01-03T00:00:00Z",
+    });
+
+    const result = await readRoundOneStatus(deps, statusInput());
+
+    expect(result).toMatchObject({
+      kind: "ok",
+      body: {
+        state: "refunded",
+        access: { granted: false, reason: null },
+        canStartCheckout: true,
+      },
+    });
   });
 
   it("does not let a paid-looking order substitute for an entitlement", async () => {
@@ -217,6 +270,24 @@ describe("startRoundOneCheckout", () => {
     expect(stripe.createSession).not.toHaveBeenCalled();
   });
 
+  it("does not reuse a retrieved session whose Stripe identity changed", async () => {
+    vi.mocked(deps.beginOrder).mockResolvedValue(
+      newOrder({ stripe_session_id: "cs_expected" }),
+    );
+    vi.mocked(stripe.retrieveSession).mockResolvedValue({
+      id: "cs_different",
+      status: "open",
+      url: "https://checkout.stripe.com/c/pay/cs_different",
+      expires_at: 1_800_000_100,
+    });
+
+    await expect(startRoundOneCheckout(deps, stripe, checkoutInput())).resolves.toEqual({
+      kind: "unavailable",
+    });
+    expect(stripe.expireSession).not.toHaveBeenCalled();
+    expect(deps.cancelPendingOrder).not.toHaveBeenCalled();
+  });
+
   it("cancels an expired pending order and creates exactly one replacement", async () => {
     vi.mocked(deps.beginOrder)
       .mockResolvedValueOnce(newOrder({ order_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", stripe_session_id: "cs_expired" }))
@@ -234,6 +305,76 @@ describe("startRoundOneCheckout", () => {
     );
     expect(deps.beginOrder).toHaveBeenCalledTimes(2);
     expect(stripe.createSession).toHaveBeenCalledOnce();
+    expect(stripe.expireSession).not.toHaveBeenCalled();
+  });
+
+  it("expires a still-open unusable session before replacing it", async () => {
+    vi.mocked(deps.beginOrder)
+      .mockResolvedValueOnce(newOrder({
+        order_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        stripe_session_id: "cs_open_but_stale",
+      }))
+      .mockResolvedValueOnce(newOrder());
+    vi.mocked(stripe.retrieveSession).mockResolvedValue({
+      id: "cs_open_but_stale",
+      status: "open",
+      url: "https://checkout.stripe.com/c/pay/cs_open_but_stale",
+      expires_at: checkoutInput().nowEpochSeconds,
+    });
+    vi.mocked(stripe.expireSession).mockResolvedValue({
+      id: "cs_open_but_stale",
+      status: "expired",
+    });
+
+    await expect(startRoundOneCheckout(deps, stripe, checkoutInput())).resolves.toEqual(
+      expect.objectContaining({ kind: "checkout", reused: false }),
+    );
+    expect(stripe.expireSession).toHaveBeenCalledWith("cs_open_but_stale");
+    expect(deps.cancelPendingOrder).toHaveBeenCalledWith(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    );
+    expect(stripe.createSession).toHaveBeenCalledOnce();
+    expect(vi.mocked(stripe.expireSession).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(deps.cancelPendingOrder).mock.invocationCallOrder[0],
+    );
+  });
+
+  it("does not cancel or replace an open session unless Stripe confirms expiry", async () => {
+    vi.mocked(deps.beginOrder).mockResolvedValue(
+      newOrder({ stripe_session_id: "cs_open_but_stale" }),
+    );
+    vi.mocked(stripe.retrieveSession).mockResolvedValue({
+      id: "cs_open_but_stale",
+      status: "open",
+      url: null,
+      expires_at: checkoutInput().nowEpochSeconds + 60,
+    });
+    vi.mocked(stripe.expireSession).mockRejectedValue(new Error("completion race"));
+
+    await expect(startRoundOneCheckout(deps, stripe, checkoutInput())).resolves.toEqual({
+      kind: "unavailable",
+    });
+    expect(deps.cancelPendingOrder).not.toHaveBeenCalled();
+    expect(stripe.createSession).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for a Stripe session with an unknown state", async () => {
+    vi.mocked(deps.beginOrder).mockResolvedValue(
+      newOrder({ stripe_session_id: "cs_unknown" }),
+    );
+    vi.mocked(stripe.retrieveSession).mockResolvedValue({
+      id: "cs_unknown",
+      status: null,
+      url: null,
+      expires_at: 0,
+    });
+
+    await expect(startRoundOneCheckout(deps, stripe, checkoutInput())).resolves.toEqual({
+      kind: "unavailable",
+    });
+    expect(stripe.expireSession).not.toHaveBeenCalled();
+    expect(deps.cancelPendingOrder).not.toHaveBeenCalled();
+    expect(stripe.createSession).not.toHaveBeenCalled();
   });
 
   it("fails closed when Stripe creation or DB attachment fails", async () => {
@@ -252,6 +393,22 @@ describe("startRoundOneCheckout", () => {
     expect(await startRoundOneCheckout(deps, stripe, checkoutInput())).toEqual({
       kind: "unavailable",
     });
+  });
+
+  it.each([
+    ["already expired", { status: "expired" as const, expires_at: 1_800_001_800 }],
+    ["not future-dated", { status: "open" as const, expires_at: 1_800_000_000 }],
+  ])("does not attach a newly created session that is %s", async (_label, patch) => {
+    vi.mocked(stripe.createSession).mockResolvedValue({
+      id: "cs_not_payable",
+      url: "https://checkout.stripe.com/c/pay/cs_not_payable",
+      ...patch,
+    });
+
+    await expect(startRoundOneCheckout(deps, stripe, checkoutInput())).resolves.toEqual({
+      kind: "unavailable",
+    });
+    expect(deps.attachCheckout).not.toHaveBeenCalled();
   });
 
   it("replays identical Stripe creation after a lost attachment response", async () => {

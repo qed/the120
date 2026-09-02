@@ -37,6 +37,15 @@ function metadataFrom(value: Stripe.Metadata | null | undefined): RoundOneWebhoo
   };
 }
 
+/** Stripe can deliver expandable references as either an id or an expanded
+ * object. Normalize both so webhook ordering does not depend on expansion. */
+function stripeObjectId(value: unknown): string | null {
+  if (typeof value === "string") return value.trim() || null;
+  if (!value || typeof value !== "object") return null;
+  const id = (value as { id?: unknown }).id;
+  return typeof id === "string" ? id.trim() || null : null;
+}
+
 export async function POST(req: Request): Promise<Response> {
   const stripeKey = process.env.STRIPE_SECRET_KEY?.trim();
   const webhookSecret = process.env.FP_ROUND_ONE_STRIPE_WEBHOOK_SECRET?.trim();
@@ -69,9 +78,7 @@ export async function POST(req: Request): Promise<Response> {
     : null;
 
   let metadata = metadataFrom(session?.metadata);
-  let paymentIntentId = session && typeof session.payment_intent === "string"
-    ? session.payment_intent
-    : null;
+  let paymentIntentId = stripeObjectId(session?.payment_intent);
   const needsCatalogProof = !!session && (
     event.type === "checkout.session.completed"
     || event.type === "checkout.session.async_payment_succeeded"
@@ -110,9 +117,7 @@ export async function POST(req: Request): Promise<Response> {
   let currency = session?.currency ?? null;
 
   if (charge) {
-    paymentIntentId = typeof charge.payment_intent === "string"
-      ? charge.payment_intent
-      : null;
+    paymentIntentId = stripeObjectId(charge.payment_intent);
     amountSubtotal = null;
     amountTotal = null;
     amountDiscount = null;
@@ -153,6 +158,14 @@ export async function POST(req: Request): Promise<Response> {
   });
 
   if (plan.kind === "ignore") {
+    if (plan.reason === "partial_refund") {
+      // Stripe emits charge.refunded for partial refunds too. Preserve access,
+      // but leave an operator signal after PaymentIntent metadata proves this
+      // event belongs to Round One rather than another Stripe product.
+      console.error(
+        "[fp/billing/round-one/webhook] partial Round One refund observed; access preserved and staff ledger review required"
+      );
+    }
     return Response.json({ received: true });
   }
   if (plan.kind === "invalid") {

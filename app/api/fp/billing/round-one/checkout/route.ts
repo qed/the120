@@ -84,6 +84,7 @@ export async function POST(req: Request): Promise<Response> {
           },
           createSession: (params, opts) => stripe.checkout.sessions.create(params, opts),
           retrieveSession: (sessionId) => stripe.checkout.sessions.retrieve(sessionId),
+          expireSession: (sessionId) => stripe.checkout.sessions.expire(sessionId),
         },
         {
           parentId: ctx.parentId,

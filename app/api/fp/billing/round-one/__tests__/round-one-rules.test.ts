@@ -203,6 +203,23 @@ describe("Stripe Checkout shape", () => {
     expect("expires_at" in retry.params).toBe(false);
   });
 
+  it("rotates the stable Checkout identity when the product version changes", () => {
+    const base = {
+      orderId: ORDER_ID,
+      parentId: PARENT_ID,
+      childId: CHILD_ID,
+      priceId: "price_round_one_test",
+      customerEmail: "parent@example.com",
+    };
+    const first = buildRoundOneCheckoutSession({ ...base, productVersion: 1 });
+    const next = buildRoundOneCheckoutSession({ ...base, productVersion: 2 });
+
+    expect(first.idempotencyKey).toBe(`fp-round-one-order:${ORDER_ID}:v1`);
+    expect(next.idempotencyKey).toBe(`fp-round-one-order:${ORDER_ID}:v2`);
+    expect(first.params.metadata?.product_version).toBe("1");
+    expect(next.params.metadata?.product_version).toBe("2");
+  });
+
   it("reuses only a live Stripe-hosted open session", () => {
     expect(
       reusableCheckoutSession({

@@ -387,6 +387,35 @@ describe("site offer core", () => {
     expect(captured.update).toMatchObject({ checkout_enabled: false });
   });
 
+  it("lets the current parent disable and unapprove checkout after access is revoked", async () => {
+    const written = {
+      ...siteRow(null),
+      checkout_enabled: false,
+      offer_edited_by: PARENT_ID,
+    };
+    const { deps, captured } = makeDeps({ entitlement: null, written: [written] });
+
+    const result = await saveSiteOfferForParent(deps, PARENT_ID, {
+      ...INPUT,
+      enabled: false,
+      parentApproved: false,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      offer: {
+        enabled: false,
+        approved: false,
+        checkoutReadiness: "round-one-required",
+      },
+    });
+    expect(captured.update).toMatchObject({
+      checkout_enabled: false,
+      checkout_approved_at: null,
+      checkout_approved_by: null,
+    });
+  });
+
   it("fails activation closed when the configured Round One product version is invalid", async () => {
     const { deps, captured } = makeDeps({ productVersion: null });
     await expect(saveSiteOfferForParent(deps, PARENT_ID, INPUT)).resolves.toEqual({

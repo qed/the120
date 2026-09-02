@@ -63,6 +63,9 @@ export type RoundOneStripeDeps = {
   retrieveSession: (
     sessionId: string
   ) => Promise<Pick<Stripe.Checkout.Session, "id" | "url" | "expires_at" | "status">>;
+  expireSession: (
+    sessionId: string
+  ) => Promise<Pick<Stripe.Checkout.Session, "id" | "status">>;
 };
 
 export type ReadRoundOneStatusResult =
@@ -185,6 +188,7 @@ export async function startRoundOneCheckout(
       } catch {
         return { kind: "unavailable" };
       }
+      if (existing.id !== begun.stripe_session_id) return { kind: "unavailable" };
       const reusable = reusableCheckoutSession({
         status: existing.status,
         url: existing.url,
@@ -196,6 +200,25 @@ export async function startRoundOneCheckout(
       // A completed session is money-in-flight to the webhook. Never create a
       // second chance to pay and never trust the browser return as fulfilment.
       if (existing.status === "complete") return { kind: "awaiting_webhook" };
+
+      // A session can still be OPEN at Stripe even when its local expiry has
+      // passed or its redirect URL is unusable. Canceling only the database
+      // order would let that old URL keep accepting payment beside its
+      // replacement. Expire it at Stripe first, and fail closed if Stripe
+      // cannot prove that it is no longer payable (including a completion race).
+      if (existing.status === "open") {
+        let expired;
+        try {
+          expired = await stripe.expireSession(existing.id);
+        } catch {
+          return { kind: "unavailable" };
+        }
+        if (expired.id !== existing.id || expired.status !== "expired") {
+          return { kind: "unavailable" };
+        }
+      } else if (existing.status !== "expired") {
+        return { kind: "unavailable" };
+      }
 
       if (!(await deps.cancelPendingOrder(begun.order_id))) {
         return { kind: "unavailable" };
@@ -224,6 +247,8 @@ export async function startRoundOneCheckout(
       || !session.url
       || !session.url.startsWith("https://checkout.stripe.com/")
       || !session.expires_at
+      || session.expires_at <= input.nowEpochSeconds
+      || session.status !== "open"
     ) {
       return { kind: "unavailable" };
     }

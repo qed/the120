@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const sendEmailMock = vi.hoisted(() =>
-  vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
+  vi.fn<
+    (input: { idempotencyKey?: string }) => Promise<{ ok: boolean; error?: string }>
+  >(async () => ({ ok: true })),
 );
 vi.mock("@/app/lib/email", () => ({ sendEmail: sendEmailMock }));
 
@@ -111,6 +113,42 @@ describe("Round One parent notification outbox", () => {
       claimed_at: null,
       last_error: "Resend 503",
     });
+  });
+
+  it("retries a lost success stamp with the same provider idempotency key", async () => {
+    const first = fakeDb([
+      { data: [{ id: "notify-1" }], error: null },
+      { data: null, error: { message: "connection lost after provider accepted" } },
+    ]);
+    await expect(attemptRoundOneParentNotification(first.db, SETUP_ROW)).resolves.toBe(
+      "claim_error",
+    );
+
+    const second = fakeDb([
+      { data: [{ id: "notify-1" }], error: null },
+      { data: [{ id: "notify-1" }], error: null },
+    ]);
+    await expect(
+      attemptRoundOneParentNotification(second.db, { ...SETUP_ROW, attempts: 1 }),
+    ).resolves.toBe("sent");
+
+    expect(sendEmailMock).toHaveBeenCalledTimes(2);
+    expect(sendEmailMock.mock.calls.map(([input]) => input.idempotencyKey)).toEqual([
+      SETUP_ROW.dedupeKey,
+      SETUP_ROW.dedupeKey,
+    ]);
+  });
+
+  it("parks a row at the attempt ceiling without claiming or sending it", async () => {
+    const { db, updates } = fakeDb([]);
+    await expect(
+      attemptRoundOneParentNotification(db, {
+        ...SETUP_ROW,
+        attempts: 5,
+      }),
+    ).resolves.toBe("parked");
+    expect(updates).toEqual([]);
+    expect(sendEmailMock).not.toHaveBeenCalled();
   });
 
   it("does not send when another worker already stamped the row", async () => {

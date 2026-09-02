@@ -13,6 +13,10 @@ const refs = vi.hoisted(() => ({
   emails: [] as Record<string, unknown>[],
   phones: [] as Record<string, unknown>[],
   phoneStored: { value: true },
+  paymentIntent: {
+    value: { metadata: {} } as Record<string, unknown>,
+  },
+  paymentIntentIds: [] as string[],
   lineItems: {
     value: {
       data: [{ quantity: 1, price: { id: "price_round_one_test" } }],
@@ -33,7 +37,12 @@ vi.mock("stripe", () => ({
         return refs.event.value;
       },
     };
-    paymentIntents = { retrieve: vi.fn() };
+    paymentIntents = {
+      retrieve: async (id: string) => {
+        refs.paymentIntentIds.push(id);
+        return refs.paymentIntent.value;
+      },
+    };
     checkout = {
       sessions: {
         listLineItems: async () => refs.lineItems.value,
@@ -111,6 +120,8 @@ describe("Round One webhook route", () => {
     refs.emails.length = 0;
     refs.phones.length = 0;
     refs.phoneStored.value = true;
+    refs.paymentIntent.value = { metadata: {} };
+    refs.paymentIntentIds.length = 0;
     refs.lineItems.value = {
       data: [{ quantity: 1, price: { id: "price_round_one_test" } }],
     };
@@ -211,6 +222,134 @@ describe("Round One webhook route", () => {
       amount: 25_000,
       currency: "cad",
     });
+  });
+
+  it("keeps the PaymentIntent identity when Stripe expands it on a paid session", async () => {
+    const event = paidEvent();
+    refs.event.value = {
+      ...event,
+      data: {
+        object: {
+          ...(event.data as { object: Record<string, unknown> }).object,
+          payment_intent: { id: "pi_round_one_expanded", object: "payment_intent" },
+        },
+      },
+    };
+
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(200);
+    expect(refs.plans[0]).toMatchObject({
+      effect: "paid",
+      paymentIntentId: "pi_round_one_expanded",
+    });
+  });
+
+  it("resolves an out-of-order full refund from an expanded PaymentIntent", async () => {
+    refs.event.value = {
+      id: "evt_round_one_refund",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_round_one",
+          refunded: true,
+          currency: "cad",
+          payment_intent: { id: "pi_round_one_expanded", object: "payment_intent" },
+          metadata: {},
+        },
+      },
+    };
+    refs.paymentIntent.value = {
+      metadata: (paidEvent().data as { object: { metadata: Record<string, string> } })
+        .object.metadata,
+    };
+    refs.applied.value = { ok: true, outcome: "refunded" };
+
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(200);
+    expect(refs.paymentIntentIds).toEqual(["pi_round_one_expanded"]);
+    expect(refs.plans[0]).toMatchObject({
+      effect: "refunded",
+      paymentIntentId: "pi_round_one_expanded",
+      orderId: ORDER_ID,
+    });
+  });
+
+  it("retries a refund that cannot yet resolve its pre-existing order", async () => {
+    refs.event.value = {
+      id: "evt_round_one_refund_early",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_round_one",
+          refunded: true,
+          currency: "cad",
+          payment_intent: "pi_round_one",
+          metadata: {},
+        },
+      },
+    };
+    refs.paymentIntent.value = {
+      metadata: (paidEvent().data as { object: { metadata: Record<string, string> } })
+        .object.metadata,
+    };
+    // The SQL RPC uses the pre-created order id from PaymentIntent metadata.
+    // If that invariant is ever broken, non-2xx keeps Stripe retrying rather
+    // than acknowledging a zero-row financial update.
+    refs.applied.value = { ok: true, outcome: "order_missing" };
+
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(500);
+    expect(refs.plans[0]).toMatchObject({
+      effect: "refunded",
+      orderId: ORDER_ID,
+      paymentIntentId: "pi_round_one",
+    });
+    expect(refs.emails).toEqual([]);
+  });
+
+  it("acknowledges a verified partial refund without revoking access", async () => {
+    refs.event.value = {
+      id: "evt_round_one_partial_refund",
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_round_one",
+          refunded: false,
+          currency: "cad",
+          payment_intent: "pi_round_one",
+          metadata: {},
+        },
+      },
+    };
+    refs.paymentIntent.value = {
+      metadata: (paidEvent().data as { object: { metadata: Record<string, string> } })
+        .object.metadata,
+    };
+
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(200);
+    expect(refs.paymentIntentIds).toEqual(["pi_round_one"]);
+    expect(refs.plans).toEqual([]);
+    expect(refs.emails).toEqual([]);
+  });
+
+  it("does not let a delayed paid completion resurrect a refunded order", async () => {
+    refs.applied.value = { ok: true, outcome: "refund_stands" };
+
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(200);
+    expect(refs.plans[0]).toMatchObject({ effect: "paid", orderId: ORDER_ID });
+    expect(refs.emails).toEqual([]);
   });
 
   it("rejects a signed completion whose Stripe line item is not the configured Round One Price", async () => {

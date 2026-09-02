@@ -516,7 +516,10 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
   });
 
   it("adds the exact aggregate Round One child contract with one bucket per child", async () => {
-    store.value.children.push({ id: "c-7", fp_username: "jo" });
+    // A valid enrolled child always belongs to a parent family. Keeping the
+    // linkage explicit also verifies the payment funnel uses the same scoped
+    // roster as the progress feed.
+    store.value.children.push({ id: "c-7", parent_id: "parent-2", fp_username: "jo" });
     store.value.fp_billing_entitlements = [
       {
         child_id: "c-1",
@@ -731,6 +734,15 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
       excludedFamilies: 1,
       revision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
     });
+    expect(body.round1Payments).toEqual({
+      unit: "child",
+      paidPurchases: 0,
+      complimentaryAccess: 0,
+      pending: 0,
+      unpaid: 1,
+      refundedPaid: 0,
+      revokedComplimentary: 0,
+    });
 
     const parentRead = dbCalls.find((call) => call.table === "parents");
     const profileRead = dbCalls.find((call) => call.table === "fp_player_profiles");
@@ -755,6 +767,8 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     const all = (await (await get({ scope: "all" })).json()) as Body;
     expect(all.children.map((child) => child.username).sort()).toEqual(["alex", "cy", "eve"]);
     expect(all.analyticsScope).toEqual(included.analyticsScope);
+    expect(included.round1Payments?.unpaid).toBe(1);
+    expect(all.round1Payments?.unpaid).toBe(3);
   });
 
   it("requires scope after both staff gates, refunds the bad request, and exposes no parser oracle", async () => {

@@ -263,6 +263,12 @@ export const ERASURE_TABLE_LEDGER: Record<string, TableLedgerEntry> = {
     note: "parent_id -> parents ON DELETE CASCADE and the owned-child FK (child_id, parent_id) -> children ON DELETE CASCADE. Pending/sent parent addresses and snapshotted names are family PII, so notification delivery state disappears with either the child or family.",
   },
 
+  /* ── First Profit staff analytics scope ── */
+  fp_watchtower_family_scope: {
+    disposition: "erased-by-cascade",
+    note: "parent_id -> parents ON DELETE CASCADE (provisional Watchtower cohort migration). The row is a family-level staff analytics decision, so a full-family erasure removes it with the parent. A child-scoped erasure deliberately leaves it in place for the surviving parent and siblings.",
+  },
+
   /* ── Image Lab v1 (#140/#143) ── */
   fp_image_lab_runs: {
     disposition: "erased-explicitly",

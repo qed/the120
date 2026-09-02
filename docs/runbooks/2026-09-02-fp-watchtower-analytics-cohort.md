@@ -53,25 +53,46 @@ enrolment or username change also invalidates mixed criterion caches.
 
 ## Application and deployment order
 
+The combined Round One release contains three provisional, unapplied schema
+changes. Reconcile every filename against the live migration ledger first,
+then preserve this dependency order when assigning the true next-free versions
+and applying them:
+
+1. Round One billing (`*_fp_round_one_billing.sql`).
+2. Hosted site offers (`*_fp_site_offers.sql`).
+3. Watchtower cohort scope (`*_fp_watchtower_family_scope_PROVISIONAL.sql`).
+
+The numeric versions shown in this branch (`20260927`, `20260928`, `20260929`)
+are placeholders until that one release-time reconciliation. Do not apply only
+the third file ahead of the first two, do not reorder them, and never write
+`schema_migrations` by hand.
+
+The release owner must execute the sequence as follows:
+
 1. Re-query `supabase_migrations.schema_migrations` immediately before release.
-2. Rename
-   `20260929120000_fp_watchtower_family_scope_PROVISIONAL.sql` to the true next
-   free `12:00:00` version if needed.
-3. Apply and register that migration. Do not deploy either API before the table
-   exists.
-4. Use a coordinated maintenance window for the First Profit client and this
+2. Assign the three files the next three free `12:00:00` versions, preserving
+   billing -> site offers -> cohort scope. Re-query and confirm all three slots
+   are still free before the first apply.
+3. Apply and verify the billing migration using
+   `2026-09-01-fp-round-one-billing.md`.
+4. Apply and verify the site-offer migration using
+   `2026-09-01-fp-site-offers.md`.
+5. Apply and verify the cohort-scope migration. Do not deploy either cohort API
+   before `fp_watchtower_family_scope` exists and the PostgREST schema cache has
+   been reloaded.
+6. Use a coordinated maintenance window for the First Profit client and this
    backend. Neither mixed pairing is supported: the old client omits the now
    required `scope`, while the new client deliberately refuses a response with
    no `analyticsScope`.
-5. Prepare both deployments before switching their production aliases, switch
+7. Prepare both deployments before switching their production aliases, switch
    them back-to-back, and do not leave a mixed-version window open. Do not add a
    silent missing-scope compatibility default: the explicit scope is what
    prevents accidental cohort mixing.
-6. Sign in as staff, open **Review analytics cohort**, and verify the family
+8. Sign in as staff, open **Review analytics cohort**, and verify the family
    list contains no email or phone.
-7. Exclude one known QA family. Verify `scope.revision` changes, included totals
+9. Exclude one known QA family. Verify `scope.revision` changes, included totals
    fall by one family, and `scope=all` still shows the family.
-8. Restore the family. Verify totals and the revision change again.
+10. Restore the family. Verify totals and the revision change again.
 
 No migration, deployment or scope mutation is performed by this branch itself.
 

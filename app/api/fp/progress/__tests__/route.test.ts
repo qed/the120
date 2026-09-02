@@ -219,6 +219,8 @@ function seed(): void {
       },
       { profile_id: "p-3", doc: doc() },
     ],
+    fp_billing_entitlements: [],
+    fp_billing_orders: [],
   } as Store;
 }
 
@@ -255,6 +257,15 @@ type Body = {
       childName: string | null;
     };
   }[];
+  round1Payments?: {
+    unit: "child";
+    paidPurchases: number;
+    complimentaryAccess: number;
+    pending: number;
+    unpaid: number;
+    refundedPaid: number;
+    revokedComplimentary: number;
+  };
 };
 
 const usernames = async (res: Response): Promise<string[]> =>
@@ -473,6 +484,174 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(res.headers.get("vary")).toBe("Origin");
     expect(res.headers.get("access-control-allow-origin")).toBe(ORIGIN);
+    expect(body.round1Payments).toEqual({
+      unit: "child",
+      paidPurchases: 0,
+      complimentaryAccess: 0,
+      pending: 0,
+      unpaid: 3,
+      refundedPaid: 0,
+      revokedComplimentary: 0,
+    });
+  });
+
+  it("adds the exact aggregate Round One child contract with one bucket per child", async () => {
+    store.value.children.push({ id: "c-7", fp_username: "jo" });
+    store.value.fp_billing_entitlements = [
+      {
+        child_id: "c-1",
+        product_key: "round_one_sell",
+        product_version: 1,
+        status: "active",
+        grant_kind: "comped",
+        revoked_at: null,
+        updated_at: "2026-09-03T00:00:00.000Z",
+      },
+      {
+        child_id: "c-5",
+        product_key: "round_one_sell",
+        product_version: 1,
+        status: "revoked",
+        grant_kind: "paid",
+        revoked_at: "2026-09-04T00:00:00.000Z",
+        updated_at: "2026-09-04T00:00:00.000Z",
+      },
+      // A different product version is outside this deployment's funnel.
+      {
+        child_id: "c-7",
+        product_key: "round_one_sell",
+        product_version: 99,
+        status: "active",
+        grant_kind: "paid",
+        revoked_at: null,
+        updated_at: "2026-09-09T00:00:00.000Z",
+      },
+    ];
+    store.value.fp_billing_orders = [
+      // Active access wins over historical refunded order truth.
+      {
+        id: "order-private-1",
+        child_id: "c-1",
+        product_key: "round_one_sell",
+        product_version: 1,
+        status: "refunded",
+        created_at: "2026-09-01T00:00:00.000Z",
+        updated_at: "2026-09-05T00:00:00.000Z",
+        stripe_checkout_session_id: "must-never-leave",
+      },
+      {
+        id: "order-private-2",
+        child_id: "c-3",
+        product_key: "round_one_sell",
+        product_version: 1,
+        status: "pending",
+        created_at: "2026-09-06T00:00:00.000Z",
+        updated_at: "2026-09-06T00:00:00.000Z",
+      },
+    ];
+
+    const res = await get();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Body;
+    expect(body.round1Payments).toEqual({
+      unit: "child",
+      paidPurchases: 0,
+      complimentaryAccess: 1,
+      pending: 1,
+      unpaid: 1,
+      refundedPaid: 1,
+      revokedComplimentary: 0,
+    });
+    expect(Object.keys(body.round1Payments!).sort()).toEqual(
+      [
+        "paidPurchases",
+        "complimentaryAccess",
+        "pending",
+        "unpaid",
+        "refundedPaid",
+        "revokedComplimentary",
+        "unit",
+      ].sort()
+    );
+    const paymentWire = JSON.stringify(body.round1Payments);
+    for (const forbidden of ["c-1", "alex", "order-private", "must-never-leave"]) {
+      expect(paymentWire).not.toContain(forbidden);
+    }
+  });
+
+  it("pages Round One order history so a latest state past row 1000 is not hidden", async () => {
+    store.value.fp_billing_orders = Array.from({ length: PROGRESS_PAGE_SIZE + 1 }, (_, i) => ({
+      id: `order-${String(i).padStart(6, "0")}`,
+      child_id: "c-1",
+      product_key: "round_one_sell",
+      product_version: 1,
+      status: i === PROGRESS_PAGE_SIZE ? "pending" : "cancelled",
+      created_at: new Date(1_700_000_000_000 + i).toISOString(),
+      updated_at: new Date(1_700_000_000_000 + i).toISOString(),
+    }));
+
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Body).round1Payments).toEqual({
+      unit: "child",
+      paidPurchases: 0,
+      complimentaryAccess: 0,
+      pending: 1,
+      unpaid: 2,
+      refundedPaid: 0,
+      revokedComplimentary: 0,
+    });
+    // A full first page, a one-row tail, and the empty terminator.
+    expect(callLog.filter((call) => call === "db:fp_billing_orders")).toHaveLength(3);
+  });
+
+  it("omits (never zero-fills) the optional summary across a billing-schema rollout gap", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const table of ["fp_billing_entitlements", "fp_billing_orders"] as const) {
+      seed();
+      faults.value = {
+        [`select:${table}`]: {
+          kind: "error",
+          error: {
+            code: "PGRST205",
+            message: "schema cache miss containing private-child-marker",
+          },
+        },
+      };
+      const res = await get();
+      expect(res.status, table).toBe(200);
+      const body = (await res.json()) as Body;
+      expect(body.children, table).toHaveLength(3);
+      expect(body, table).not.toHaveProperty("round1Payments");
+    }
+    const lines = error.mock.calls.map((call) => call.map(String).join(" ")).join("\n");
+    expect(lines).toContain("schema_absent");
+    expect(lines).not.toContain("private-child-marker");
+    for (const childValue of ["c-1", "alex", "cy", "eve"]) {
+      expect(lines).not.toContain(childValue);
+    }
+  });
+
+  it("keeps the dashboard 200 and omits a billing summary that crosses its read cap", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    store.value.fp_billing_orders = Array.from({ length: PROGRESS_MAX_ROWS + 1 }, (_, i) => ({
+      id: `private-order-${String(i).padStart(6, "0")}`,
+      child_id: "c-1",
+      product_key: "round_one_sell",
+      product_version: 1,
+      status: "cancelled",
+      created_at: "2026-09-01T00:00:00.000Z",
+      updated_at: "2026-09-01T00:00:00.000Z",
+    }));
+
+    const res = await get();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Body;
+    expect(body.children).toHaveLength(3);
+    expect(body).not.toHaveProperty("round1Payments");
+    const lines = error.mock.calls.map((call) => call.map(String).join(" ")).join("\n");
+    expect(lines).toContain("capacity");
+    expect(lines).not.toContain("private-order");
   });
 
   it("carries NO band, NO label and no task id the caller did not request, at any depth", async () => {
@@ -503,6 +682,8 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
         "db:parents",
         "db:fp_player_profiles",
         "db:fp_player_saves",
+        "db:fp_billing_entitlements",
+        "db:fp_billing_orders",
       ])
     );
   });
@@ -520,7 +701,19 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     faults.value["select:fp_player_saves"] = { kind: "error", error: { message: "must not run" } };
     const res = await get();
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, children: [] });
+    expect(await res.json()).toEqual({
+      ok: true,
+      children: [],
+      round1Payments: {
+        unit: "child",
+        paidPurchases: 0,
+        complimentaryAccess: 0,
+        pending: 0,
+        unpaid: 0,
+        refundedPaid: 0,
+        revokedComplimentary: 0,
+      },
+    });
   });
 
   // ── The requested task-id list ──
@@ -1010,7 +1203,8 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     expect((await get()).status).toBe(200);
     const dbCalls = callLog.filter((c) => c.startsWith("db:")).length;
     // 1 staff + children (1 page + terminator) + profiles (2 chunks × 2) +
-    // saves (2 chunks × 1 empty) — comfortably inside three read budgets.
+    // saves (2 chunks × 1 empty) plus the two optional empty billing reads —
+    // comfortably inside the independent read budgets.
     expect(dbCalls).toBeLessThanOrEqual(1 + 3 * PROGRESS_MAX_ROUND_TRIPS);
     expect(dbCalls).toBeLessThan(20);
   });
@@ -1163,10 +1357,32 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
       ["parents", "id, first_name, last_name, phone"],
       ["fp_player_profiles", "id, child_id"],
       ["fp_player_saves", "profile_id, doc"],
+      [
+        "fp_billing_entitlements",
+        "child_id, status, grant_kind, revoked_at, updated_at",
+      ],
+      ["fp_billing_orders", "id, child_id, status, created_at, updated_at"],
     ] as const) {
       const reads = dbCalls.filter((c) => c.table === table);
       expect(reads.length, table).toBeGreaterThan(0);
       for (const call of reads) expect(call.columns, table).toBe(columns);
+    }
+    for (const table of ["fp_billing_entitlements", "fp_billing_orders"] as const) {
+      const reads = dbCalls.filter((c) => c.table === table);
+      for (const call of reads) {
+        expect(call.filters).toContainEqual({
+          op: "eq",
+          col: "product_key",
+          value: "round_one_sell",
+        });
+        expect(call.filters).toContainEqual({
+          op: "eq",
+          col: "product_version",
+          value: 1,
+        });
+        expect(call.filters.some((filter) => filter.op === "in" && filter.col === "child_id"))
+          .toBe(true);
+      }
     }
     // Sensitive child demographic columns and wildcard reads remain absent.
     const asked = dbCalls.flatMap((c) => (c.columns ?? "").split(",").map((s) => s.trim()));
@@ -1201,6 +1417,8 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
       ["children", PROGRESS_PAGE_SIZE],
       ["fp_player_profiles", PROGRESS_PAGE_SIZE],
       ["fp_player_saves", PROGRESS_SAVES_PAGE_SIZE],
+      ["fp_billing_entitlements", PROGRESS_PAGE_SIZE],
+      ["fp_billing_orders", PROGRESS_PAGE_SIZE],
     ] as const) {
       const reads = dbCalls.filter((c) => c.table === table);
       expect(reads.length, table).toBeGreaterThan(0);

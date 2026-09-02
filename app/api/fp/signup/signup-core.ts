@@ -101,6 +101,8 @@ export type StartSignupInput = {
   parentEmail: string;
   parentFirstName: string;
   parentLastName: string;
+  /** Normalized E.164 support number; required by the First Profit wire. */
+  parentPhone?: string;
   parentName: string; // as typed, for the email greeting (escaped)
   parentPassword: string;
   isTest: boolean;
@@ -192,6 +194,7 @@ export async function startSignup(
     email,
     firstName: input.parentFirstName,
     lastName: input.parentLastName,
+    phone: input.parentPhone,
   });
   if (provisioned.kind === "existing_account") {
     // R10 + review P2 (lost-response resume): an existing email is USUALLY a

@@ -170,6 +170,7 @@ const startInput = {
   parentEmail: "dana@example.com",
   parentFirstName: "Dana",
   parentLastName: "Rivera",
+  parentPhone: "+14165550123",
   parentName: "Dana Rivera",
   parentPassword: "hunter2hunter",
   isTest: false,
@@ -188,6 +189,12 @@ describe("startSignup", () => {
 
     expect(res).toEqual({ kind: "started", attemptId: "att1" });
     expect(record.provision).toHaveLength(1);
+    expect(record.provision[0]).toEqual({
+      email: "dana@example.com",
+      firstName: "Dana",
+      lastName: "Rivera",
+      phone: "+14165550123",
+    });
     expect(record.mail).toHaveLength(1);
     expect(record.cleanup).toEqual([]);
     expect(calls.some((c) => c.table === "families")).toBe(false);

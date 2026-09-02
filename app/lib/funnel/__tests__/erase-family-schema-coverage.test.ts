@@ -96,6 +96,30 @@ describe("R28 erasure coverage — the ledger matches the real schema", () => {
     expect(CHILD_LEAF_DELETE_ORDER.indexOf("fp_onboarding_drafts")).toBeGreaterThanOrEqual(0);
   });
 
+  it("classifies Round One family data as cascaded while retaining only a de-identified webhook ledger", () => {
+    for (const table of [
+      "fp_billing_orders",
+      "fp_billing_entitlements",
+      "fp_billing_access_events",
+      "fp_parent_notification_outbox",
+    ]) {
+      expect(ERASURE_TABLE_LEDGER[table]?.disposition, `${table} must follow family erasure`).toBe(
+        "erased-by-cascade"
+      );
+    }
+
+    const migration = readFileSync(
+      path.resolve(process.cwd(), "supabase/migrations/20260927120000_fp_round_one_billing.sql"),
+      "utf8"
+    );
+    const webhookTable = migration.match(
+      /create table if not exists public\.fp_billing_webhook_events\s*\(([\s\S]*?)\);/i
+    )?.[1];
+    expect(webhookTable).toBeTruthy();
+    expect(webhookTable).toMatch(/order_id\s+uuid[\s\S]*?on delete set null/i);
+    expect(webhookTable).not.toMatch(/\b(parent_id|child_id)\b/i);
+  });
+
   it("the kid's identity payload on `children` is accounted for column by column", () => {
     const cols = ERASURE_COLUMN_LEDGER.children;
     for (const c of ["fp_kid_age", "fp_story_answers", "fp_cover_data_url", "first_name", "last_name"]) {
@@ -299,6 +323,17 @@ describe("R28 coverage tripwire — it actually catches an ADDITION", () => {
     );
     expect(findings.map((f) => `${f.kind}:${f.subject}`)).toContain(
       "unclassified-column:children.fp_favourite_colour"
+    );
+  });
+
+  it("a NEW ordinary storefront column is reported, not only blob-looking site columns", () => {
+    const findings = auditErasureCoverage(
+      withChange((s) => {
+        s.fp_public_sites.push("customer_note");
+      })
+    );
+    expect(findings.map((f) => `${f.kind}:${f.subject}`)).toContain(
+      "unclassified-column:fp_public_sites.customer_note"
     );
   });
 

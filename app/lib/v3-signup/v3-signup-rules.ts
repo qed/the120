@@ -150,6 +150,12 @@ const v3StartSchema = z
   .object({
     parentName: nameField,
     parentEmail: emailField,
+    // The firstprofit.school front door requires this field and persists it
+    // for program-support calls. It remains optional in the shared parser so
+    // the separate the120.school /start journey is not silently changed.
+    // The First Profit route performs authoritative normalization before any
+    // account is created.
+    parentPhone: z.string().trim().min(1).max(40).optional(),
     parentPassword: passwordField,
     consentAccepted: z.literal(true),
   })

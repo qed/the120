@@ -170,7 +170,7 @@ export const ERASURE_TABLE_LEDGER: Record<string, TableLedgerEntry> = {
   /* ── the FP/Path graph the eraser walks explicitly ── */
   fp_public_sites: {
     disposition: "erased-explicitly",
-    note: "Step 0 — dies first (RESTRICT -> fp_player_profiles). Frees the handle; an operator-locked row is still deleted, loudly.",
+    note: "Step 0 — dies first (RESTRICT -> fp_player_profiles). The row delete removes the public projection, parent-reviewed storefront draft, Stripe Payment Link and approval stamps together; no site-offer column names an external object. Frees the handle; an operator-locked row is still deleted, loudly.",
   },
   fp_ledger: {
     disposition: "erased-explicitly",
@@ -243,6 +243,24 @@ export const ERASURE_TABLE_LEDGER: Record<string, TableLedgerEntry> = {
   deposit_attempts: {
     disposition: "erased-by-cascade",
     note: "child_id -> children ON DELETE CASCADE (20260811120000). Deposit-policy acceptance evidence (policy hash + accepted IP); same retention flag as `deposits`.",
+  },
+
+  /* ── First Profit Round One billing ── */
+  fp_billing_orders: {
+    disposition: "erased-by-cascade",
+    note: "parent_id -> parents ON DELETE CASCADE and the owned-child FK (child_id, parent_id) -> children ON DELETE CASCADE (provisional Round One billing migration). The app-side order, including Stripe object ids, is intentionally removed with either the family or child. Stripe remains the payment processor's bookkeeping ledger, and fp_billing_webhook_events retains only a de-identified event id/type/outcome after order_id is SET NULL. If First Profit later needs statutory app-side financial retention, change the schema to an explicit anonymize-in-place policy rather than weakening family erasure silently.",
+  },
+  fp_billing_entitlements: {
+    disposition: "erased-by-cascade",
+    note: "parent_id -> parents ON DELETE CASCADE and the owned-child FK (child_id, parent_id) -> children ON DELETE CASCADE. Access is child-specific product state, not a financial retention record, so deleting the child or family removes it completely.",
+  },
+  fp_billing_access_events: {
+    disposition: "erased-by-cascade",
+    note: "parent_id -> parents ON DELETE CASCADE and the owned-child FK (child_id, parent_id) -> children ON DELETE CASCADE. Complimentary-access notes can describe a child and therefore go with the family; actor_id only attributes the staff action and does not preserve the family-linked row.",
+  },
+  fp_parent_notification_outbox: {
+    disposition: "erased-by-cascade",
+    note: "parent_id -> parents ON DELETE CASCADE and the owned-child FK (child_id, parent_id) -> children ON DELETE CASCADE. Pending/sent parent addresses and snapshotted names are family PII, so notification delivery state disappears with either the child or family.",
   },
 
   /* ── Image Lab v1 (#140/#143) ── */
@@ -367,6 +385,10 @@ export type ColumnDisposition = "row-deleted" | "scrubbed" | "preserved" | "exte
 /** Tables whose EVERY column must be classified (see scope (2) in the header). */
 export const COLUMN_AUDITED_TABLES = [
   "children",
+  // Public-site rows now also contain parent-authored offer copy, a Stripe
+  // Payment Link and approval provenance. Classify every column so a future
+  // ordinary-looking storefront field cannot bypass the erasure tripwire.
+  "fp_public_sites",
   "fp_onboarding_drafts",
   "fp_handoff_codes",
   "fp_login_codes",
@@ -444,6 +466,42 @@ export const ERASURE_COLUMN_LEDGER: Record<string, Record<string, ColumnDisposit
     // PHOTOGRAPH OF THE CHILD, not a drawing derived from one.
     fp_photo_blob_key: "external-object",
   },
+
+  // The executor deletes this entire row before fp_player_profiles. `image_choice`
+  // is only a controlled enum selecting the cover already stored on `children`;
+  // it is not a blob key or remote URL. The parent's Stripe Payment Link and
+  // approval/edit provenance are app-held copies and die with the row.
+  fp_public_sites: all(
+    [
+      "profile_id",
+      "handle",
+      "first_name",
+      "headline",
+      "one_liner",
+      "published",
+      "first_published_at",
+      "operator_locked",
+      "created_at",
+      "updated_at",
+      "products",
+      "template_id",
+      "theme_id",
+      "storefront_headline",
+      "image_choice",
+      "offer_name",
+      "offer_description",
+      "price_cents",
+      "currency",
+      "cta_label",
+      "checkout_url",
+      "checkout_enabled",
+      "offer_edited_at",
+      "offer_edited_by",
+      "checkout_approved_at",
+      "checkout_approved_by",
+    ],
+    "row-deleted"
+  ),
 
   fp_onboarding_drafts: {
     ...all(

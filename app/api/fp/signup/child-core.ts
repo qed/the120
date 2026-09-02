@@ -165,6 +165,12 @@ export type CreateChildInput = {
    *  cover draw needs to know). Best-effort decoration — never fails a mint. */
   heroVibe?: string | null;
   heroGender?: string | null;
+  /** Additional cover brief fields captured by the New Kid Launch flow. They
+   * live beside vibe/gender in fp_story_answers so a later redraw can reuse the
+   * exact brief the family approved. */
+  heroPersona?: string | null;
+  heroSetting?: string | null;
+  heroCity?: string | null;
   /**
    * fpv04 U7d — the GENERATED cover artifact from the FP signup track's
    * CoverDraftStudio (the Gemini-drawn "Day 1 of Building My Empire" cover the
@@ -503,69 +509,60 @@ export async function createChild(
     }
     created.profileId = String((insProfile.data as { id: unknown }).id);
 
-    // 8b. fpv04 hero redraw inputs (vibe + gender), best-effort DECORATION on
+    // 8b. fpv04 hero redraw inputs + generated cover, best-effort DECORATION on
     //     the child row's fp_story_answers jsonb (the 20260918120000 redraw-
     //     inputs column — exactly what a future AI cover draw needs). The v3
     //     posture verbatim: a failed decoration write is logged and stepped
     //     past; it never fails a mint that is otherwise complete.
-    if (input.heroVibe || input.heroGender) {
+    const coverArtifact = asStoredCoverDataUrl(input.coverDataUrl);
+    const coverDecision = coverArtifact
+      ? decideCoverStatusWrite({
+          status: "final",
+          scope: "child",
+          ownerId: childId,
+          coverBlobKey: null,
+          blobConfirmed: false,
+          source: "derived",
+        })
+      : null;
+    if (coverDecision && !coverDecision.ok) {
+      console.error(
+        `[fp/signup/child] cover artifact status write refused (non-fatal): ${coverDecision.detail}`
+      );
+    }
+
+    const storyAnswers = {
+      ...(input.heroVibe ? { fpv04_hero_vibe: input.heroVibe } : {}),
+      ...(input.heroGender ? { fpv04_hero_gender: input.heroGender } : {}),
+      ...(input.heroPersona ? { fpv04_hero_persona: input.heroPersona } : {}),
+      ...(input.heroSetting ? { fpv04_hero_setting: input.heroSetting } : {}),
+      ...(input.heroCity ? { fpv04_hero_city: input.heroCity } : {}),
+    };
+    const carriesStoryAnswers = Object.keys(storyAnswers).length > 0;
+    const carriesCover = Boolean(coverArtifact && coverDecision?.ok);
+
+    if (carriesStoryAnswers || carriesCover) {
+      const generationCount =
+        Number.isInteger(input.coverGenerationCount) && (input.coverGenerationCount as number) > 0
+          ? Math.min(3, input.coverGenerationCount as number)
+          : 1;
       const deco = await admin
         .from("children")
         .update({
-          fp_story_answers: {
-            ...(input.heroVibe ? { fpv04_hero_vibe: input.heroVibe } : {}),
-            ...(input.heroGender ? { fpv04_hero_gender: input.heroGender } : {}),
-          },
+          ...(carriesStoryAnswers ? { fp_story_answers: storyAnswers } : {}),
+          ...(carriesCover
+            ? {
+                fp_cover_data_url: coverArtifact,
+                fp_cover_status: "final",
+                fp_cover_generation_count: generationCount,
+              }
+            : {}),
         })
         .eq("id", childId);
       if (deco.error) {
         console.error(
-          `[fp/signup/child] hero redraw-inputs write failed (non-fatal): ${deco.error.message}`
+          `[fp/signup/child] cover decoration write failed (non-fatal): ${deco.error.message}`
         );
-      }
-    }
-
-    // 8c. fpv04 U7d — persist the GENERATED cover artifact onto the child row,
-    //     the same best-effort decoration posture as 8b. The gate is the
-    //     storage authority's own: `asStoredCoverDataUrl` (whitelisted prefix,
-    //     bounded length) narrows the value or drops it, and
-    //     `decideCoverStatusWrite` (source: "derived" — bytes in the row, no
-    //     blob key to name) authorizes the "final" status the sign-in doors key
-    //     on. Both doors (`deriveCoverSessionFields`) then serve this exact
-    //     string verbatim on the kid's first sign-in. Any failure here mints a
-    //     coverless child, never a failed mint.
-    const coverArtifact = asStoredCoverDataUrl(input.coverDataUrl);
-    if (coverArtifact) {
-      const allowed = decideCoverStatusWrite({
-        status: "final",
-        scope: "child",
-        ownerId: childId,
-        coverBlobKey: null,
-        blobConfirmed: false,
-        source: "derived",
-      });
-      if (!allowed.ok) {
-        console.error(
-          `[fp/signup/child] cover artifact status write refused (non-fatal): ${allowed.detail}`
-        );
-      } else {
-        const generationCount =
-          Number.isInteger(input.coverGenerationCount) && (input.coverGenerationCount as number) > 0
-            ? (input.coverGenerationCount as number)
-            : 1;
-        const cover = await admin
-          .from("children")
-          .update({
-            fp_cover_data_url: coverArtifact,
-            fp_cover_status: "final",
-            fp_cover_generation_count: generationCount,
-          })
-          .eq("id", childId);
-        if (cover.error) {
-          console.error(
-            `[fp/signup/child] cover artifact write failed (non-fatal): ${cover.error.message}`
-          );
-        }
       }
     }
 

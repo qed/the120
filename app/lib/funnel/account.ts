@@ -83,6 +83,8 @@ export type ProvisionInput = {
   email: string;
   firstName: string;
   lastName: string;
+  /** Normalized parent support number. Optional for non-First-Profit callers. */
+  phone?: string;
 };
 
 /**
@@ -208,6 +210,7 @@ export async function provisionOrRecognizeAccount(
       first_name: input.firstName.trim(),
       last_name: input.lastName.trim(),
       email,
+      phone: input.phone?.trim() ?? "",
     });
     if (parent.error) {
       console.error(

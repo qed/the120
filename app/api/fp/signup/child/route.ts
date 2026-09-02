@@ -101,6 +101,9 @@ const childSchema = z
     coverLook: z.enum(FP_STORY_LOOK_IDS).optional(),
     heroVibe: z.enum(FP_HERO_VIBES).optional(),
     heroGender: z.enum(FP_HERO_GENDERS).optional(),
+    heroPersona: z.string().trim().min(1).max(60).optional(),
+    heroSetting: z.string().trim().min(1).max(80).optional(),
+    heroCity: z.string().trim().min(1).max(80).optional(),
     // (fpv04 U7d) The GENERATED cover artifact + spend count, previously sent
     // by the FP client and silently .strip()ed here. `.catch(undefined)` is
     // load-bearing on both: these are DECORATION, and a malformed or oversized
@@ -286,9 +289,12 @@ export async function POST(req: Request): Promise<Response> {
       childPassword,
       coverLook: data.coverLook,
       heroVibe: data.heroVibe,
+      heroGender: data.heroGender,
+      heroPersona: data.heroPersona,
+      heroSetting: data.heroSetting,
+      heroCity: data.heroCity,
       coverDataUrl: data.coverDataUrl,
       coverGenerationCount: data.coverGenerationCount,
-      heroGender: data.heroGender,
     });
 
     if (!result.ok) {

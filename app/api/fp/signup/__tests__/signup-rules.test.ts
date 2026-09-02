@@ -6,6 +6,7 @@ import {
   deriveVerifyRateLimitKeys,
   isTestSignup,
   launchGateVerdict,
+  normalizeParentSupportPhone,
   parseSignupRequest,
   shapeSignupRefusal,
   splitParentName,
@@ -84,6 +85,30 @@ describe("splitParentName", () => {
   it("yields an empty last name for a single token", () => {
     expect(splitParentName("Dana")).toEqual({ firstName: "Dana", lastName: "" });
     expect(splitParentName("  Dana  ")).toEqual({ firstName: "Dana", lastName: "" });
+  });
+});
+
+/* --------------------------------------------------- parent support phone */
+
+describe("normalizeParentSupportPhone", () => {
+  it("normalizes Canada/U.S. formatting and explicit international country codes", () => {
+    expect(normalizeParentSupportPhone("(416) 555-0123")).toBe("+14165550123");
+    expect(normalizeParentSupportPhone("1-416-555-0123")).toBe("+14165550123");
+    expect(normalizeParentSupportPhone("+44 20 7946 0958")).toBe("+442079460958");
+  });
+
+  it("refuses ambiguous, extended, alphabetic, and out-of-bounds values", () => {
+    for (const value of [
+      "",
+      "44 20 7946 0958",
+      "+44 20 7946 0958 ext 2",
+      "call me",
+      "+0123456789",
+      `+${"1".repeat(16)}`,
+      "1".repeat(41),
+    ]) {
+      expect(normalizeParentSupportPhone(value)).toBeNull();
+    }
   });
 });
 

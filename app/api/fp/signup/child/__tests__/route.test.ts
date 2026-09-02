@@ -151,6 +151,11 @@ describe("POST /api/fp/signup/child — fpv04 U5a additive extensions", () => {
     coverLook: "manga-arc",
     heroVibe: "inventor",
     heroGender: "girl",
+    heroPersona: "The fearless designer",
+    heroSetting: "garage",
+    heroCity: "Toronto",
+    coverDataUrl: "data:image/jpeg;base64,Y292ZXI=",
+    coverGenerationCount: 2,
   };
 
   it("no attemptId → resolves server-side from the Bearer identity; body keys are the pinned FpChildMintBody", async () => {
@@ -175,6 +180,11 @@ describe("POST /api/fp/signup/child — fpv04 U5a additive extensions", () => {
     expect(coreInput.coverLook).toBe("manga-arc");
     expect(coreInput.heroVibe).toBe("inventor");
     expect(coreInput.heroGender).toBe("girl");
+    expect(coreInput.heroPersona).toBe("The fearless designer");
+    expect(coreInput.heroSetting).toBe("garage");
+    expect(coreInput.heroCity).toBe("Toronto");
+    expect(coreInput.coverDataUrl).toBe("data:image/jpeg;base64,Y292ZXI=");
+    expect(coreInput.coverGenerationCount).toBe(2);
 
     const body = (await res.json()) as Record<string, unknown>;
     // TWIN PIN: exactly the FpChildMintBody keys, in order (mint-rules).

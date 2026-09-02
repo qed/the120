@@ -49,7 +49,7 @@ const { store, authRef, rateRef, mailRef, provisionRef } = vi.hoisted(() => ({
     released: [] as string[],
   },
   mailRef: { sent: [] as Array<{ to: string; subject: string; text: string }> },
-  provisionRef: { seq: 0 },
+  provisionRef: { seq: 0, inputs: [] as Array<Record<string, unknown>> },
 }));
 
 vi.mock("@/app/lib/supabase/admin", () => ({
@@ -72,7 +72,9 @@ vi.mock("@/app/lib/supabase/admin", () => ({
 
 // The provisioner: first sight of an email mints an account, repeat = existing.
 vi.mock("@/app/lib/funnel/account", () => ({
-  provisionOrRecognizeAccount: async ({ email }: { email: string }) => {
+  provisionOrRecognizeAccount: async (input: { email: string; phone?: string }) => {
+    provisionRef.inputs.push(input);
+    const { email } = input;
     const key = email.trim().toLowerCase();
     if (authRef.idToEmail.size > 0) {
       for (const [, e] of authRef.idToEmail) {
@@ -148,6 +150,7 @@ const post = (path: string, body: unknown) => {
 const startBody = (email: string) => ({
   parentName: "Robin Reyes",
   parentEmail: email,
+  parentPhone: "(416) 555-0123",
   parentPassword: "correct horse battery",
   consentAccepted: true,
 });
@@ -173,6 +176,7 @@ beforeEach(() => {
   rateRef.released = [];
   mailRef.sent = [];
   provisionRef.seq = 0;
+  provisionRef.inputs = [];
   // PUBLIC-OPEN default: nothing set. Tests that CLOSE the gate stub the
   // kill-switch (FP_SIGNUP_TEST_ONLY=on) themselves.
   vi.stubEnv("FP_SIGNUP_TEST_ONLY", "");
@@ -275,6 +279,32 @@ describe("the CODE flow with the gate lifted (FP_SIGNUP_TEST_ONLY=off)", () => {
     // retired /signup/verify screen.
     expect(mail.text).not.toMatch(/https?:\/\//);
     expect(mail.text).not.toContain("signup/verify");
+  });
+
+  it("requires the First Profit support phone and forwards only its normalized value", async () => {
+    const missing = { ...startBody("missing-phone@example.com") } as Record<string, unknown>;
+    delete missing.parentPhone;
+    await expectGenericRefusal(await post("/api/fp/signup", missing));
+    expect(provisionRef.inputs).toHaveLength(0);
+
+    const formatted = {
+      ...startBody("international@example.com"),
+      parentPhone: "+44 20 7946 0958",
+    };
+    const started = await post("/api/fp/signup", formatted);
+    expect(started.status).toBe(200);
+    expect(provisionRef.inputs[0]?.phone).toBe("+442079460958");
+  });
+
+  it("generically refuses an ambiguous or extension-bearing phone before provisioning", async () => {
+    for (const [index, parentPhone] of ["44 20 7946 0958", "+44 20 7946 0958 ext 2"].entries()) {
+      const res = await post("/api/fp/signup", {
+        ...startBody(`bad-phone-${index}@example.com`),
+        parentPhone,
+      });
+      await expectGenericRefusal(res);
+    }
+    expect(provisionRef.inputs).toHaveLength(0);
   });
 
   it("start → verify with the mailed code → parent tokens; wrong code first → invalid_code with the guess budget", async () => {

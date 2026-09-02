@@ -105,6 +105,36 @@ export function splitParentName(parentName: string): { firstName: string; lastNa
   return { firstName: trimmed.slice(0, idx), lastName: trimmed.slice(idx).trim() };
 }
 
+/* --------------------------------------------------- parent support phone */
+
+/**
+ * Normalize the required First Profit parent support number before account
+ * creation. A ten-digit Canada/U.S. number gets the +1 country code;
+ * international numbers must state their country code with a leading `+`.
+ *
+ * E.164 permits at most 15 digits. We accept a seven-digit lower bound for
+ * small numbering plans, discard ordinary display punctuation, and reject
+ * letters/extensions instead of guessing. The returned value is safe to save
+ * to `parents.phone`; null means the hostile-facing route must use its generic
+ * refusal.
+ */
+export function normalizeParentSupportPhone(raw: string): string | null {
+  const value = raw.trim();
+  if (value.length === 0 || value.length > 40) return null;
+  if (!/^[+\d\s().\-/]+$/.test(value)) return null;
+
+  const hasLeadingPlus = value.startsWith("+");
+  if (value.slice(hasLeadingPlus ? 1 : 0).includes("+")) return null;
+  const digits = value.replace(/\D/g, "");
+
+  if (hasLeadingPlus) {
+    return /^[1-9]\d{6,14}$/.test(digits) ? `+${digits}` : null;
+  }
+  if (/^\d{10}$/.test(digits)) return `+1${digits}`;
+  if (/^1\d{10}$/.test(digits)) return `+${digits}`;
+  return null;
+}
+
 /* -------------------------------------------------- launch gate (Rev 3, P0) */
 
 /** The subset of the environment the gate reads — passed IN so this stays pure. */

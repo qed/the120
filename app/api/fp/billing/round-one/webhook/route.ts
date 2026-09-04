@@ -19,7 +19,9 @@ import {
 import { sendRoundOneStripeSetupEmail } from "../round-one-setup-email";
 import {
   applyRoundOneWebhookPlan,
+  cancelRoundOneExpiredCheckout,
   fillRoundOneParentPhone,
+  readRoundOnePendingCheckouts,
 } from "../round-one-store";
 
 export const dynamic = "force-dynamic";
@@ -44,6 +46,67 @@ function stripeObjectId(value: unknown): string | null {
   if (!value || typeof value !== "object") return null;
   const id = (value as { id?: unknown }).id;
   return typeof id === "string" ? id.trim() || null : null;
+}
+
+/**
+ * A dispute can commit after a replacement Checkout URL was already returned.
+ * The database hold immediately blocks access and any new URL, while this
+ * post-commit pass closes every still-open sibling Session at Stripe. There is
+ * no atomic transaction across Stripe and Postgres: a Session that races to
+ * `complete` remains financial truth, but its paid event cannot restore access.
+ */
+async function closePendingCheckoutsAfterDispute(
+  stripe: Stripe,
+  input: {
+    parentId: string;
+    childId: string;
+    productKey: string;
+    productVersion: number;
+  }
+): Promise<boolean> {
+  const db = supabaseAdmin();
+  const pending = await readRoundOnePendingCheckouts(db, input);
+  if (pending === "error") return false;
+
+  let allClosed = true;
+  for (const checkout of pending) {
+    try {
+      const session = await stripe.checkout.sessions.retrieve(checkout.sessionId);
+      if (session.id !== checkout.sessionId) {
+        allClosed = false;
+        continue;
+      }
+
+      if (session.status === "open") {
+        const expired = await stripe.checkout.sessions.expire(checkout.sessionId);
+        if (expired.id !== checkout.sessionId || expired.status !== "expired") {
+          allClosed = false;
+          continue;
+        }
+      } else if (session.status === "complete") {
+        // Stripe cannot expire a completed Session. The sticky database hold
+        // still prevents fulfilment; its paid webhook makes the charge visible
+        // for staff refund review instead of reopening course access.
+        console.error(
+          `[fp/billing/round-one/webhook] disputed product has completed sibling order ${checkout.orderId}; access remains suspended`
+        );
+        continue;
+      } else if (session.status !== "expired") {
+        allClosed = false;
+        continue;
+      }
+
+      if (!(await cancelRoundOneExpiredCheckout(db, checkout))) {
+        allClosed = false;
+      }
+    } catch (err) {
+      console.error(
+        `[fp/billing/round-one/webhook] sibling Checkout cleanup failed for order ${checkout.orderId}: ${err instanceof Error ? err.message : String(err)}`
+      );
+      allClosed = false;
+    }
+  }
+  return allClosed;
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -251,6 +314,17 @@ export async function POST(req: Request): Promise<Response> {
   ) {
     console.error(
       "[fp/billing/round-one/webhook] Round One dispute recorded; access remains suspended pending staff review"
+    );
+  }
+  if (
+    (plan.effect === "dispute_opened" || plan.effect === "dispute_closed")
+    && !(await closePendingCheckoutsAfterDispute(stripe, plan))
+  ) {
+    // The durable hold is already committed. Non-2xx asks Stripe to retry the
+    // signed event so a transient Stripe/database cleanup failure can finish.
+    return Response.json(
+      { error: "Disputed checkout cleanup incomplete" },
+      { status: 500 }
     );
   }
   if (plan.effect === "paid") {

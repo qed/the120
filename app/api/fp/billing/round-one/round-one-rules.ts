@@ -355,20 +355,27 @@ export function shapeRoundOneStatus(input: {
   product: RoundOneProductRow;
   entitlement: RoundOneEntitlementRow | null;
   latestOrder: RoundOneOrderSummaryRow | null;
+  disputeHeld?: boolean;
 }): RoundOneStatusBody {
-  const active = input.entitlement?.status === "active"
-    && input.entitlement.access_code === input.product.access_code;
-  const suspended = input.entitlement?.status === "suspended"
+  // The order marker is product-wide and sticky. It must override even an
+  // absent/revoked entitlement (for example, refund before a delayed dispute)
+  // and an accidentally active grant until an audited restoration exists.
+  const suspended = input.disputeHeld === true || (
+    input.entitlement?.status === "suspended"
     && input.entitlement.access_code === input.product.access_code
-    && input.entitlement.suspension_reason === "stripe_dispute";
+    && input.entitlement.suspension_reason === "stripe_dispute"
+  );
+  const active = !suspended
+    && input.entitlement?.status === "active"
+    && input.entitlement.access_code === input.product.access_code;
   const latestState = input.latestOrder?.status ?? "not_started";
   // A revoked complimentary order remains comped/grandfathered in the audit
   // ledger, but it must not present as an active complimentary state to the
   // parent or child. `access.granted` is authoritative either way.
-  const state: RoundOneAccessState = active
-    ? input.entitlement!.grant_kind
-    : suspended
-      ? "suspended"
+  const state: RoundOneAccessState = suspended
+    ? "suspended"
+    : active
+      ? input.entitlement!.grant_kind
       : input.entitlement?.status === "revoked"
         && (latestState === "comped" || latestState === "grandfathered")
         ? "cancelled"

@@ -394,6 +394,46 @@ describe("status shaping", () => {
       canStartCheckout: false,
     });
   });
+
+  it("lets a product-wide hold override missing, revoked, or accidentally active entitlement state", () => {
+    for (const entitlement of [
+      null,
+      {
+        status: "revoked" as const,
+        grant_kind: "paid" as const,
+        access_code: ROUND_ONE_ACCESS_CODE,
+        granted_at: "2026-01-01T00:00:00Z",
+        suspended_at: null,
+        suspension_reason: null,
+        revoked_at: "2026-01-02T00:00:00Z",
+      },
+      {
+        status: "active" as const,
+        grant_kind: "paid" as const,
+        access_code: ROUND_ONE_ACCESS_CODE,
+        granted_at: "2026-01-01T00:00:00Z",
+        suspended_at: null,
+        suspension_reason: null,
+        revoked_at: null,
+      },
+    ]) {
+      expect(shapeRoundOneStatus({
+        childId: CHILD_ID,
+        product: product(),
+        entitlement,
+        latestOrder: {
+          status: "refunded",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-02T00:00:00Z",
+        },
+        disputeHeld: true,
+      })).toMatchObject({
+        state: "suspended",
+        access: { granted: false },
+        canStartCheckout: false,
+      });
+    }
+  });
 });
 
 describe("signed webhook planning", () => {

@@ -56,9 +56,21 @@ locks paid tasks closed; it never grants fallback access.
 
 ## Stripe test-mode setup
 
-1. Query the live Supabase migration ledger under the repository migration
-   lock and rename the provisional migration to the actual next free version.
-2. Apply the migration before deploying code that calls the new RPCs.
+1. Under the repository migration lock, query both the live Supabase migration
+   ledger and catalog before touching the provisional file. Check
+   `supabase_migrations.schema_migrations`, `to_regclass` for every
+   `fp_billing_*` relation, and `to_regprocedure` for both the former 12-argument
+   and current 16-argument `fp_billing_apply_stripe_event` signatures.
+   - If no Round One billing migration, relation, or function exists, rename the
+     provisional foundation to the actual next free version and apply it once.
+   - If any earlier form exists, do not rename, edit, or replay an applied
+     migration. Preserve that ledger entry and author a new additive upgrade
+     migration with explicit `alter table`/constraint changes. Drop the obsolete
+     12-argument RPC overload only in that upgrade, after its replacement is
+     created and grants are verified.
+2. Apply only the ledger-safe migration selected above before deploying code
+   that calls the new RPCs. The provisional foundation is not a general
+   idempotent upgrade script.
 3. In Stripe test mode, create a one-time CAD $250 Price for a distinct First
    Profit Round 1: Sell product. Set its id in
    `FP_ROUND_ONE_STRIPE_PRICE_ID`. Re-open the Price in Stripe and independently
@@ -113,8 +125,19 @@ refunds preserve access and create a durable open Watchtower billing-review
 case. Any Stripe dispute/chargeback suspends Round One access immediately and
 creates an open review case. A later `charge.dispute.closed`, including a won
 dispute, updates and reopens that case but does not automatically restore
-access. Restoration remains a deliberate future staff workflow; v1 exposes no
-automatic or manual restoration action.
+access. The hold spans every order for the child/product version, survives a
+full refund and review-state changes, and prevents any new Checkout URL. After
+the hold commits, the signed dispute handler also finds every pending sibling
+Checkout Session and expires each one that Stripe still reports as open; it
+cancels the matching database order only after Stripe confirms expiry. That
+post-commit cleanup is intentionally retryable because Stripe and Postgres do
+not share an atomic transaction. A Session that races to `complete` cannot be
+expired: record the payment, keep access suspended, and send the charge to staff
+refund review. Restoration remains a deliberate future staff workflow; v1
+exposes no automatic or manual restoration action. A full refund
+system-supersedes any open partial-refund case for that Charge so it leaves the
+actionable queue, while both the case evidence and immutable per-delivery
+webhook ledger remain available for audit.
 
 Checkout enables Stripe Promotion Codes. Before granting access, the webhook
 retrieves the signed Session's line items and requires exactly one quantity of
@@ -392,13 +415,25 @@ validation, and approval of the Buy, Order, or Book button.
 - A full refund revokes the matching paid grant and a redelivered paid event
   cannot resurrect it.
 - A partial refund preserves access, upserts one open review case per Charge,
-  and redelivery remains idempotent.
+  and redelivery remains idempotent. A later full refund system-supersedes that
+  follow-up, and an out-of-order stale partial delivery cannot reopen it.
 - `charge.dispute.created` immediately suspends access and upserts one open
-  review case per Dispute. A late paid event cannot restore access.
+  review case per Dispute. A late paid event on the same or another order cannot
+  restore access.
 - `charge.dispute.closed` updates/reopens the review case without restoring
   access for `won`, `lost`, or `warning_closed`; a late `created` delivery
   cannot overwrite terminal processor status.
 - A full refund remains final even if dispute events arrive before or after it.
+- The product-wide dispute hold survives a full refund, a resolved review row,
+  and duplicate paid orders. Parent status remains suspended, the admin seam is
+  a no-op, and checkout begin/attachment cannot expose a new payable URL.
+- If a replacement Checkout URL was returned after a refund but before a late
+  dispute on the old charge committed, the dispute retry expires that sibling
+  Session when it is still open and then cancels its pending order. Test open,
+  already-expired, transient-cleanup-failure, and replay paths. Also force a
+  completion race: the charge remains financial truth, the paid webhook cannot
+  restore access, the handler emits an operator-visible error, and staff must
+  inspect and refund the raced charge during dispute review.
 - Watchtower exposes only case/contact/reason/timestamp review fields; an
   unavailable or malformed review read omits that queue without erasing the
   unchanged six-field payment summary.

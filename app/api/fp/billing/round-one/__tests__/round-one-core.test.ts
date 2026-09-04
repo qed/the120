@@ -48,6 +48,7 @@ beforeEach(() => {
     ownsChild: vi.fn().mockResolvedValue("owned"),
     readProduct: vi.fn().mockResolvedValue(product()),
     readEntitlement: vi.fn().mockResolvedValue(null),
+    hasDisputeHold: vi.fn().mockResolvedValue(false),
     readLatestOrder: vi.fn().mockResolvedValue(null),
     beginOrder: vi.fn().mockResolvedValue(newOrder()),
     attachCheckout: vi.fn().mockResolvedValue(true),
@@ -180,6 +181,31 @@ describe("readRoundOneStatus", () => {
     });
   });
 
+  it("surfaces a product-wide dispute hold even with no entitlement or a refunded order", async () => {
+    vi.mocked(deps.hasDisputeHold).mockResolvedValue(true);
+    vi.mocked(deps.readLatestOrder).mockResolvedValue({
+      status: "refunded",
+      created_at: "2026-01-02T00:00:00Z",
+      updated_at: "2026-01-03T00:00:00Z",
+    });
+
+    await expect(readRoundOneStatus(deps, statusInput())).resolves.toMatchObject({
+      kind: "ok",
+      body: {
+        state: "suspended",
+        access: { granted: false, code: null, reason: null },
+        canStartCheckout: false,
+      },
+    });
+  });
+
+  it("fails status closed when the product-wide dispute-hold read fails", async () => {
+    vi.mocked(deps.hasDisputeHold).mockResolvedValue("error");
+    await expect(readRoundOneStatus(deps, statusInput())).resolves.toEqual({
+      kind: "unavailable",
+    });
+  });
+
   it("does not let a paid-looking order substitute for an entitlement", async () => {
     vi.mocked(deps.readLatestOrder).mockResolvedValue({
       status: "paid",
@@ -250,6 +276,21 @@ describe("startRoundOneCheckout", () => {
     });
     expect(stripe.createSession).not.toHaveBeenCalled();
     expect(deps.attachCheckout).not.toHaveBeenCalled();
+  });
+
+  it("expires an unattached Session when a dispute wins the begin-to-attach race", async () => {
+    vi.mocked(deps.attachCheckout).mockResolvedValue(false);
+    vi.mocked(deps.hasDisputeHold).mockResolvedValue(true);
+    vi.mocked(stripe.expireSession).mockResolvedValue({
+      id: "cs_test_1",
+      status: "expired",
+    });
+
+    await expect(startRoundOneCheckout(deps, stripe, checkoutInput())).resolves.toEqual({
+      kind: "suspended",
+    });
+    expect(stripe.expireSession).toHaveBeenCalledWith("cs_test_1");
+    expect(deps.cancelPendingOrder).toHaveBeenCalledWith(ORDER_ID);
   });
 
   it("reuses an existing live session rather than risking a second charge", async () => {

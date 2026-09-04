@@ -100,19 +100,28 @@ describe("Round One migration parity", () => {
   });
 
   it("serializes duplicate and out-of-order events before changing order state", () => {
-    const eventLock = sql.indexOf(
+    const applyStart = sql.indexOf(
+      "create or replace function public.fp_billing_apply_stripe_event"
+    );
+    const accessStart = sql.indexOf(
+      "create or replace function public.fp_billing_set_round_one_access"
+    );
+    const apply = sql.slice(applyStart, accessStart);
+    const eventLock = apply.indexOf(
       "pg_advisory_xact_lock(hashtextextended(p_event_id, 0))"
     );
-    const replayRead = sql.indexOf(
+    const replayRead = apply.indexOf(
       "select 1 from public.fp_billing_webhook_events w"
     );
-    const childLock = sql.indexOf(
+    const childLock = apply.indexOf(
       "concat_ws(':', p_child_id::text, p_product_key, p_product_version::text)"
     );
-    const orderMutation = sql.indexOf("if p_effect = 'pending' then");
-    const eventStamp = sql.indexOf(
+    const orderMutation = apply.indexOf("if p_effect = 'pending' then");
+    const eventStamp = apply.indexOf(
       "insert into public.fp_billing_webhook_events"
     );
+    expect(applyStart).toBeGreaterThanOrEqual(0);
+    expect(accessStart).toBeGreaterThan(applyStart);
     expect(eventLock).toBeGreaterThanOrEqual(0);
     expect(replayRead).toBeGreaterThan(eventLock);
     expect(childLock).toBeGreaterThan(replayRead);
@@ -154,13 +163,53 @@ describe("Round One migration parity", () => {
     );
     expect(sql).toContain("p_effect = 'dispute_closed' then 'dispute_closed_review'");
     expect(sql).toMatch(
-      /v_order\.dispute_suspended_at is not null[\s\S]*?v_outcome := 'dispute_stands'/
+      /select min\(held\.dispute_suspended_at\)[\s\S]*?v_outcome := 'dispute_stands'/
     );
+  });
+
+  it("keeps a dispute product-wide across multiple orders, refund ordering, and review resolution", () => {
+    const disputeBranch = sql.match(
+      /elsif p_effect in \('dispute_opened', 'dispute_closed'\) then([\s\S]*?)elsif p_effect = 'refunded' then/
+    )?.[1] ?? "";
+    expect(disputeBranch.indexOf("set dispute_suspended_at")).toBeGreaterThanOrEqual(0);
+    expect(disputeBranch.indexOf("set dispute_suspended_at")).toBeLessThan(
+      disputeBranch.indexOf("if v_order.status = 'refunded'")
+    );
+    expect(sql).toMatch(
+      /select min\(held\.dispute_suspended_at\)[\s\S]*?held\.child_id = v_order\.child_id[\s\S]*?held\.product_key = v_order\.product_key[\s\S]*?held\.product_version = v_order\.product_version/
+    );
+    expect(sql).not.toMatch(
+      /select min\(held\.dispute_suspended_at\)[\s\S]{0,500}review_state = 'open'/
+    );
+  });
+
+  it("serializes begin and attach with the webhook lock and blocks a second payable URL", () => {
+    const lockKey =
+      "concat_ws(':', p_child_id::text, p_product_key, p_product_version::text)";
+    expect(sql).toContain(lockKey);
+    expect(sql).toMatch(
+      /create or replace function public\.fp_billing_begin_order[\s\S]*?pg_advisory_xact_lock[\s\S]*?dispute_suspended_at is not null[\s\S]*?select 'access_suspended'/
+    );
+    expect(sql).toMatch(
+      /create or replace function public\.fp_billing_attach_checkout[\s\S]*?pg_advisory_xact_lock[\s\S]*?not exists \([\s\S]*?held\.dispute_suspended_at is not null/
+    );
+  });
+
+  it("system-supersedes partial-refund work after full-refund finality without deleting audit", () => {
+    expect(sql).toContain("review_state in ('open', 'resolved', 'superseded')");
+    expect(sql).toMatch(
+      /elsif p_effect = 'refunded' then[\s\S]*?update public\.fp_billing_review_items review[\s\S]*?set review_state = 'superseded'[\s\S]*?review\.review_kind = 'partial_refund'/
+    );
+    expect(sql).toMatch(
+      /on conflict \(review_kind, stripe_object_id\) do update[\s\S]*?v_order\.status = 'refunded'[\s\S]*?then 'superseded'/
+    );
+    expect(sql).toContain("insert into public.fp_billing_webhook_events");
+    expect(sql).not.toMatch(/delete from public\.fp_billing_review_items/);
   });
 
   it("does not let the emergency access seam clear a dispute suspension", () => {
     expect(sql).toMatch(
-      /v_entitlement\.status = 'suspended' then[\s\S]*?v_outcome := 'dispute_requires_review'/
+      /v_dispute_hold_order_id is not null[\s\S]*?v_entitlement\.status = 'suspended'[\s\S]*?v_outcome := 'dispute_requires_review'/
     );
   });
 
@@ -297,5 +346,8 @@ describe("Round One migration parity", () => {
   it("is visibly provisional so it cannot be mistaken for an applied ledger version", () => {
     expect(raw).toContain("PROVISIONAL / NOT APPLIED");
     expect(raw).toContain("query `supabase_migrations.schema_migrations`");
+    expect(raw).toContain("live relation/function");
+    expect(raw).toContain("new additive upgrade migration");
+    expect(raw).toContain("not an in-place upgrade or blanket-idempotent script");
   });
 });

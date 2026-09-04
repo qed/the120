@@ -64,6 +64,23 @@ export function buildRoundOneCoreDeps(db: SupabaseClient): RoundOneCoreDeps {
       }
       return (data as RoundOneEntitlementRow | null) ?? null;
     },
+    hasDisputeHold: async (parentId, childId, productKey, version) => {
+      const { data, error } = await db
+        .from("fp_billing_orders")
+        .select("id")
+        .eq("parent_id", parentId)
+        .eq("child_id", childId)
+        .eq("product_key", productKey)
+        .eq("product_version", version)
+        .not("dispute_suspended_at", "is", null)
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        console.error(`[fp/billing/round-one] dispute-hold read failed: ${error.message}`);
+        return "error";
+      }
+      return !!data;
+    },
     readLatestOrder: async (parentId, childId, productKey, version) => {
       const { data, error } = await db
         .from("fp_billing_orders")
@@ -161,6 +178,95 @@ export async function applyRoundOneWebhookPlan(
   } catch (err) {
     console.error(`[fp/billing/round-one] webhook rpc threw: ${errorMessage(err)}`);
     return { ok: false };
+  }
+}
+
+export type RoundOnePendingCheckout = {
+  orderId: string;
+  sessionId: string;
+};
+
+/**
+ * Read every still-pending Checkout Session for the disputed child/product.
+ * The signed event has already installed the durable database hold before this
+ * is called. This list exists only to close Stripe URLs that were returned in
+ * the small cross-system window before that hold committed.
+ */
+export async function readRoundOnePendingCheckouts(
+  db: SupabaseClient,
+  input: {
+    parentId: string;
+    childId: string;
+    productKey: string;
+    productVersion: number;
+  }
+): Promise<RoundOnePendingCheckout[] | "error"> {
+  try {
+    const { data, error } = await db
+      .from("fp_billing_orders")
+      .select("id, stripe_checkout_session_id")
+      .eq("parent_id", input.parentId)
+      .eq("child_id", input.childId)
+      .eq("product_key", input.productKey)
+      .eq("product_version", input.productVersion)
+      .eq("status", "pending")
+      .not("stripe_checkout_session_id", "is", null);
+    if (error) {
+      console.error(`[fp/billing/round-one] pending Checkout read failed: ${error.message}`);
+      return "error";
+    }
+    if (!Array.isArray(data)) return [];
+    return data.flatMap((row) => {
+      const candidate = row as {
+        id?: unknown;
+        stripe_checkout_session_id?: unknown;
+      };
+      return typeof candidate.id === "string"
+        && typeof candidate.stripe_checkout_session_id === "string"
+        && candidate.id.trim()
+        && candidate.stripe_checkout_session_id.trim()
+        ? [{
+            orderId: candidate.id,
+            sessionId: candidate.stripe_checkout_session_id,
+          }]
+        : [];
+    });
+  } catch (err) {
+    console.error(
+      `[fp/billing/round-one] pending Checkout read threw: ${errorMessage(err)}`
+    );
+    return "error";
+  }
+}
+
+/** Mark an order cancelled only after Stripe proves its Session is expired. */
+export async function cancelRoundOneExpiredCheckout(
+  db: SupabaseClient,
+  input: { orderId: string; sessionId: string }
+): Promise<boolean> {
+  try {
+    const { error } = await db
+      .from("fp_billing_orders")
+      .update({
+        status: "cancelled",
+        cancelled_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", input.orderId)
+      .eq("status", "pending")
+      .eq("stripe_checkout_session_id", input.sessionId);
+    if (error) {
+      console.error(`[fp/billing/round-one] expired Checkout cancellation failed: ${error.message}`);
+      return false;
+    }
+    // A concurrent signed event may already have moved the order to a terminal
+    // state. A zero-row conditional update is therefore also a safe outcome.
+    return true;
+  } catch (err) {
+    console.error(
+      `[fp/billing/round-one] expired Checkout cancellation threw: ${errorMessage(err)}`
+    );
+    return false;
   }
 }
 

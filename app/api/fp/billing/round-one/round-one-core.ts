@@ -39,6 +39,12 @@ export type RoundOneCoreDeps = {
     productKey: string,
     version: number
   ) => Promise<RoundOneEntitlementRow | null | "error">;
+  hasDisputeHold: (
+    parentId: string,
+    childId: string,
+    productKey: string,
+    version: number
+  ) => Promise<boolean | "error">;
   readLatestOrder: (
     parentId: string,
     childId: string,
@@ -95,7 +101,7 @@ export async function readRoundOneStatus(
   if (product === "error" || !isExpectedRoundOneProduct(product, input.productVersion)) {
     return { kind: "unavailable" };
   }
-  const [entitlement, latestOrder] = await Promise.all([
+  const [entitlement, latestOrder, disputeHeld] = await Promise.all([
     deps.readEntitlement(
       input.parentId,
       input.childId,
@@ -108,13 +114,25 @@ export async function readRoundOneStatus(
       input.productKey,
       input.productVersion
     ),
+    deps.hasDisputeHold(
+      input.parentId,
+      input.childId,
+      input.productKey,
+      input.productVersion
+    ),
   ]);
-  if (entitlement === "error" || latestOrder === "error") {
+  if (entitlement === "error" || latestOrder === "error" || disputeHeld === "error") {
     return { kind: "unavailable" };
   }
   return {
     kind: "ok",
-    body: shapeRoundOneStatus({ childId: input.childId, product, entitlement, latestOrder }),
+    body: shapeRoundOneStatus({
+      childId: input.childId,
+      product,
+      entitlement,
+      latestOrder,
+      disputeHeld,
+    }),
   };
 }
 
@@ -264,7 +282,28 @@ export async function startRoundOneCheckout(
       session.id,
       new Date(session.expires_at * 1000).toISOString()
     );
-    if (!attached) return { kind: "unavailable" };
+    if (!attached) {
+      // The database rechecks the product-wide dispute hold while attaching.
+      // If that hold appeared after beginOrder returned, never hand the newly
+      // created payable URL to the parent. Best-effort expiry and cancellation
+      // also keep an undisclosed orphan Session from remaining usable.
+      try {
+        const expired = await stripe.expireSession(session.id);
+        if (expired.id === session.id && expired.status === "expired") {
+          await deps.cancelPendingOrder(begun.order_id);
+        }
+      } catch {
+        // Returning no URL is the fail-closed outcome even when Stripe races a
+        // completion or is temporarily unavailable during cleanup.
+      }
+      const held = await deps.hasDisputeHold(
+        input.parentId,
+        input.childId,
+        input.productKey,
+        input.productVersion
+      );
+      return held === true ? { kind: "suspended" } : { kind: "unavailable" };
+    }
     return { kind: "checkout", url: session.url, reused: false };
   }
   return { kind: "unavailable" };

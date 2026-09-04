@@ -24,6 +24,23 @@ const refs = vi.hoisted(() => ({
       data: [{ quantity: 1, price: { id: "price_round_one_test" } }],
     } as Record<string, unknown>,
   },
+  pendingCheckouts: {
+    value: [] as Array<{ orderId: string; sessionId: string }> | "error",
+  },
+  pendingCheckoutScopes: [] as Record<string, unknown>[],
+  cancelledCheckouts: [] as Record<string, unknown>[],
+  cancelCheckoutOk: { value: true },
+  checkoutSession: {
+    value: { id: "cs_replacement", status: "open" } as Record<string, unknown>,
+  },
+  expiredCheckoutSession: {
+    value: { id: "cs_replacement", status: "expired" } as Record<string, unknown>,
+  },
+  checkoutRetrieveError: { value: null as Error | null },
+  checkoutExpireError: { value: null as Error | null },
+  checkoutSessionIds: [] as string[],
+  expiredCheckoutSessionIds: [] as string[],
+  cleanupTimeline: [] as string[],
   db: { marker: "admin-db" },
   stripeConfigs: [] as Array<Record<string, unknown> | undefined>,
 }));
@@ -54,6 +71,18 @@ vi.mock("stripe", () => ({
     checkout = {
       sessions: {
         listLineItems: async () => refs.lineItems.value,
+        retrieve: async (id: string) => {
+          refs.cleanupTimeline.push("stripe:retrieve");
+          refs.checkoutSessionIds.push(id);
+          if (refs.checkoutRetrieveError.value) throw refs.checkoutRetrieveError.value;
+          return refs.checkoutSession.value;
+        },
+        expire: async (id: string) => {
+          refs.cleanupTimeline.push("stripe:expire");
+          refs.expiredCheckoutSessionIds.push(id);
+          if (refs.checkoutExpireError.value) throw refs.checkoutExpireError.value;
+          return refs.expiredCheckoutSession.value;
+        },
       },
     };
   },
@@ -65,12 +94,23 @@ vi.mock("@/app/lib/supabase/admin", () => ({
 
 vi.mock("../round-one-store", () => ({
   applyRoundOneWebhookPlan: async (_db: unknown, plan: Record<string, unknown>) => {
+    refs.cleanupTimeline.push("db:hold");
     refs.plans.push(plan);
     return refs.applied.value;
   },
   fillRoundOneParentPhone: async (_db: unknown, input: Record<string, unknown>) => {
     refs.phones.push(input);
     return refs.phoneStored.value;
+  },
+  readRoundOnePendingCheckouts: async (_db: unknown, input: Record<string, unknown>) => {
+    refs.cleanupTimeline.push("db:list-pending");
+    refs.pendingCheckoutScopes.push(input);
+    return refs.pendingCheckouts.value;
+  },
+  cancelRoundOneExpiredCheckout: async (_db: unknown, input: Record<string, unknown>) => {
+    refs.cleanupTimeline.push("db:cancel-expired");
+    refs.cancelledCheckouts.push(input);
+    return refs.cancelCheckoutOk.value;
   },
 }));
 
@@ -107,6 +147,24 @@ function paidEvent(): Record<string, unknown> {
   };
 }
 
+function disputeOpenedEvent(): Record<string, unknown> {
+  return {
+    id: "evt_round_one_dispute_created",
+    type: "charge.dispute.created",
+    data: {
+      object: {
+        id: "dp_round_one",
+        charge: "ch_round_one",
+        payment_intent: "pi_round_one",
+        status: "needs_response",
+        reason: "fraudulent",
+        amount: 25_000,
+        currency: "cad",
+      },
+    },
+  };
+}
+
 function request(): Request {
   return new Request("http://localhost/api/fp/billing/round-one/webhook", {
     method: "POST",
@@ -135,6 +193,17 @@ describe("Round One webhook route", () => {
     refs.lineItems.value = {
       data: [{ quantity: 1, price: { id: "price_round_one_test" } }],
     };
+    refs.pendingCheckouts.value = [];
+    refs.pendingCheckoutScopes.length = 0;
+    refs.cancelledCheckouts.length = 0;
+    refs.cancelCheckoutOk.value = true;
+    refs.checkoutSession.value = { id: "cs_replacement", status: "open" };
+    refs.expiredCheckoutSession.value = { id: "cs_replacement", status: "expired" };
+    refs.checkoutRetrieveError.value = null;
+    refs.checkoutExpireError.value = null;
+    refs.checkoutSessionIds.length = 0;
+    refs.expiredCheckoutSessionIds.length = 0;
+    refs.cleanupTimeline.length = 0;
     refs.stripeConfigs.length = 0;
   });
 
@@ -396,6 +465,106 @@ describe("Round One webhook route", () => {
       processorAmount: 25_000,
     });
     expect(refs.emails).toEqual([]);
+  });
+
+  it("expires a replacement Checkout that was returned before the old charge dispute committed", async () => {
+    refs.event.value = disputeOpenedEvent();
+    refs.paymentIntent.value = {
+      metadata: (paidEvent().data as { object: { metadata: Record<string, string> } })
+        .object.metadata,
+    };
+    refs.applied.value = { ok: true, outcome: "dispute_suspended" };
+    refs.pendingCheckouts.value = [{
+      orderId: "44444444-4444-4444-8444-444444444444",
+      sessionId: "cs_replacement",
+    }];
+
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(200);
+    expect(refs.pendingCheckoutScopes).toHaveLength(1);
+    expect(refs.pendingCheckoutScopes[0]).toMatchObject({
+      parentId: PARENT_ID,
+      childId: CHILD_ID,
+      productKey: "round_one_sell",
+      productVersion: 1,
+    });
+    expect(refs.checkoutSessionIds).toEqual(["cs_replacement"]);
+    expect(refs.expiredCheckoutSessionIds).toEqual(["cs_replacement"]);
+    expect(refs.cancelledCheckouts).toEqual([{
+      orderId: "44444444-4444-4444-8444-444444444444",
+      sessionId: "cs_replacement",
+    }]);
+    expect(refs.cleanupTimeline).toEqual([
+      "db:hold",
+      "db:list-pending",
+      "stripe:retrieve",
+      "stripe:expire",
+      "db:cancel-expired",
+    ]);
+  });
+
+  it("finishes dispute cleanup on event replay when Stripe already expired the sibling Session", async () => {
+    refs.event.value = disputeOpenedEvent();
+    refs.paymentIntent.value = {
+      metadata: (paidEvent().data as { object: { metadata: Record<string, string> } })
+        .object.metadata,
+    };
+    refs.applied.value = { ok: true, outcome: "replay" };
+    refs.pendingCheckouts.value = [{
+      orderId: "44444444-4444-4444-8444-444444444444",
+      sessionId: "cs_replacement",
+    }];
+    refs.checkoutSession.value = { id: "cs_replacement", status: "expired" };
+
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(200);
+    expect(refs.expiredCheckoutSessionIds).toEqual([]);
+    expect(refs.cancelledCheckouts).toHaveLength(1);
+  });
+
+  it("retries a dispute webhook when an open sibling Session cannot be expired", async () => {
+    refs.event.value = disputeOpenedEvent();
+    refs.paymentIntent.value = {
+      metadata: (paidEvent().data as { object: { metadata: Record<string, string> } })
+        .object.metadata,
+    };
+    refs.applied.value = { ok: true, outcome: "dispute_suspended" };
+    refs.pendingCheckouts.value = [{
+      orderId: "44444444-4444-4444-8444-444444444444",
+      sessionId: "cs_replacement",
+    }];
+    refs.checkoutExpireError.value = new Error("completion race");
+
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(500);
+    expect(refs.cancelledCheckouts).toEqual([]);
+  });
+
+  it("keeps a raced completed sibling charge held instead of cancelling financial truth", async () => {
+    refs.event.value = disputeOpenedEvent();
+    refs.paymentIntent.value = {
+      metadata: (paidEvent().data as { object: { metadata: Record<string, string> } })
+        .object.metadata,
+    };
+    refs.applied.value = { ok: true, outcome: "dispute_suspended" };
+    refs.pendingCheckouts.value = [{
+      orderId: "44444444-4444-4444-8444-444444444444",
+      sessionId: "cs_replacement",
+    }];
+    refs.checkoutSession.value = { id: "cs_replacement", status: "complete" };
+
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(200);
+    expect(refs.expiredCheckoutSessionIds).toEqual([]);
+    expect(refs.cancelledCheckouts).toEqual([]);
   });
 
   it("keeps a closed won dispute suspended for explicit staff review", async () => {

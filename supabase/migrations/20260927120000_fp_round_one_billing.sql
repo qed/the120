@@ -2,9 +2,11 @@
 --
 -- The repository checkout used to author this file has no live Supabase
 -- credential, and this work must not deploy. Before merge or application,
--- query `supabase_migrations.schema_migrations`, rename this file to the true
--- next free version if necessary, and only then apply it. All DDL below is
--- additive and idempotent.
+-- query `supabase_migrations.schema_migrations` and the live relation/function
+-- catalog. If no earlier Round One billing schema exists, rename this file to
+-- the true next free version and apply it once. If any earlier form exists,
+-- preserve its applied file and write a new additive upgrade migration instead;
+-- this foundation file is not an in-place upgrade or blanket-idempotent script.
 --
 -- This is deliberately NOT an extension of `deposits`. A $250 Round One
 -- purchase buys one child's access to First Profit's Sell phase. It is a
@@ -229,7 +231,9 @@ create table if not exists public.fp_billing_review_items (
     processor_currency is null or processor_currency ~ '^[a-z]{3}$'
   ),
   processor_closed_at timestamptz,
-  review_state text not null default 'open' check (review_state in ('open', 'resolved')),
+  review_state text not null default 'open' check (
+    review_state in ('open', 'resolved', 'superseded')
+  ),
   first_observed_at timestamptz not null default now(),
   last_observed_at timestamptz not null default now(),
   resolved_at timestamptz,
@@ -258,6 +262,13 @@ create table if not exists public.fp_billing_review_items (
       and resolved_at is not null
       and resolved_by is not null
       and char_length(trim(coalesce(resolution_note, ''))) between 3 and 1000
+    ) or (
+      -- A later full refund makes a partial-refund follow-up non-actionable,
+      -- while preserving the processor facts and webhook ledger for audit.
+      review_state = 'superseded'
+      and resolved_at is not null
+      and resolved_by is null
+      and resolution_note is null
     )
   ),
   unique (review_kind, stripe_object_id)
@@ -624,6 +635,34 @@ begin
     return;
   end if;
 
+  -- Use the exact child/product state-machine lock as the signed webhook and
+  -- staff-access seam. The database attachment step repeats the hold check
+  -- after Stripe Session creation to close the external-call race window.
+  perform pg_advisory_xact_lock(
+    hashtextextended(
+      concat_ws(':', p_child_id::text, p_product_key, p_product_version::text),
+      1
+    )
+  );
+
+  -- A dispute hold belongs to the child's product version, not merely whichever
+  -- paid order currently anchors the entitlement. Refunds and staff review-state
+  -- changes never make a second Checkout a valid way to resolve that hold.
+  select * into v_order
+  from public.fp_billing_orders o
+  where o.child_id = p_child_id
+    and o.product_key = p_product_key
+    and o.product_version = p_product_version
+    and o.dispute_suspended_at is not null
+  order by o.dispute_suspended_at desc, o.created_at desc
+  limit 1
+  for update;
+  if found then
+    return query
+      select 'access_suspended', v_order.id, null::text, null::timestamptz, null::text;
+    return;
+  end if;
+
   select * into v_entitlement
   from public.fp_billing_entitlements e
   where e.child_id = p_child_id
@@ -700,14 +739,43 @@ set search_path = public, pg_temp
 as $$
 declare
   v_count integer;
+  v_order public.fp_billing_orders%rowtype;
 begin
+  -- Read immutable scope first, then acquire locks in the same advisory→row
+  -- order as the webhook. A dispute that commits after begin_order but before
+  -- this attachment therefore prevents its new Checkout URL from being used.
+  select * into v_order
+  from public.fp_billing_orders o
+  where o.id = p_order_id;
+  if not found then return false; end if;
+
+  perform pg_advisory_xact_lock(
+    hashtextextended(
+      concat_ws(
+        ':',
+        v_order.child_id::text,
+        v_order.product_key,
+        v_order.product_version::text
+      ),
+      1
+    )
+  );
+
   update public.fp_billing_orders o
   set stripe_checkout_session_id = p_stripe_session_id,
       stripe_session_expires_at = p_expires_at,
       updated_at = now()
   where o.id = p_order_id
     and o.status = 'pending'
-    and (o.stripe_checkout_session_id is null or o.stripe_checkout_session_id = p_stripe_session_id);
+    and (o.stripe_checkout_session_id is null or o.stripe_checkout_session_id = p_stripe_session_id)
+    and not exists (
+      select 1
+      from public.fp_billing_orders held
+      where held.child_id = o.child_id
+        and held.product_key = o.product_key
+        and held.product_version = o.product_version
+        and held.dispute_suspended_at is not null
+    );
   get diagnostics v_count = row_count;
   return v_count = 1;
 end;
@@ -779,6 +847,8 @@ declare
   v_review_kind text;
   v_outcome text;
   v_replacement_order_id uuid;
+  v_dispute_hold_at timestamptz;
+  v_entitlement_found boolean := false;
 begin
   -- Serialize duplicate deliveries before checking the durable event ledger.
   perform pg_advisory_xact_lock(hashtextextended(p_event_id, 0));
@@ -955,15 +1025,16 @@ begin
         and e.product_key = v_order.product_key
         and e.product_version = v_order.product_version
       for update;
+      v_entitlement_found := found;
 
-      if v_order.dispute_suspended_at is not null or exists (
-        select 1 from public.fp_billing_review_items review
-        where review.child_id = v_order.child_id
-          and review.product_key = v_order.product_key
-          and review.product_version = v_order.product_version
-          and review.review_kind = 'stripe_dispute'
-          and review.review_state = 'open'
-      ) then
+      select min(held.dispute_suspended_at) into v_dispute_hold_at
+      from public.fp_billing_orders held
+      where held.child_id = v_order.child_id
+        and held.product_key = v_order.product_key
+        and held.product_version = v_order.product_version
+        and held.dispute_suspended_at is not null;
+
+      if v_dispute_hold_at is not null then
         -- A dispute may arrive before the Checkout completion. Record the
         -- payment as financial truth, but never let the late paid event reopen
         -- access or enqueue the setup email while the sticky dispute stands.
@@ -975,7 +1046,7 @@ begin
           v_order.parent_id, v_order.child_id, v_order.product_key,
           v_order.product_version, v_product.access_code,
           'suspended', 'paid', v_order.id, now(),
-          coalesce(v_order.dispute_suspended_at, now()),
+          v_dispute_hold_at,
           'stripe_dispute', null, now()
         )
         on conflict (child_id, product_key, product_version) do update
@@ -992,7 +1063,7 @@ begin
             revoked_at = null,
             updated_at = now();
         v_outcome := 'dispute_stands';
-      elsif found and v_entitlement.status = 'active'
+      elsif v_entitlement_found and v_entitlement.status = 'active'
          and v_entitlement.grant_kind = 'paid'
          and v_entitlement.source_order_id is distinct from v_order.id then
         -- The charge is real, but access was already granted by another paid
@@ -1057,16 +1128,20 @@ begin
     end if;
 
   elsif p_effect in ('dispute_opened', 'dispute_closed') then
+    -- Every observed dispute is a sticky product-wide hold, including one that
+    -- arrives after a full refund. Refunded financial state remains final, but
+    -- cannot become a fresh opportunity to pay while review is outstanding.
+    update public.fp_billing_orders
+    set dispute_suspended_at = coalesce(dispute_suspended_at, now()),
+        updated_at = now()
+    where id = v_order.id;
+    v_order.dispute_suspended_at := coalesce(v_order.dispute_suspended_at, now());
+
     if v_order.status = 'refunded' or v_order.refunded_at is not null then
       -- A later dispute delivery cannot weaken full-refund finality. It is
       -- still recorded in both audit/review ledgers below for staff visibility.
       v_outcome := 'refund_stands';
     else
-      update public.fp_billing_orders
-      set dispute_suspended_at = coalesce(dispute_suspended_at, now()),
-          updated_at = now()
-      where id = v_order.id;
-
       update public.fp_billing_entitlements entitlement
       set status = 'suspended',
           suspended_at = coalesce(entitlement.suspended_at, now()),
@@ -1127,6 +1202,18 @@ begin
         );
     end if;
     v_outcome := 'refunded';
+
+    -- A full refund is a stronger, final processor fact than an earlier partial
+    -- refund. Keep the review row as audit evidence, but remove it from the
+    -- actionable queue without inventing a staff actor or deleting history.
+    update public.fp_billing_review_items review
+    set review_state = 'superseded',
+        resolved_at = now(),
+        resolved_by = null,
+        resolution_note = null
+    where review.order_id = v_order.id
+      and review.review_kind = 'partial_refund'
+      and review.review_state = 'open';
   else
     return 'unsupported_effect';
   end if;
@@ -1137,14 +1224,26 @@ begin
       review_kind, stripe_object_id, last_stripe_event_id,
       processor_status, processor_reason, processor_amount,
       processor_currency, processor_closed_at, review_state,
-      first_observed_at, last_observed_at
+      first_observed_at, last_observed_at, resolved_at
     ) values (
       v_order.parent_id, v_order.child_id, v_order.product_key,
       v_order.product_version, v_order.id, v_review_kind,
       p_processor_object_id, p_event_id, p_processor_status,
       p_processor_reason, p_processor_amount, lower(p_currency),
       case when p_effect = 'dispute_closed' then now() else null end,
-      'open', now(), now()
+      case
+        when p_effect = 'partial_refund'
+          and (v_order.status = 'refunded' or v_order.refunded_at is not null)
+          then 'superseded'
+        else 'open'
+      end,
+      now(), now(),
+      case
+        when p_effect = 'partial_refund'
+          and (v_order.status = 'refunded' or v_order.refunded_at is not null)
+          then now()
+        else null
+      end
     )
     on conflict (review_kind, stripe_object_id) do update
     set last_stripe_event_id = excluded.last_stripe_event_id,
@@ -1168,12 +1267,40 @@ begin
           fp_billing_review_items.processor_closed_at,
           excluded.processor_closed_at
         ),
-        -- A new signed processor event is new work even if staff had resolved
-        -- an earlier snapshot of this case. Reopen it, but never restore access.
-        review_state = 'open',
-        resolved_at = null,
-        resolved_by = null,
-        resolution_note = null,
+        -- A new signed processor event is ordinarily new work even if staff had
+        -- resolved an earlier snapshot. A stale partial-refund delivery cannot,
+        -- however, reopen work after the stronger full-refund finality. Preserve
+        -- an explicit staff resolution in that case; otherwise system-supersede.
+        review_state = case
+          when p_effect = 'partial_refund'
+               and (v_order.status = 'refunded' or v_order.refunded_at is not null)
+               and fp_billing_review_items.review_state = 'resolved'
+            then 'resolved'
+          when p_effect = 'partial_refund'
+               and (v_order.status = 'refunded' or v_order.refunded_at is not null)
+            then 'superseded'
+          else 'open'
+        end,
+        resolved_at = case
+          when p_effect = 'partial_refund'
+               and (v_order.status = 'refunded' or v_order.refunded_at is not null)
+            then coalesce(fp_billing_review_items.resolved_at, now())
+          else null
+        end,
+        resolved_by = case
+          when p_effect = 'partial_refund'
+               and (v_order.status = 'refunded' or v_order.refunded_at is not null)
+               and fp_billing_review_items.review_state = 'resolved'
+            then fp_billing_review_items.resolved_by
+          else null
+        end,
+        resolution_note = case
+          when p_effect = 'partial_refund'
+               and (v_order.status = 'refunded' or v_order.refunded_at is not null)
+               and fp_billing_review_items.review_state = 'resolved'
+            then fp_billing_review_items.resolution_note
+          else null
+        end,
         last_observed_at = now();
   end if;
 
@@ -1239,6 +1366,7 @@ declare
   v_order_id uuid;
   v_outcome text;
   v_prior public.fp_billing_access_events%rowtype;
+  v_dispute_hold_order_id uuid;
 begin
   if p_action not in ('comped', 'grandfathered', 'revoke') then
     raise exception 'unsupported Round One access action';
@@ -1290,6 +1418,15 @@ begin
     )
   );
 
+  select o.id into v_dispute_hold_order_id
+  from public.fp_billing_orders o
+  where o.child_id = p_child_id
+    and o.product_key = v_product.product_key
+    and o.product_version = v_product.version
+    and o.dispute_suspended_at is not null
+  order by o.dispute_suspended_at desc, o.created_at desc
+  limit 1;
+
   select * into v_entitlement
   from public.fp_billing_entitlements e
   where e.child_id = p_child_id
@@ -1300,9 +1437,10 @@ begin
   -- A processor dispute is a sticky security/financial hold. Neither a grant
   -- nor a revoke action may silently clear or rewrite it; staff must resolve
   -- the open billing review case through an explicit future workflow.
-  if found and v_entitlement.status = 'suspended' then
+  if v_dispute_hold_order_id is not null
+     or (found and v_entitlement.status = 'suspended') then
     v_outcome := 'dispute_requires_review';
-    v_order_id := v_entitlement.source_order_id;
+    v_order_id := coalesce(v_dispute_hold_order_id, v_entitlement.source_order_id);
   elsif p_action in ('comped', 'grandfathered') then
     if found and v_entitlement.status = 'active' and v_entitlement.grant_kind = 'paid' then
       v_outcome := 'paid_stands';

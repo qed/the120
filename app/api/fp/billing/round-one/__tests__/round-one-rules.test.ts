@@ -193,9 +193,11 @@ describe("Stripe Checkout shape", () => {
     expect(built.params.allow_promotion_codes).toBe(true);
     expect(built.params.phone_number_collection).toEqual({ enabled: true });
     const submitCopy = built.params.custom_text?.submit;
-    expect(typeof submitCopy === "string" ? submitCopy : submitCopy?.message).toMatch(
-      /one-child, non-refundable CAD \$350 total today.*tax-exempt for K-12 education.*program-support calls/i
+    const submitMessage = typeof submitCopy === "string" ? submitCopy : submitCopy?.message;
+    expect(submitMessage).toMatch(
+      /one-child, non-refundable course fee.*standard price before any promotion code is CAD \$350.*tax-exempt for K-12 education.*program-support calls/i
     );
+    expect(submitMessage).not.toMatch(/CAD \$350 total today/i);
     expect(built.params.metadata).toEqual({
       billing_kind: ROUND_ONE_BILLING_KIND,
       order_id: ORDER_ID,
@@ -231,9 +233,11 @@ describe("Stripe Checkout shape", () => {
     ]);
     expect(built.params.metadata?.billing_currency).toBe("usd");
     const submitCopy = built.params.custom_text?.submit;
-    expect(typeof submitCopy === "string" ? submitCopy : submitCopy?.message).toMatch(
-      /one-child, non-refundable USD \$250 total today.*tax-exempt for K-12 education/i
+    const submitMessage = typeof submitCopy === "string" ? submitCopy : submitCopy?.message;
+    expect(submitMessage).toMatch(
+      /one-child, non-refundable course fee.*standard price before any promotion code is USD \$250.*tax-exempt for K-12 education/i
     );
+    expect(submitMessage).not.toMatch(/USD \$250 total today/i);
   });
 
   it("keeps every Stripe creation parameter stable when wall-clock time advances", () => {

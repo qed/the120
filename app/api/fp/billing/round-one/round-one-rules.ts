@@ -311,7 +311,7 @@ export function buildRoundOneCheckoutSession(
       custom_text: {
         submit: {
           message:
-            `First Profit Round 1 is a one-child, non-refundable ${roundOnePriceLabel(input.currency)} total today. No sales tax is added because First Profit is tax-exempt for K-12 education. Your phone number is used for First Profit program-support calls about this child.`,
+            `First Profit Round 1 is a one-child, non-refundable course fee. The standard price before any promotion code is ${roundOnePriceLabel(input.currency)}. No sales tax is added because First Profit is tax-exempt for K-12 education. Your phone number is used for First Profit program-support calls about this child.`,
         },
       },
       // Deliberately omit `expires_at` and accept Stripe's assigned expiry.

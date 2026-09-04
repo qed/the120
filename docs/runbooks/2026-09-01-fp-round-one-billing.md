@@ -58,6 +58,10 @@ directly in the isolated Preview environment.
   `FP_ROUND_ONE_BILLING_ENABLED=true` and `VITE_FP_ROUND_ONE=true` were set only
   on their respective release-branch Preview configurations. Production
   remained unchanged.
+- `FP_PREVIEW_ORIGIN=https://first-profit-round-one-sell-preview.vercel.app`
+  was set only on the backend release branch's Preview configuration so the
+  exact-origin CORS boundary accepts the matching First Profit Preview.
+  Production remained unchanged.
 - Stripe Test webhook: `we_1UByyr25N9cbf3wUpVWEYKmI`, pointed at the backend
   Preview's `/api/fp/billing/round-one/webhook` route, pinned to API version
   `2026-07-29.dahlia`. Its signing secret was written directly to the
@@ -87,10 +91,13 @@ unavailable`, proving that Vercel Deployment Protection no longer intercepts
 Stripe. The dedicated restricted Test credential is now stored as
 `FP_ROUND_ONE_STRIPE_SECRET_KEY` only on the backend release-branch Preview.
 A CLI-sourced deployment deliberately received none of the branch-scoped
-variables and remained fail-closed; release verification must therefore use a
-Git-sourced deployment whose `gitRef` is the release branch. Require the same
-probe to return `400 Missing signature` on that build before running Checkout.
-Production remains untouched.
+variables and remained fail-closed. The subsequent Git-sourced deployment had
+the correct release-branch `gitRef`, and the same probe returned `400 Missing
+signature`, proving that the complete server configuration loaded. A signed
+`checkout.session.expired` Test event for a previously expired no-charge QA
+Session was then resent to the registered endpoint; Stripe reported
+`pending_webhooks=0`. No charge or entitlement was created. Production remains
+untouched.
 
 ## Required server environment
 
@@ -463,8 +470,13 @@ billing IP limit. Keep those policies separate if rate limits are tuned later.
 `POST /api/fp/billing/round-one/checkout`
 
 ```json
-{ "childId": "uuid" }
+{ "childId": "uuid", "currency": "cad" }
 ```
+
+`currency` is required and must be either `"cad"` or `"usd"`. If a reusable
+pending Checkout already exists in the other currency, the API refuses the
+switch and returns that pending currency instead of creating a second payable
+Session.
 
 Success:
 

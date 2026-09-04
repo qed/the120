@@ -1,8 +1,10 @@
 # First Profit Round One billing runbook
 
 Status: backend foundation, isolated Stripe Test mode catalog, test discounts,
-and a disabled Preview deployment are prepared. No migration, Production
-change, feature activation, or live payment has been performed.
+and a disabled Preview deployment are prepared. The production Supabase ledger
+and relation catalog were inspected read-only on 2026-09-04; the reviewed
+foundation is `20260927120000_fp_round_one_billing.sql`. No migration,
+Production change, feature activation, or live payment has been performed.
 
 ## Product contract
 
@@ -127,13 +129,15 @@ locks paid tasks closed; it never grants fallback access.
 
 ## Stripe test-mode setup
 
-1. Under the repository migration lock, query both the live Supabase migration
-   ledger and catalog before touching the provisional file. Check
+1. Under the repository migration lock, re-query both the live Supabase migration
+   ledger and catalog immediately before application. The 2026-09-04 check found
+   the live ledger ending at `20260926120000` and no `fp_billing_*` relation,
+   so this candidate remains a fresh foundation at `20260927120000`. Check
    `supabase_migrations.schema_migrations`, `to_regclass` for every
    `fp_billing_*` relation, and `to_regprocedure` for both the former 12-argument
    and current 16-argument `fp_billing_apply_stripe_event` signatures.
    - If no Round One billing migration, relation, or function exists, rename the
-     provisional foundation to the actual next free version, keep
+     reviewed foundation at the actual next free version, keep
      `ROUND_ONE_BILLING_MIGRATION_SPEC.deploymentMode` at `fresh-foundation`,
      and apply it once.
    - If any earlier form exists, do not rename, edit, or replay an applied
@@ -141,11 +145,11 @@ locks paid tasks closed; it never grants fallback access.
      named `<next-version>_fp_round_one_billing_upgrade_<purpose>.sql` with
      explicit `alter table`/constraint changes. Set the checked-in migration
      contract mode to `existing-install-upgrade`; its tests inspect the upgrade
-     corpus without borrowing the provisional foundation. Drop the obsolete
+     corpus without borrowing the fresh foundation. Drop the obsolete
      12-argument RPC overload only in that upgrade, after its replacement is
      created and grants are verified.
 2. Apply only the ledger-safe migration selected above before deploying code
-   that calls the new RPCs. The provisional foundation is not a general
+   that calls the new RPCs. The fresh foundation is not a general
    idempotent upgrade script.
 
 ### Existing-install additive upgrade
@@ -153,7 +157,7 @@ locks paid tasks closed; it never grants fallback access.
 If the live ledger or catalog shows any earlier Round One billing schema, the
 operator must create a **new, next-free, ledger-versioned additive upgrade**.
 Do not assign that version until the live ledger has been read, and do not
-rename, edit, or rerun the provisional foundation. The upgrade must, in one
+rename, edit, or rerun the reviewed fresh foundation. The upgrade must, in one
 database transaction:
 
 1. add missing columns and replace **both** legacy review checks: the generated

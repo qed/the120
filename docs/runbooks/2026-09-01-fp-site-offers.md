@@ -1,8 +1,9 @@
 # First Profit hosted storefront offers: launch and verification
 
-Status: **not launched**. The schema file
-`supabase/migrations/20260928120000_fp_site_offers.sql` is deliberately marked
-PROVISIONAL / UNAPPLIED.
+Status: **not launched**. A read-only live check on 2026-09-04 confirmed
+`supabase/migrations/20260928120000_fp_site_offers.sql` as the second next-free
+slot. The existing `fp_public_sites` table had zero estimated rows. The schema
+file remains unapplied.
 
 This slice lets a current parent review one child's active business offer,
 paste a parent-owned Stripe Payment Link, and publish a controlled First
@@ -43,10 +44,11 @@ password, card details, API key, or webhook secret.
 1. Apply and verify the Round One billing migration first. The parent API reads
    `fp_billing_entitlements` to authorize checkout activation and intentionally
    fails activation closed if that table is unavailable.
-2. Query the linked production Supabase migration ledger. Confirm that the
-   filename version `20260928120000` is unused and that the existing public-site
-   migrations are present. If the version is occupied, rename this migration to
-   the next free version. Never edit `schema_migrations` by hand.
+2. Re-query the linked production Supabase migration ledger immediately before
+   application. The 2026-09-04 check confirmed `20260928120000` was unused and
+   the existing public-site migrations were present. If the version has since
+   become occupied, stop and reconcile all three release migrations together.
+   Never edit `schema_migrations` by hand.
 3. Review and apply `20260928120000_fp_site_offers.sql` through the normal
    migration process. It adds columns to `fp_public_sites` and replaces the
    `fp_public_site` RPC, then adds the separate fresh checkout RPC.

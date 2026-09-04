@@ -53,26 +53,27 @@ enrolment or username change also invalidates mixed criterion caches.
 
 ## Application and deployment order
 
-The combined Round One release contains three provisional, unapplied schema
-changes. Reconcile every filename against the live migration ledger first,
-then preserve this dependency order when assigning the true next-free versions
-and applying them:
+The combined Round One release contains three live-ledger-verified, unapplied
+schema changes. A read-only check on 2026-09-04 found the ledger ending at
+`20260926120000`, no Round One billing or cohort-scope tables, and the existing
+empty `fp_public_sites` table. The remote dry run selected only these three
+files in this dependency order:
 
 1. Round One billing (`*_fp_round_one_billing.sql`).
 2. Hosted site offers (`*_fp_site_offers.sql`).
-3. Watchtower cohort scope (`*_fp_watchtower_family_scope_PROVISIONAL.sql`).
+3. Watchtower cohort scope (`20260929120000_fp_watchtower_family_scope.sql`).
 
-The numeric versions shown in this branch (`20260927`, `20260928`, `20260929`)
-are placeholders until that one release-time reconciliation. Do not apply only
-the third file ahead of the first two, do not reorder them, and never write
-`schema_migrations` by hand.
+The versions shown in this branch (`20260927`, `20260928`, `20260929`) are the
+verified next slots as of 2026-09-04. Re-query immediately before application.
+Do not apply only the third file ahead of the first two, do not reorder them,
+and never write `schema_migrations` by hand.
 
 The release owner must execute the sequence as follows:
 
 1. Re-query `supabase_migrations.schema_migrations` immediately before release.
-2. Assign the three files the next three free `12:00:00` versions, preserving
-   billing -> site offers -> cohort scope. Re-query and confirm all three slots
-   are still free before the first apply.
+2. Confirm the three reviewed `12:00:00` versions remain free, preserving
+   billing -> site offers -> cohort scope. If any is occupied, stop and
+   reconcile the complete sequence before the first apply.
 3. Apply and verify the billing migration using
    `2026-09-01-fp-round-one-billing.md`.
 4. Apply and verify the site-offer migration using

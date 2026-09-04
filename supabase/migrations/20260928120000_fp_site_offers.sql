@@ -1,9 +1,11 @@
--- PROVISIONAL / UNAPPLIED: First Profit controlled storefront templates and
+-- LIVE LEDGER VERIFIED / NOT APPLIED: First Profit controlled storefront templates and
 -- one parent-approved Stripe Payment Link offer per learner page.
 --
--- The filename assumes 20260927 is the latest repo-visible slot. Re-check the
--- LIVE Supabase migration ledger and rename to the next free slot immediately
--- before applying. Never write schema_migrations by hand.
+-- On 2026-09-04 the linked production ledger confirmed this as the second
+-- next-free slot, immediately after Round One billing. `fp_public_sites`
+-- exists and had zero estimated rows; no offer migration was present. Re-check
+-- the live ledger immediately before applying. Never write schema_migrations
+-- by hand.
 --
 -- Security posture:
 -- * the public page RPC never returns checkout_url;

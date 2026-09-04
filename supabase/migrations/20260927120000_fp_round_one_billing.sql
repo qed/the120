@@ -1,12 +1,13 @@
--- PROVISIONAL / NOT APPLIED — First Profit Round One billing foundation.
+-- LIVE LEDGER VERIFIED / NOT APPLIED — First Profit Round One billing foundation.
 --
--- The repository checkout used to author this file has no live Supabase
--- credential, and this work must not deploy. Before merge or application,
--- query `supabase_migrations.schema_migrations` and the live relation/function
--- catalog. If no earlier Round One billing schema exists, rename this file to
--- the true next free version and apply it once. If any earlier form exists,
--- preserve its applied file and write a new additive upgrade migration instead;
--- this foundation file is not an in-place upgrade or blanket-idempotent script.
+-- On 2026-09-04 the linked production project's migration ledger ended at
+-- 20260926120000, and the live relation catalog contained no `fp_billing_*`
+-- tables. A remote dry run selected this file first, followed only by the site
+-- offers and Watchtower cohort migrations. This is therefore the reviewed
+-- fresh-foundation slot. Re-query the ledger immediately before application;
+-- if any earlier Round One form has appeared, preserve it and write a new
+-- additive upgrade migration instead. This foundation file is not an in-place
+-- upgrade or blanket-idempotent script.
 --
 -- This is deliberately NOT an extension of `deposits`. A Round One
 -- purchase buys one child's access to First Profit's Sell phase. It is a

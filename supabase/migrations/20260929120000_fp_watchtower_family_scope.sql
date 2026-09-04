@@ -1,14 +1,10 @@
--- PROVISIONAL — First Profit Watchtower analytics cohort scope.
+-- LIVE LEDGER VERIFIED / NOT APPLIED — First Profit Watchtower analytics cohort scope.
 --
--- This version has NOT been checked against the live migration ledger and this
--- file must NOT be applied under this name until the release owner runs:
---
---   select version, name from supabase_migrations.schema_migrations
---   order by version desc limit 5;
---
--- Rename to the true next-free 12:00:00 slot if 20260929120000 is occupied.
--- The application and parity tests find this migration by its descriptive
--- suffix, so renaming the version is safe.
+-- On 2026-09-04 the linked production ledger confirmed this as the third
+-- next-free slot, after Round One billing and hosted-site offers. The live
+-- relation catalog contained no `fp_watchtower_family_scope` table. Re-query
+-- the ledger immediately before application and preserve this dependency
+-- order. Never write schema_migrations by hand.
 --
 -- One row records an explicit staff decision about one First Profit parent
 -- family. Absence means included. A restored family keeps a `false` row so the

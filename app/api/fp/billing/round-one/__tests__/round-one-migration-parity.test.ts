@@ -583,14 +583,14 @@ describe.skipIf(!migrationResolution.ok)("Round One migration parity", () => {
     );
   });
 
-  it("is visibly provisional so it cannot be mistaken for an applied ledger version", () => {
+  it("records the live-ledger verification without claiming the migration is applied", () => {
     const foundationRaw = migrationResolution.ok
       ? migrationResolution.value.foundationRaw
       : "";
-    expect(foundationRaw).toContain("PROVISIONAL / NOT APPLIED");
-    expect(foundationRaw).toContain("query `supabase_migrations.schema_migrations`");
-    expect(foundationRaw).toContain("live relation/function");
-    expect(foundationRaw).toContain("new additive upgrade migration");
-    expect(foundationRaw).toContain("not an in-place upgrade or blanket-idempotent script");
+    expect(foundationRaw).toContain("LIVE LEDGER VERIFIED / NOT APPLIED");
+    expect(foundationRaw).toContain("Re-query the ledger immediately before application");
+    expect(foundationRaw).toContain("live relation catalog");
+    expect(foundationRaw).toContain("additive upgrade migration");
+    expect(foundationRaw).toContain("upgrade or blanket-idempotent script");
   });
 });

@@ -53,20 +53,21 @@ enrolment or username change also invalidates mixed criterion caches.
 
 ## Application and deployment order
 
-The combined Round One release contains three live-ledger-verified, unapplied
-schema changes. A read-only check on 2026-09-04 found the ledger ending at
+The combined Round One release contained three live-ledger-verified schema
+changes. A read-only check on 2026-09-04 found the ledger ending at
 `20260926120000`, no Round One billing or cohort-scope tables, and the existing
 empty `fp_public_sites` table. The remote dry run selected only these three
-files in this dependency order:
+files in this dependency order, and they were applied in that exact order on
+2026-09-04:
 
 1. Round One billing (`*_fp_round_one_billing.sql`).
 2. Hosted site offers (`*_fp_site_offers.sql`).
 3. Watchtower cohort scope (`20260929120000_fp_watchtower_family_scope.sql`).
 
-The versions shown in this branch (`20260927`, `20260928`, `20260929`) are the
-verified next slots as of 2026-09-04. Re-query immediately before application.
-Do not apply only the third file ahead of the first two, do not reorder them,
-and never write `schema_migrations` by hand.
+The versions shown in this branch (`20260927`, `20260928`, `20260929`) are now
+recorded in the live migration ledger. A post-apply dry run reported the remote
+database fully up to date. Never edit those applied migrations or write
+`schema_migrations` by hand.
 
 The release owner must execute the sequence as follows:
 
@@ -95,7 +96,8 @@ The release owner must execute the sequence as follows:
    fall by one family, and `scope=all` still shows the family.
 10. Restore the family. Verify totals and the revision change again.
 
-No migration, deployment or scope mutation is performed by this branch itself.
+The three schema migrations have been applied. No application deployment,
+feature activation, or analytics-scope mutation was performed with them.
 
 ## Rollback
 

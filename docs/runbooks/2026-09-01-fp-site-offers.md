@@ -1,9 +1,11 @@
 # First Profit hosted storefront offers: launch and verification
 
-Status: **not launched**. A read-only live check on 2026-09-04 confirmed
+Status: **schema applied; feature not launched**. A read-only live check on
+2026-09-04 confirmed
 `supabase/migrations/20260928120000_fp_site_offers.sql` as the second next-free
-slot. The existing `fp_public_sites` table had zero estimated rows. The schema
-file remains unapplied.
+slot. It was then applied in the required position after Round One billing and
+before Watchtower scope. The existing `fp_public_sites` table had zero estimated
+rows. Public storefront checkout remains disabled.
 
 This slice lets a current parent review one child's active business offer,
 paste a parent-owned Stripe Payment Link, and publish a controlled First

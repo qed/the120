@@ -1,10 +1,13 @@
 # First Profit Round One billing runbook
 
-Status: backend foundation, isolated Stripe Test mode catalog, test discounts,
-and a disabled Preview deployment are prepared. The production Supabase ledger
-and relation catalog were inspected read-only on 2026-09-04; the reviewed
-foundation is `20260927120000_fp_round_one_billing.sql`. No migration,
-Production change, feature activation, or live payment has been performed.
+Status: the reviewed foundation
+`20260927120000_fp_round_one_billing.sql` was applied to the linked production
+Supabase project on 2026-09-04, followed by the dependent site-offer and
+Watchtower migrations. A post-apply dry run reports the remote database fully
+up to date. The isolated Stripe Test catalog, discounts, and disabled Preview
+deployment are prepared. No feature activation or live payment has occurred.
+Both database rollout switches remain at the migration's explicit `false`
+seed values.
 
 ## Product contract
 

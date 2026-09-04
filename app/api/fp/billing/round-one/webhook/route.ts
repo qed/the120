@@ -132,7 +132,7 @@ async function finishDisputeCheckoutCleanup(
 }
 
 export async function POST(req: Request): Promise<Response> {
-  const stripeKey = process.env.STRIPE_SECRET_KEY?.trim();
+  const stripeKey = process.env.FP_ROUND_ONE_STRIPE_SECRET_KEY?.trim();
   const webhookSecret = process.env.FP_ROUND_ONE_STRIPE_WEBHOOK_SECRET?.trim();
   const expectedCadPriceId = process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_CAD?.trim();
   const expectedUsdPriceId = process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_USD?.trim();

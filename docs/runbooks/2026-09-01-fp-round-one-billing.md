@@ -1,8 +1,8 @@
 # First Profit Round One billing runbook
 
-Status: backend foundation plus an isolated Stripe Test mode catalog. No
-migration, environment change, preview deployment, production change, or live
-payment has been performed.
+Status: backend foundation, isolated Stripe Test mode catalog, test discounts,
+and a disabled Preview deployment are prepared. No migration, Production
+change, feature activation, or live payment has been performed.
 
 ## Product contract
 
@@ -39,9 +39,42 @@ branch contains only the two confirmed Sell variants.
 - CAD $350 one-time Price: `price_1UBygW25N9cbf3wULX116M5V`
 
 All three objects were retrieved after creation and reported `livemode=false`.
-No Build price, live-mode object, webhook destination, or Promotion Code was
-created. These identifiers are non-secret; credentials and webhook signing
-secrets must still be configured directly in the isolated Preview environment.
+No Build price or live-mode object was created. These identifiers are
+non-secret; credentials and webhook signing secrets must still be configured
+directly in the isolated Preview environment.
+
+### Isolated Preview and Stripe test wiring prepared 2026-09-04
+
+- Backend Preview: `https://the120-round-one-sell-preview.vercel.app`
+- First Profit client Preview:
+  `https://first-profit-round-one-sell-preview.vercel.app`
+- Both Vercel builds passed. `FP_ROUND_ONE_BILLING_ENABLED=false` and
+  `VITE_FP_ROUND_ONE=false` remain the intended release-branch state. The
+  client Preview answers successfully while the paid UI remains hidden.
+- Stripe Test webhook: `we_1UByyr25N9cbf3wUpVWEYKmI`, pointed at the backend
+  Preview's `/api/fp/billing/round-one/webhook` route, pinned to API version
+  `2026-07-29.dahlia`. Its signing secret was written directly to the
+  release-branch Preview configuration and was not printed or retained.
+- The webhook currently subscribes to the five events explicitly listed in the
+  original owner handoff: Checkout completed, asynchronous payment succeeded,
+  asynchronous payment failed, Checkout expired, and charge refunded. The two
+  dispute events required by the later immediate-suspension decision still need
+  to be added before the dispute matrix or any activation.
+- Product-scoped test Promotion Codes were created: `ROUND1QA20` (20% off) and
+  `ROUND1QA100` (100% off). Each is test-mode only, one-time, limited to 50
+  redemptions, and backed by a coupon restricted to
+  `prod_VCNRdrRPJs0yOi`.
+
+The Preview is deliberately **not ready to enable**. A no-signature probe to
+the deployed webhook returned `503 Webhook unavailable` rather than the
+expected configured-path `400 Missing signature`, so the complete runtime
+Stripe configuration is not yet present or verifiable. Vercel also has
+Deployment Protection on this Preview, which means Stripe cannot deliver to the
+current URL without a project-scoped automation bypass or a deliberately public
+test endpoint. Before enabling either application flag, configure a dedicated
+test-mode server credential for the same Stripe sandbox, resolve the Preview
+protection path, redeploy, and require the no-signature probe to return `400`.
+Production remains untouched.
 
 ## Required server environment
 
@@ -51,7 +84,7 @@ FP_ROUND_ONE_PRODUCT_VERSION=1
 FP_ROUND_ONE_STRIPE_PRICE_ID_CAD=price_...
 FP_ROUND_ONE_STRIPE_PRICE_ID_USD=price_...
 FP_ROUND_ONE_STRIPE_WEBHOOK_SECRET=whsec_...
-STRIPE_SECRET_KEY=sk_...
+FP_ROUND_ONE_STRIPE_SECRET_KEY=sk_... # dedicated Test key; never the deposit key
 RESEND_API_KEY=re_...
 ```
 
@@ -66,6 +99,14 @@ SUPABASE_SERVICE_ROLE_KEY=...
 `FP_PREVIEW_ORIGIN` is optional and retains its existing exact-origin preview
 meaning. Never put a Stripe, Supabase service-role, or Resend secret in a
 `NEXT_PUBLIC_` or `VITE_` variable.
+
+Round One deliberately does not read the shared `STRIPE_SECRET_KEY` used by
+The 120's existing deposit flow. Create a dedicated test-mode restricted key
+for the `Hatch Coding CDN · sandbox` account and configure only
+`FP_ROUND_ONE_STRIPE_SECRET_KEY` on the isolated backend Preview. It needs
+Checkout Session read/write, Price read, and Payment Intent read access for the
+implemented create/reuse/expire, catalog-proof, and refund/dispute paths. Do
+not replace the deposit key.
 
 The First Profit client has a separate public fail-off switch:
 

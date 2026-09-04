@@ -198,7 +198,7 @@ function request(): Request {
 
 describe("Round One webhook route", () => {
   beforeEach(() => {
-    process.env.STRIPE_SECRET_KEY = "sk_test_not_live";
+    process.env.FP_ROUND_ONE_STRIPE_SECRET_KEY = "sk_test_not_live";
     process.env.FP_ROUND_ONE_STRIPE_WEBHOOK_SECRET = "whsec_test";
     process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_CAD = "price_round_one_test";
     process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_USD = "price_round_one_usd_test";
@@ -256,6 +256,17 @@ describe("Round One webhook route", () => {
 
   it("requires both configured Sell price variants before accepting events", async () => {
     delete process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_USD;
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(503);
+    expect(refs.stripeConfigs).toEqual([]);
+    expect(refs.plans).toEqual([]);
+  });
+
+  it("never falls back to The 120's shared deposit Stripe credential", async () => {
+    delete process.env.FP_ROUND_ONE_STRIPE_SECRET_KEY;
+    process.env.STRIPE_SECRET_KEY = "sk_test_legacy_deposit";
     const { POST } = await import("../webhook/route");
     const res = await POST(request());
 

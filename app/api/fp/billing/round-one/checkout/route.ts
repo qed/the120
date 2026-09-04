@@ -41,7 +41,7 @@ export async function POST(req: Request): Promise<Response> {
       const productVersion = roundOneProductVersionFromEnv(
         process.env.FP_ROUND_ONE_PRODUCT_VERSION
       );
-      const stripeKey = process.env.STRIPE_SECRET_KEY?.trim();
+      const stripeKey = process.env.FP_ROUND_ONE_STRIPE_SECRET_KEY?.trim();
       const priceIds = {
         cad: process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_CAD?.trim(),
         usd: process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_USD?.trim(),

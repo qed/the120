@@ -85,6 +85,17 @@ describe("Round One migration manifest", () => {
     expect(runbook).toContain("FP_ROUND_ONE_STRIPE_PRICE_ID_CAD");
     expect(runbook).toContain("Do not create or attach");
   });
+
+  it("isolates Round One from the legacy deposit Stripe credential", () => {
+    for (const route of ["checkout/route.ts", "webhook/route.ts"]) {
+      const source = readFileSync(
+        path.resolve(process.cwd(), "app/api/fp/billing/round-one", route),
+        "utf8"
+      );
+      expect(source).toContain("process.env.FP_ROUND_ONE_STRIPE_SECRET_KEY");
+      expect(source).not.toContain("process.env.STRIPE_SECRET_KEY");
+    }
+  });
 });
 
 describe.skipIf(

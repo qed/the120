@@ -27,6 +27,8 @@ export interface RoundOneParentNotificationRow {
   kind: RoundOneParentNotificationKind;
   parentId: string;
   childId: string;
+  productKey: string;
+  productVersion: number;
   recipientEmail: string;
   parentFirstName: string | null;
   childFirstName: string | null;
@@ -41,6 +43,7 @@ export type RoundOneNotificationAttempt =
   | "raced_retry_later"
   | "claim_error"
   | "row_missing"
+  | "suppressed"
   | "parked";
 
 export interface RoundOneNotificationDrainSummary {
@@ -49,6 +52,7 @@ export interface RoundOneNotificationDrainSummary {
   alreadySent: number;
   failed: number;
   raced: number;
+  suppressed: number;
   errors: number;
 }
 
@@ -70,6 +74,11 @@ function mapRow(raw: Record<string, unknown>): RoundOneParentNotificationRow | n
     || typeof raw.dedupe_key !== "string"
     || typeof raw.parent_id !== "string"
     || typeof raw.child_id !== "string"
+    || typeof raw.product_key !== "string"
+    || !raw.product_key.trim()
+    || typeof raw.product_version !== "number"
+    || !Number.isSafeInteger(raw.product_version)
+    || raw.product_version < 1
     || typeof raw.recipient_email !== "string"
   ) {
     return null;
@@ -80,6 +89,8 @@ function mapRow(raw: Record<string, unknown>): RoundOneParentNotificationRow | n
     kind,
     parentId: raw.parent_id,
     childId: raw.child_id,
+    productKey: raw.product_key,
+    productVersion: raw.product_version,
     recipientEmail: raw.recipient_email,
     parentFirstName:
       typeof raw.parent_first_name === "string" ? raw.parent_first_name : null,
@@ -91,6 +102,81 @@ function mapRow(raw: Record<string, unknown>): RoundOneParentNotificationRow | n
         : 0,
     sentAt: typeof raw.sent_at === "string" ? raw.sent_at : null,
   };
+}
+
+async function offerReadyDeliveryIsAuthorized(
+  db: Db,
+  row: RoundOneParentNotificationRow,
+): Promise<"authorized" | "suppressed" | "error"> {
+  if (row.kind !== "offer_price_ready") return "authorized";
+
+  const { data: entitlement, error: entitlementError } = await db
+    .from("fp_billing_entitlements")
+    .select("child_id, status")
+    .eq("parent_id", row.parentId)
+    .eq("child_id", row.childId)
+    .eq("product_key", row.productKey)
+    .eq("product_version", row.productVersion)
+    .eq("status", "active")
+    .maybeSingle();
+  if (entitlementError) {
+    console.error(
+      `[fp/parent-notify] offer-ready entitlement check failed: ${entitlementError.message}`,
+    );
+    return "error";
+  }
+  if (!entitlement) return "suppressed";
+  if (
+    typeof entitlement !== "object"
+    || (entitlement as { child_id?: unknown }).child_id !== row.childId
+    || (entitlement as { status?: unknown }).status !== "active"
+  ) {
+    console.error("[fp/parent-notify] offer-ready entitlement result is malformed");
+    return "error";
+  }
+
+  const { data: hold, error: holdError } = await db
+    .from("fp_billing_orders")
+    .select("id")
+    .eq("child_id", row.childId)
+    .eq("product_key", row.productKey)
+    .eq("product_version", row.productVersion)
+    .not("dispute_suspended_at", "is", null)
+    .limit(1)
+    .maybeSingle();
+  if (holdError) {
+    console.error(
+      `[fp/parent-notify] offer-ready dispute check failed: ${holdError.message}`,
+    );
+    return "error";
+  }
+  return hold ? "suppressed" : "authorized";
+}
+
+async function suppressQueuedOfferReadyNotification(
+  db: Db,
+  row: RoundOneParentNotificationRow,
+): Promise<"suppressed" | "raced_retry_later" | "error"> {
+  const staleCutoff = new Date(
+    Date.now() - ROUND_ONE_NOTIFICATION_STALE_CLAIM_MS,
+  ).toISOString();
+  const { data, error } = await db
+    .from("fp_parent_notification_outbox")
+    .delete()
+    .eq("id", row.id)
+    .eq("kind", "offer_price_ready")
+    .is("sent_at", null)
+    .or(`claimed_at.is.null,claimed_at.lt.${staleCutoff}`)
+    .select("id");
+  if (error) {
+    console.error(
+      `[fp/parent-notify] stale offer-ready suppression failed: ${error.message}`,
+    );
+    return "error";
+  }
+  return Array.isArray(data) && data.some((candidate) => candidate?.id === row.id)
+    ? "suppressed"
+    : "raced_retry_later";
 }
 
 function render(row: RoundOneParentNotificationRow) {
@@ -116,6 +202,18 @@ export async function attemptRoundOneParentNotification(
 ): Promise<RoundOneNotificationAttempt> {
   if (row.sentAt) return "already_sent";
   if (row.attempts >= ROUND_ONE_NOTIFICATION_MAX_ATTEMPTS) return "parked";
+
+  // Offer-ready mail asks the parent to activate a customer checkout. A queued
+  // row can outlive the access that created it, so re-authorize immediately
+  // before claiming it. Database ambiguity is fail-closed. A definitively stale
+  // row is removed so it cannot starve newer mail; a future eligible save can
+  // enqueue the same semantic key again.
+  const offerReadyAuthorization = await offerReadyDeliveryIsAuthorized(db, row);
+  if (offerReadyAuthorization === "error") return "claim_error";
+  if (offerReadyAuthorization === "suppressed") {
+    const suppression = await suppressQueuedOfferReadyNotification(db, row);
+    return suppression === "error" ? "claim_error" : suppression;
+  }
 
   const stamp = new Date().toISOString();
   const staleCutoff = new Date(
@@ -199,7 +297,7 @@ async function readRowByKey(
   const { data, error } = await db
     .from("fp_parent_notification_outbox")
     .select(
-      "id, dedupe_key, kind, parent_id, child_id, recipient_email, parent_first_name, child_first_name, attempts, sent_at",
+      "id, dedupe_key, kind, parent_id, child_id, product_key, product_version, recipient_email, parent_first_name, child_first_name, attempts, sent_at",
     )
     .eq("dedupe_key", dedupeKey)
     .maybeSingle();
@@ -233,12 +331,13 @@ export async function drainRoundOneParentNotifications(
     alreadySent: 0,
     failed: 0,
     raced: 0,
+    suppressed: 0,
     errors: 0,
   };
   const { data, error } = await db
     .from("fp_parent_notification_outbox")
     .select(
-      "id, dedupe_key, kind, parent_id, child_id, recipient_email, parent_first_name, child_first_name, attempts, sent_at",
+      "id, dedupe_key, kind, parent_id, child_id, product_key, product_version, recipient_email, parent_first_name, child_first_name, attempts, sent_at",
     )
     .is("sent_at", null)
     .lt("attempts", ROUND_ONE_NOTIFICATION_MAX_ATTEMPTS)
@@ -265,6 +364,7 @@ export async function drainRoundOneParentNotifications(
     else if (outcome === "already_sent") summary.alreadySent += 1;
     else if (outcome === "send_failed" || outcome === "parked") summary.failed += 1;
     else if (outcome === "raced_retry_later") summary.raced += 1;
+    else if (outcome === "suppressed") summary.suppressed += 1;
     else summary.errors += 1;
     if (index < pending.length - 1) {
       const paceMs = options.paceMs ?? ROUND_ONE_NOTIFICATION_SEND_INTERVAL_MS;

@@ -12,14 +12,14 @@ const migrationResolution = safelyResolveMigrationContract(
   WATCHTOWER_SCOPE_MIGRATION_SPEC
 );
 const sql = migrationResolution.ok
-  ? migrationResolution.value.raw
+  ? migrationResolution.value.allRaw
       .replace(/--.*$/gm, "")
       .replace(/\s+/g, " ")
       .toLowerCase()
   : "";
 const touchFunctionSql = migrationResolution.ok
   ? lastCreateOrReplaceFunction(
-      migrationResolution.value.raw,
+      migrationResolution.value.deploymentRaw,
       "public.fp_watchtower_family_scope_touch"
     ).toLowerCase()
   : "";

@@ -20,10 +20,15 @@ const migrationResolution = safelyResolveMigrationContract(
   migrationsDir,
   ROUND_ONE_BILLING_MIGRATION_SPEC
 );
-const raw = migrationResolution.ok ? migrationResolution.value.raw : "";
-const sql = raw.replace(/--[^\n]*/g, "").toLowerCase();
+const allMigrationRaw = migrationResolution.ok ? migrationResolution.value.allRaw : "";
+const deploymentRaw = migrationResolution.ok
+  ? migrationResolution.value.deploymentRaw
+  : "";
+const upgradeRaw = migrationResolution.ok ? migrationResolution.value.upgradeRaw : "";
+const sql = allMigrationRaw.replace(/--[^\n]*/g, "").toLowerCase();
+const upgradeSql = upgradeRaw.replace(/--[^\n]*/g, "").toLowerCase();
 const effectiveFunction = (name: string): string => migrationResolution.ok
-  ? lastCreateOrReplaceFunction(raw, `public.${name}`)
+  ? lastCreateOrReplaceFunction(deploymentRaw, `public.${name}`)
       .replace(/--[^\n]*/g, "")
       .toLowerCase()
   : "";
@@ -45,6 +50,100 @@ describe("Round One migration manifest", () => {
       migrationResolution.value.foundation,
       ...migrationResolution.value.upgrades,
     ]);
+    expect(migrationResolution.value.deploymentFiles).toEqual(
+      ROUND_ONE_BILLING_MIGRATION_SPEC.deploymentMode === "fresh-foundation"
+        ? migrationResolution.value.orderedFiles
+        : migrationResolution.value.upgrades
+    );
+  });
+
+  it("requires both 036 review constraints and a disposable old-schema upgrade proof", () => {
+    const runbook = readFileSync(
+      path.resolve(process.cwd(), "docs/runbooks/2026-09-01-fp-round-one-billing.md"),
+      "utf8"
+    );
+    expect(runbook).toContain("fp_billing_review_items_review_state_check");
+    expect(runbook).toMatch(
+      /drop constraint fp_billing_review_items_resolution_shape[\s\S]*?add constraint fp_billing_review_items_resolution_shape/
+    );
+    expect(runbook).toContain("review_state = 'superseded'");
+    expect(runbook).toContain("036332a6b0abf11cbf7739e55863a2dfe8c7ea9f");
+    expect(runbook).toContain("has no executable Postgres migration harness");
+    expect(runbook).toMatch(/source-text parity is not a\s+substitute/);
+    expect(runbook).toMatch(/must begin with an old fully refunded\s+order/);
+  });
+
+  it("keeps Price creation and migration behind the pending commercial decision", () => {
+    const runbook = readFileSync(
+      path.resolve(process.cwd(), "docs/runbooks/2026-09-01-fp-round-one-billing.md"),
+      "utf8"
+    );
+    expect(runbook).toMatch(
+      /Peter's\s+proposed USD \$250 \/ CAD \$350 Sell choice/
+    );
+    expect(runbook).toContain("USD $1,000 / CAD $1,400 later");
+    expect(runbook).toMatch(
+      /Do not create any Stripe Price[\s\S]*?apply any Round\s+One billing migration[\s\S]*?explicitly confirmed/
+    );
+    expect(runbook).toContain(
+      "Do not execute this Price step while the commercial decision is pending."
+    );
+  });
+});
+
+describe.skipIf(
+  !migrationResolution.ok || migrationResolution.value.upgrades.length === 0
+)("Round One existing-install additive upgrade", () => {
+  it("carries its critical DDL and legacy backfill without borrowing foundation text", () => {
+    expect(upgradeSql).toMatch(
+      /alter table public\.fp_billing_orders[\s\S]*?add column if not exists dispute_suspended_at timestamptz/
+    );
+    expect(upgradeSql).toMatch(
+      /alter table public\.fp_billing_webhook_events[\s\S]*?add column if not exists checkout_cleanup_completed_at timestamptz/
+    );
+    expect(upgradeSql).toMatch(
+      /drop constraint fp_billing_review_items_review_state_check[\s\S]*?add constraint fp_billing_review_items_review_state_check[\s\S]*?review_state[\s\S]*?'superseded'/
+    );
+    expect(upgradeSql).toMatch(
+      /drop constraint fp_billing_review_items_resolution_shape[\s\S]*?add constraint fp_billing_review_items_resolution_shape[\s\S]*?review_state = 'superseded'[\s\S]*?resolved_at is not null[\s\S]*?resolved_by is null[\s\S]*?resolution_note is null/
+    );
+
+    const historicalHoldBackfill = upgradeSql.match(
+      /with historical_holds as \(([\s\S]*?)\)\s*update public\.fp_billing_orders/
+    )?.[1] ?? "";
+    expect(historicalHoldBackfill).toContain("review_kind = 'stripe_dispute'");
+    expect(historicalHoldBackfill).not.toContain("review_state");
+    expect(upgradeSql).toMatch(
+      /with held_products as \([\s\S]*?dispute_suspended_at is not null[\s\S]*?update public\.fp_billing_entitlements[\s\S]*?set status = 'suspended'[\s\S]*?e\.status = 'active'/
+    );
+  });
+
+  it("ships every final state-machine function and its service-role grants", () => {
+    for (const name of [
+      "fp_billing_begin_order",
+      "fp_billing_attach_checkout",
+      "fp_billing_fill_parent_phone",
+      "fp_billing_apply_stripe_event",
+      "fp_billing_set_round_one_access",
+      "fp_round_one_completion_guard",
+      "fp_round_one_offer_ready_notification",
+    ]) {
+      expect(() => lastCreateOrReplaceFunction(upgradeRaw, `public.${name}`)).not.toThrow();
+    }
+    for (const name of [
+      "fp_billing_begin_order",
+      "fp_billing_attach_checkout",
+      "fp_billing_fill_parent_phone",
+      "fp_billing_apply_stripe_event",
+      "fp_billing_set_round_one_access",
+    ]) {
+      expect(upgradeSql).toMatch(
+        new RegExp(`grant execute on function public\\.${name}\\([\\s\\S]*?to service_role`)
+      );
+    }
+    expect(upgradeSql).toMatch(
+      /drop function(?: if exists)? public\.fp_billing_apply_stripe_event\(\s*text,\s*text,\s*text,\s*uuid,\s*text,\s*text,\s*uuid,\s*uuid,\s*text,\s*integer,\s*integer,\s*text\s*\)/
+    );
   });
 });
 
@@ -197,6 +296,38 @@ describe.skipIf(!migrationResolution.ok)("Round One migration parity", () => {
     );
   });
 
+  it("suspends B-backed access for paid A, duplicate-paid B, refund A, then dispute A", () => {
+    const disputeBranch = applyEventSql.match(
+      /elsif p_effect in \('dispute_opened', 'dispute_closed'\) then([\s\S]*?)elsif p_effect = 'refunded' then/
+    )?.[1] ?? "";
+    const suspension = disputeBranch.indexOf(
+      "update public.fp_billing_entitlements entitlement"
+    );
+    const refundedOrderOutcome = disputeBranch.indexOf(
+      "if v_order.status = 'refunded' or v_order.refunded_at is not null"
+    );
+
+    // Refund A can re-anchor the active entitlement to paid sibling B. The
+    // later dispute on refunded A must therefore suspend by product scope before
+    // choosing refund_stands; it must not update only non-refunded orders.
+    expect(applyEventSql).toMatch(
+      /elsif p_effect = 'refunded' then[\s\S]*?source_order_id = v_replacement_order_id/
+    );
+    expect(suspension).toBeGreaterThanOrEqual(0);
+    expect(refundedOrderOutcome).toBeGreaterThan(suspension);
+    expect(disputeBranch).toMatch(
+      /where entitlement\.child_id = v_order\.child_id[\s\S]*?entitlement\.product_key = v_order\.product_key[\s\S]*?entitlement\.product_version = v_order\.product_version[\s\S]*?entitlement\.status in \('active', 'suspended'\)/
+    );
+
+    // Both database-side consumers independently reject a held product even if
+    // legacy or corrupted state were still to expose an active entitlement.
+    for (const consumer of [completionGuardSql, offerReadyNotificationSql]) {
+      expect(consumer).toMatch(
+        /not exists \([\s\S]*?from public\.fp_billing_orders held[\s\S]*?held\.child_id[\s\S]*?held\.product_key[\s\S]*?held\.product_version[\s\S]*?held\.dispute_suspended_at is not null/
+      );
+    }
+  });
+
   it("serializes begin and attach with the webhook lock and blocks a second payable URL", () => {
     const lockKey =
       "concat_ws(':', p_child_id::text, p_product_key, p_product_version::text)";
@@ -287,7 +418,7 @@ describe.skipIf(!migrationResolution.ok)("Round One migration parity", () => {
 
   it("persists a replay-safe dispute cleanup completion stamp", () => {
     expect(sql).toContain("checkout_cleanup_completed_at timestamptz");
-    expect(raw).toContain("original ledger provenance");
+    expect(allMigrationRaw).toContain("original ledger provenance");
   });
 
   it("does not let the emergency access seam clear a dispute suspension", () => {
@@ -427,10 +558,13 @@ describe.skipIf(!migrationResolution.ok)("Round One migration parity", () => {
   });
 
   it("is visibly provisional so it cannot be mistaken for an applied ledger version", () => {
-    expect(raw).toContain("PROVISIONAL / NOT APPLIED");
-    expect(raw).toContain("query `supabase_migrations.schema_migrations`");
-    expect(raw).toContain("live relation/function");
-    expect(raw).toContain("new additive upgrade migration");
-    expect(raw).toContain("not an in-place upgrade or blanket-idempotent script");
+    const foundationRaw = migrationResolution.ok
+      ? migrationResolution.value.foundationRaw
+      : "";
+    expect(foundationRaw).toContain("PROVISIONAL / NOT APPLIED");
+    expect(foundationRaw).toContain("query `supabase_migrations.schema_migrations`");
+    expect(foundationRaw).toContain("live relation/function");
+    expect(foundationRaw).toContain("new additive upgrade migration");
+    expect(foundationRaw).toContain("not an in-place upgrade or blanket-idempotent script");
   });
 });

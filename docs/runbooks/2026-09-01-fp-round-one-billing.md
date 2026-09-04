@@ -8,9 +8,11 @@ change, deployment, or live payment was performed while authoring this work.
 - Product key/version: `round_one_sell` / `1`
 - Customer-facing product: First Profit Round 1: Sell
 - Subject: one child, owned by the authenticated parent
-- Price: CAD $250 (`25000` cents)
-- Commercial terms: one child; non-refundable CAD $250 total in the current
-  test-mode contract. Do not claim an education exemption until documented.
+- Implemented branch price: one CAD $250 (`25000` cents) Price. This describes
+  the current code and is not approval to create that Price.
+- Implemented branch terms: one child; non-refundable CAD $250 total in the
+  current test-mode contract. Do not claim an education exemption until
+  documented.
 - Free through: task `1.1.1`
 - Opens: tasks `1.1.2` through `1.5.5`
 - Access code: `phase:sell`
@@ -20,6 +22,17 @@ change, deployment, or live payment was performed while authoring this work.
 
 This is not The 120 seat deposit. It has no seat, admissions, refund-window,
 or provisioning semantics. Do not point it at the legacy deposit Price.
+
+### Commercial decision gate — stop here
+
+The current branch supports only the single CAD $250 Sell price above. Peter's
+proposed USD $250 / CAD $350 Sell choice and USD $1,000 / CAD $1,400 later
+Build boundary both await explicit confirmation. They are not approved catalog
+configuration yet. Do not create any Stripe Price or rename or apply any Round
+One billing migration until both the currency choice and the Sell/Build boundary
+are explicitly confirmed and the implementation, tests, and this runbook agree.
+All setup steps below are a post-confirmation checklist; current CAD $250
+references document branch behavior only.
 
 ## Required server environment
 
@@ -56,16 +69,22 @@ locks paid tasks closed; it never grants fallback access.
 
 ## Stripe test-mode setup
 
-1. Under the repository migration lock, query both the live Supabase migration
+1. After the commercial decision gate above is explicitly cleared, under the
+   repository migration lock, query both the live Supabase migration
    ledger and catalog before touching the provisional file. Check
    `supabase_migrations.schema_migrations`, `to_regclass` for every
    `fp_billing_*` relation, and `to_regprocedure` for both the former 12-argument
    and current 16-argument `fp_billing_apply_stripe_event` signatures.
    - If no Round One billing migration, relation, or function exists, rename the
-     provisional foundation to the actual next free version and apply it once.
+     provisional foundation to the actual next free version, keep
+     `ROUND_ONE_BILLING_MIGRATION_SPEC.deploymentMode` at `fresh-foundation`,
+     and apply it once.
    - If any earlier form exists, do not rename, edit, or replay an applied
      migration. Preserve that ledger entry and author a new additive upgrade
-     migration with explicit `alter table`/constraint changes. Drop the obsolete
+     named `<next-version>_fp_round_one_billing_upgrade_<purpose>.sql` with
+     explicit `alter table`/constraint changes. Set the checked-in migration
+     contract mode to `existing-install-upgrade`; its tests inspect the upgrade
+     corpus without borrowing the provisional foundation. Drop the obsolete
      12-argument RPC overload only in that upgrade, after its replacement is
      created and grants are verified.
 2. Apply only the ledger-safe migration selected above before deploying code
@@ -80,8 +99,13 @@ Do not assign that version until the live ledger has been read, and do not
 rename, edit, or rerun the provisional foundation. The upgrade must, in one
 database transaction:
 
-1. add missing columns and constraints, including
-   `fp_billing_orders.dispute_suspended_at`, the `superseded` review state, and
+1. add missing columns and replace **both** legacy review checks: the generated
+   value-membership check on `review_state` and the named
+   `fp_billing_review_items_resolution_shape` check. The first must admit
+   `superseded`; the second must admit it only with non-null `resolved_at` and
+   null `resolved_by`/`resolution_note`. Replacing only the value check is
+   insufficient: full-refund supersession will still roll back. Also add
+   `fp_billing_orders.dispute_suspended_at` and
    `fp_billing_webhook_events.checkout_cleanup_completed_at`;
 2. install the final function bodies from the reviewed foundation, preserving
    grants, and only then drop the obsolete 12-argument
@@ -105,7 +129,25 @@ alter table public.fp_billing_orders
 alter table public.fp_billing_webhook_events
   add column if not exists checkout_cleanup_completed_at timestamptz;
 
--- Replace the review-state constraint only after inspecting its live name.
+-- Read both live names/definitions from pg_constraint first. The generated
+-- membership name below is the 036 name, not permission to assume live state.
+alter table public.fp_billing_review_items
+  drop constraint fp_billing_review_items_review_state_check,
+  add constraint fp_billing_review_items_review_state_check
+    check (review_state in ('open', 'resolved', 'superseded'));
+
+alter table public.fp_billing_review_items
+  drop constraint fp_billing_review_items_resolution_shape,
+  add constraint fp_billing_review_items_resolution_shape check (
+    (review_state = 'open' and resolved_at is null and resolved_by is null
+      and resolution_note is null)
+    or (review_state = 'resolved' and resolved_at is not null
+      and resolved_by is not null
+      and char_length(trim(coalesce(resolution_note, ''))) between 3 and 1000)
+    or (review_state = 'superseded' and resolved_at is not null
+      and resolved_by is null and resolution_note is null)
+  );
+
 -- Install the final reviewed RPC/function bodies and grants here.
 -- Drop the old 12-argument RPC overload only after the replacement exists.
 
@@ -168,7 +210,7 @@ where r.review_kind = 'stripe_dispute'
   and o.dispute_suspended_at is null;
 
 -- No held child/product/version still has active access.
-select e.id
+select e.child_id, e.product_key, e.product_version
 from public.fp_billing_entitlements e
 where e.status = 'active'
   and exists (
@@ -190,11 +232,49 @@ where pending.status = 'pending'
       and held.product_version = pending.product_version
       and held.dispute_suspended_at is not null
   );
+
+-- Zero rows means both legacy checks have superseded-aware final definitions.
+with review_checks as (
+  select c.conname, pg_get_constraintdef(c.oid) as definition
+  from pg_constraint c
+  join pg_class t on t.oid = c.conrelid
+  join pg_namespace n on n.oid = t.relnamespace
+  where n.nspname = 'public'
+    and t.relname = 'fp_billing_review_items'
+    and c.contype = 'c'
+)
+select 'review_state membership check is stale or missing' as violation
+where not exists (
+  select 1 from review_checks
+  where conname <> 'fp_billing_review_items_resolution_shape'
+    and definition ilike '%review_state%'
+    and definition ilike '%superseded%'
+)
+union all
+select 'resolution-shape check is stale or missing'
+where not exists (
+  select 1 from review_checks
+  where conname = 'fp_billing_review_items_resolution_shape'
+    and definition ilike '%review_state%'
+    and definition ilike '%superseded%'
+    and definition ilike '%resolved_at%'
+    and definition ilike '%resolved_by%'
+    and definition ilike '%resolution_note%'
+);
 ```
 
-Upgrade regression fixture: begin with an old fully refunded order, a resolved
-`stripe_dispute` review whose order has no hold marker, an incorrectly active
-entitlement for that child/product/version, and a pending replacement Session.
+Before cutover, export the exact legacy schema from commit
+`036332a6b0abf11cbf7739e55863a2dfe8c7ea9f` into a disposable Postgres/Supabase
+database, then execute the candidate upgrade there. This repository currently
+has no executable Postgres migration harness, so source-text parity is not a
+substitute for this required cutover test. Insert an open partial-refund review,
+drive the full-refund transition, and prove the transaction commits with a
+valid `superseded` row under both final checks.
+
+The same upgrade regression fixture must begin with an old fully refunded
+order, a resolved `stripe_dispute` review whose order has no hold marker, an
+incorrectly active entitlement for that child/product/version, and a pending
+replacement Session.
 After the database backfill and Stripe reconciliation, prove: the order is
 stamped; the entitlement is suspended; the Session is terminal; checkout begin
 returns `access_suspended`; attach refuses; a replayed paid event returns
@@ -202,10 +282,11 @@ returns `access_suspended`; attach refuses; a replayed paid event returns
 completion is rejected; and an offer-ready save/notification cannot be
 committed. Repeat with two orders and a resolved review on the older order to
 prove the hold is product-wide rather than order- or queue-state-scoped.
-3. In Stripe test mode, create a one-time CAD $250 Price for a distinct First
-   Profit Round 1: Sell product. Set its id in
-   `FP_ROUND_ONE_STRIPE_PRICE_ID`. Re-open the Price in Stripe and independently
-   verify that it is one-time, CAD, and exactly $250 before enabling checkout.
+3. Do not execute this Price step while the commercial decision is pending.
+   After explicit confirmation and any required implementation update, create
+   only the approved one-time Sell Price or Prices for a distinct First Profit
+   Round 1: Sell product. Configure the approved Price identifier or identifiers,
+   then independently verify each currency and amount before enabling checkout.
 4. Add a webhook destination at
    `/api/fp/billing/round-one/webhook` and subscribe only to:
    - `checkout.session.completed`
@@ -520,7 +601,11 @@ Price Picker value, the save transaction idempotently inserts a second
 `offer_price_ready` row. Repeated autosaves cannot duplicate it. That email
 links Stripe Payment Links and the same child-specific checklist, where the
 offer/price are prefilled but still require parent review, pasted-link
-validation, and approval of the Buy, Order, or Book button.
+validation, and approval of the Buy, Order, or Book button. Immediately before
+sending, the worker rechecks that the exact child/product entitlement is active
+and that no product-wide dispute hold exists. A queued row made stale by refund
+or dispute is removed without sending so it cannot starve newer valid mail; a
+database read failure sends nothing and remains retryable.
 
 ## Test matrix before live mode
 

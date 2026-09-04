@@ -18,15 +18,24 @@ type Reply = { data: unknown; error: { message: string } | null };
 
 function fakeDb(replies: Reply[]) {
   const updates: Record<string, unknown>[] = [];
+  const deletes: string[] = [];
   const filters: Array<[string, unknown]> = [];
+  const selects: string[] = [];
   const next = () => replies.shift() ?? { data: null, error: null };
   const db = {
     from: () => {
       const builder: Record<string, unknown> = {};
       const chain = () => builder;
-      builder.select = chain;
+      builder.select = (value: string) => {
+        selects.push(value);
+        return builder;
+      };
       builder.update = (value: Record<string, unknown>) => {
         updates.push(value);
+        return builder;
+      };
+      builder.delete = () => {
+        deletes.push("delete");
         return builder;
       };
       builder.eq = (key: string, value: unknown) => {
@@ -34,6 +43,7 @@ function fakeDb(replies: Reply[]) {
         return builder;
       };
       builder.is = chain;
+      builder.not = chain;
       builder.or = chain;
       builder.lt = chain;
       builder.order = chain;
@@ -46,7 +56,7 @@ function fakeDb(replies: Reply[]) {
       return builder;
     },
   };
-  return { db: db as never, updates, filters };
+  return { db: db as never, updates, deletes, filters, selects };
 }
 
 const SETUP_ROW: RoundOneParentNotificationRow = {
@@ -55,6 +65,8 @@ const SETUP_ROW: RoundOneParentNotificationRow = {
   kind: "round_one_stripe_setup",
   parentId: "parent-1",
   childId: "child-1",
+  productKey: "round_one_sell",
+  productVersion: 1,
   recipientEmail: "parent@example.com",
   parentFirstName: "Pat",
   childFirstName: "Kai",
@@ -169,14 +181,18 @@ describe("Round One parent notification outbox", () => {
       kind: "offer_price_ready",
       parent_id: "parent-1",
       child_id: "child-1",
+      product_key: "round_one_sell",
+      product_version: 1,
       recipient_email: "parent@example.com",
       parent_first_name: "Pat",
       child_first_name: "Kai",
       attempts: 0,
       sent_at: null,
     };
-    const { db } = fakeDb([
+    const { db, selects } = fakeDb([
       { data: [raw], error: null },
+      { data: { child_id: "child-1", status: "active" }, error: null },
+      { data: null, error: null },
       { data: [{ id: "notify-2" }], error: null },
       { data: [{ id: "notify-2" }], error: null },
     ]);
@@ -188,6 +204,7 @@ describe("Round One parent notification outbox", () => {
       alreadySent: 0,
       failed: 0,
       raced: 0,
+      suppressed: 0,
       errors: 0,
     });
     expect(sendEmailMock).toHaveBeenCalledWith(
@@ -196,5 +213,74 @@ describe("Round One parent notification outbox", () => {
         idempotencyKey: raw.dedupe_key,
       }),
     );
+    expect(selects).toContain("child_id, status");
+  });
+
+  it.each([
+    {
+      name: "a later full refund revoked access",
+      authorizationReplies: [{ data: null, error: null }],
+    },
+    {
+      name: "a later dispute installed a product hold",
+      authorizationReplies: [
+        { data: { child_id: "child-1", status: "active" }, error: null },
+        { data: { id: "held-order-1" }, error: null },
+      ],
+    },
+  ])("suppresses queued offer-ready mail when $name", async ({ authorizationReplies }) => {
+    const raw = {
+      id: "notify-2",
+      dedupe_key: "fp-offer-price-ready:child-1:v1:parent:parent-1",
+      kind: "offer_price_ready",
+      parent_id: "parent-1",
+      child_id: "child-1",
+      product_key: "round_one_sell",
+      product_version: 1,
+      recipient_email: "parent@example.com",
+      parent_first_name: "Pat",
+      child_first_name: "Kai",
+      attempts: 0,
+      sent_at: null,
+    };
+    const { db, updates, deletes } = fakeDb([
+      { data: [raw], error: null },
+      ...authorizationReplies,
+      { data: [{ id: "notify-2" }], error: null },
+    ]);
+
+    await expect(
+      drainRoundOneParentNotifications(db, { limit: 20, paceMs: 0 }),
+    ).resolves.toEqual({
+      considered: 1,
+      sent: 0,
+      alreadySent: 0,
+      failed: 0,
+      raced: 0,
+      suppressed: 1,
+      errors: 0,
+    });
+    expect(updates).toEqual([]);
+    expect(deletes).toEqual(["delete"]);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when queued offer-ready authorization cannot be read", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const row: RoundOneParentNotificationRow = {
+      ...SETUP_ROW,
+      id: "notify-2",
+      dedupeKey: "fp-offer-price-ready:child-1:v1:parent:parent-1",
+      kind: "offer_price_ready",
+    };
+    const { db, updates } = fakeDb([
+      { data: null, error: { message: "database unavailable" } },
+    ]);
+
+    await expect(attemptRoundOneParentNotification(db, row)).resolves.toBe(
+      "claim_error",
+    );
+    expect(updates).toEqual([]);
+    expect(sendEmailMock).not.toHaveBeenCalled();
   });
 });

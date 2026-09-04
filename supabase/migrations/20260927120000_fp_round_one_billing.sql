@@ -530,6 +530,14 @@ begin
      and e.access_code = 'phase:sell'
      and e.status = 'active'
     where profile.id = NEW.profile_id
+      and not exists (
+        select 1
+        from public.fp_billing_orders held
+        where held.child_id = c.id
+          and held.product_key = e.product_key
+          and held.product_version = e.product_version
+          and held.dispute_suspended_at is not null
+      )
       and nullif(btrim(coalesce(parent.email, '')), '') is not null
       and position(chr(10) in parent.email) = 0
       and position(chr(13) in parent.email) = 0
@@ -579,6 +587,14 @@ begin
       and e.product_key = 'round_one_sell'
       and e.access_code = 'phase:sell'
       and e.status = 'active'
+      and not exists (
+        select 1
+        from public.fp_billing_orders held
+        where held.child_id = e.child_id
+          and held.product_key = e.product_key
+          and held.product_version = e.product_version
+          and held.dispute_suspended_at is not null
+      )
     for share of e;
     if not found then
       raise exception 'Round One access is required to complete this task'
@@ -1150,22 +1166,26 @@ begin
     where id = v_order.id;
     v_order.dispute_suspended_at := coalesce(v_order.dispute_suspended_at, now());
 
+    -- The hold is child/product-wide, not order-status-scoped. In particular,
+    -- a fully refunded order can have another paid sibling that currently backs
+    -- active access. Suspend that replacement entitlement without reviving a
+    -- revoked entitlement or creating one when none exists.
+    update public.fp_billing_entitlements entitlement
+    set status = 'suspended',
+        suspended_at = coalesce(entitlement.suspended_at, now()),
+        suspension_reason = 'stripe_dispute',
+        revoked_at = null,
+        updated_at = now()
+    where entitlement.child_id = v_order.child_id
+      and entitlement.product_key = v_order.product_key
+      and entitlement.product_version = v_order.product_version
+      and entitlement.status in ('active', 'suspended');
+
     if v_order.status = 'refunded' or v_order.refunded_at is not null then
       -- A later dispute delivery cannot weaken full-refund finality. It is
       -- still recorded in both audit/review ledgers below for staff visibility.
       v_outcome := 'refund_stands';
     else
-      update public.fp_billing_entitlements entitlement
-      set status = 'suspended',
-          suspended_at = coalesce(entitlement.suspended_at, now()),
-          suspension_reason = 'stripe_dispute',
-          revoked_at = null,
-          updated_at = now()
-      where entitlement.child_id = v_order.child_id
-        and entitlement.product_key = v_order.product_key
-        and entitlement.product_version = v_order.product_version
-        and entitlement.status in ('active', 'suspended');
-
       v_outcome := case
         when p_effect = 'dispute_closed' then 'dispute_closed_review'
         else 'dispute_suspended'

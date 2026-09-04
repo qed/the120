@@ -118,7 +118,7 @@ describe("R28 erasure coverage — the ledger matches the real schema", () => {
       ROUND_ONE_BILLING_MIGRATION_SPEC
     );
     if (!resolution.ok) throw resolution.error;
-    const migration = resolution.value.raw;
+    const migration = resolution.value.allRaw;
     const webhookTable = migration.match(
       /create table if not exists public\.fp_billing_webhook_events\s*\(([\s\S]*?)\);/i
     )?.[1];

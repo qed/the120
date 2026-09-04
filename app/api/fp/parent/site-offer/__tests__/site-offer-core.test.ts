@@ -370,7 +370,11 @@ describe("site offer core", () => {
   });
 
   it("still saves a private draft while readiness verification is unavailable", async () => {
-    const written = { ...siteRow(PARENT_ID), checkout_enabled: false };
+    const written = {
+      ...siteRow(null),
+      checkout_enabled: false,
+      offer_edited_by: PARENT_ID,
+    };
     const { deps, captured } = makeDeps({
       entitlementError: "schema cache not ready",
       written: [written],
@@ -378,13 +382,35 @@ describe("site offer core", () => {
     const result = await saveSiteOfferForParent(deps, PARENT_ID, {
       ...INPUT,
       enabled: false,
-      parentApproved: true,
+      parentApproved: false,
     });
     expect(result).toMatchObject({
       ok: true,
-      offer: { enabled: false, checkoutReadiness: "unavailable" },
+      offer: {
+        enabled: false,
+        approved: false,
+        checkoutReadiness: "unavailable",
+      },
     });
     expect(captured.update).toMatchObject({ checkout_enabled: false });
+  });
+
+  it("blocks an approval stamp while server-owned checkout readiness is unavailable", async () => {
+    const { deps, captured } = makeDeps({
+      product: { storefront_checkout_enabled: false },
+    });
+    await expect(
+      saveSiteOfferForParent(deps, PARENT_ID, {
+        ...INPUT,
+        enabled: false,
+        parentApproved: true,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "checkout-not-ready",
+      checkoutReadiness: "unavailable",
+    });
+    expect(captured.update).toBeUndefined();
   });
 
   it("lets the current parent disable and unapprove checkout after access is revoked", async () => {

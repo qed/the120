@@ -325,7 +325,12 @@ export async function saveSiteOfferForParent(
   const owned = await ownedProfileId(deps, parentId, input.childId);
   if (!owned.ok) return owned;
   const checkout = await readCheckoutContext(deps, input.childId, owned.profileId);
-  if (input.enabled && checkout.readiness !== "ready") {
+  // Approval is an exact public-ready snapshot, not merely a checkbox stored
+  // for later. A stale/direct client may still save an unapproved draft while
+  // entitlement, Price Picker, or the catalog switch is unavailable, but it
+  // cannot stamp approval (even with checkout disabled) until the same
+  // server-owned readiness gate used for activation is open.
+  if ((input.parentApproved || input.enabled) && checkout.readiness !== "ready") {
     return {
       ok: false,
       reason: "checkout-not-ready",

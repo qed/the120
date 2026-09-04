@@ -137,7 +137,15 @@ export async function POST(req: Request): Promise<Response> {
   const expectedCadPriceId = process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_CAD?.trim();
   const expectedUsdPriceId = process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_USD?.trim();
   if (!stripeKey || !webhookSecret || !expectedCadPriceId || !expectedUsdPriceId) {
-    console.error("[fp/billing/round-one/webhook] configuration is incomplete");
+    const missing = [
+      !stripeKey && "FP_ROUND_ONE_STRIPE_SECRET_KEY",
+      !webhookSecret && "FP_ROUND_ONE_STRIPE_WEBHOOK_SECRET",
+      !expectedCadPriceId && "FP_ROUND_ONE_STRIPE_PRICE_ID_CAD",
+      !expectedUsdPriceId && "FP_ROUND_ONE_STRIPE_PRICE_ID_USD",
+    ].filter(Boolean).join(", ");
+    console.error(
+      `[fp/billing/round-one/webhook] configuration is incomplete; missing: ${missing}`
+    );
     return Response.json({ error: "Webhook unavailable" }, { status: 503 });
   }
   const signature = req.headers.get("stripe-signature");

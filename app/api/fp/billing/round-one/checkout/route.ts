@@ -66,7 +66,15 @@ export async function POST(req: Request): Promise<Response> {
       // Require the complete Sell catalog before opening either variant. A
       // Checkout that the webhook cannot validate must never be created.
       if (!productVersion || !stripeKey || !priceIds.cad || !priceIds.usd || !priceId) {
-        console.error("[fp/billing/round-one] checkout configuration is incomplete");
+        const missing = [
+          !productVersion && "FP_ROUND_ONE_PRODUCT_VERSION",
+          !stripeKey && "FP_ROUND_ONE_STRIPE_SECRET_KEY",
+          !priceIds.cad && "FP_ROUND_ONE_STRIPE_PRICE_ID_CAD",
+          !priceIds.usd && "FP_ROUND_ONE_STRIPE_PRICE_ID_USD",
+        ].filter(Boolean).join(", ");
+        console.error(
+          `[fp/billing/round-one] checkout configuration is incomplete; missing: ${missing}`
+        );
         ctx.releaseStrikes();
         return ctx.unavailable();
       }

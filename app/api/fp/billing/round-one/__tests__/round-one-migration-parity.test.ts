@@ -12,6 +12,7 @@ import {
   ROUND_ONE_CURRENCY,
   ROUND_ONE_FIRST_LOCKED_TASK_ID,
   ROUND_ONE_LAST_INCLUDED_TASK_ID,
+  ROUND_ONE_PRICES,
   ROUND_ONE_PRODUCT_KEY,
 } from "../round-one-rules";
 
@@ -73,21 +74,16 @@ describe("Round One migration manifest", () => {
     expect(runbook).toMatch(/must begin with an old fully refunded\s+order/);
   });
 
-  it("keeps Price creation and migration behind the pending commercial decision", () => {
+  it("documents the confirmed dual-currency Sell boundary without importing Build prices", () => {
     const runbook = readFileSync(
       path.resolve(process.cwd(), "docs/runbooks/2026-09-01-fp-round-one-billing.md"),
       "utf8"
     );
-    expect(runbook).toMatch(
-      /Peter's\s+proposed USD \$250 \/ CAD \$350 Sell choice/
-    );
-    expect(runbook).toContain("USD $1,000 / CAD $1,400 later");
-    expect(runbook).toMatch(
-      /Do not create any Stripe Price[\s\S]*?apply any Round\s+One billing migration[\s\S]*?explicitly confirmed/
-    );
-    expect(runbook).toContain(
-      "Do not execute this Price step while the commercial decision is pending."
-    );
+    expect(runbook).toContain("Peter confirmed the USD $250 / CAD $350 choice");
+    expect(runbook).toContain("USD $1,000 / CAD $1,400 prices belong to the later Build phase");
+    expect(runbook).toContain("FP_ROUND_ONE_STRIPE_PRICE_ID_USD");
+    expect(runbook).toContain("FP_ROUND_ONE_STRIPE_PRICE_ID_CAD");
+    expect(runbook).toContain("Do not create or attach");
   });
 });
 
@@ -160,6 +156,25 @@ describe.skipIf(!migrationResolution.ok)("Round One migration parity", () => {
     }
     expect(sql).toMatch(new RegExp(`\\b${ROUND_ONE_AMOUNT_CENTS}\\b`));
     expect(sql).toContain("'sell'");
+  });
+
+  it("seeds exactly the confirmed USD and CAD Sell catalog variants", () => {
+    expect(sql).toContain("create table if not exists public.fp_billing_product_prices");
+    expect(sql).toMatch(
+      new RegExp(
+        `'${ROUND_ONE_PRODUCT_KEY}',\\s*1,\\s*${ROUND_ONE_PRICES.cad},\\s*'cad',\\s*true`
+      )
+    );
+    expect(sql).toMatch(
+      new RegExp(
+        `'${ROUND_ONE_PRODUCT_KEY}',\\s*1,\\s*${ROUND_ONE_PRICES.usd},\\s*'usd',\\s*true`
+      )
+    );
+    expect(beginOrderSql).toContain("p_currency text");
+    expect(beginOrderSql).toContain("from public.fp_billing_product_prices price");
+    expect(beginOrderSql).toContain("price.currency = lower(coalesce(p_currency, ''))");
+    expect(sql).not.toMatch(/'round_one_sell',\s*1,\s*100000,\s*'usd'/);
+    expect(sql).not.toMatch(/'round_one_sell',\s*1,\s*140000,\s*'cad'/);
   });
 
   it("seeds the public storefront fail-off independently and disabled", () => {

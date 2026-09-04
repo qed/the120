@@ -8,11 +8,11 @@ change, deployment, or live payment was performed while authoring this work.
 - Product key/version: `round_one_sell` / `1`
 - Customer-facing product: First Profit Round 1: Sell
 - Subject: one child, owned by the authenticated parent
-- Implemented branch price: one CAD $250 (`25000` cents) Price. This describes
-  the current code and is not approval to create that Price.
-- Implemented branch terms: one child; non-refundable CAD $250 total in the
-  current test-mode contract. Do not claim an education exemption until
-  documented.
+- Confirmed Sell prices: USD $250 (`25000` cents) or CAD $350 (`35000` cents),
+  selected by the parent before Checkout. Both variants grant the same one-child
+  Round One entitlement.
+- Confirmed terms: one child; non-refundable; no sales tax added because the
+  owner has represented that First Profit is tax-exempt for K-12 education.
 - Free through: task `1.1.1`
 - Opens: tasks `1.1.2` through `1.5.5`
 - Access code: `phase:sell`
@@ -23,23 +23,20 @@ change, deployment, or live payment was performed while authoring this work.
 This is not The 120 seat deposit. It has no seat, admissions, refund-window,
 or provisioning semantics. Do not point it at the legacy deposit Price.
 
-### Commercial decision gate — stop here
+### Confirmed Sell/Build boundary
 
-The current branch supports only the single CAD $250 Sell price above. Peter's
-proposed USD $250 / CAD $350 Sell choice and USD $1,000 / CAD $1,400 later
-Build boundary both await explicit confirmation. They are not approved catalog
-configuration yet. Do not create any Stripe Price or rename or apply any Round
-One billing migration until both the currency choice and the Sell/Build boundary
-are explicitly confirmed and the implementation, tests, and this runbook agree.
-All setup steps below are a post-confirmation checklist; current CAD $250
-references document branch behavior only.
+Peter confirmed the USD $250 / CAD $350 choice for Round One Sell. The proposed
+USD $1,000 / CAD $1,400 prices belong to the later Build phase and must not be
+created under, displayed by, or grant access through this Round One flow. This
+branch contains only the two confirmed Sell variants.
 
 ## Required server environment
 
 ```text
 FP_ROUND_ONE_BILLING_ENABLED=true
 FP_ROUND_ONE_PRODUCT_VERSION=1
-FP_ROUND_ONE_STRIPE_PRICE_ID=price_...
+FP_ROUND_ONE_STRIPE_PRICE_ID_CAD=price_...
+FP_ROUND_ONE_STRIPE_PRICE_ID_USD=price_...
 FP_ROUND_ONE_STRIPE_WEBHOOK_SECRET=whsec_...
 STRIPE_SECRET_KEY=sk_...
 RESEND_API_KEY=re_...
@@ -69,8 +66,7 @@ locks paid tasks closed; it never grants fallback access.
 
 ## Stripe test-mode setup
 
-1. After the commercial decision gate above is explicitly cleared, under the
-   repository migration lock, query both the live Supabase migration
+1. Under the repository migration lock, query both the live Supabase migration
    ledger and catalog before touching the provisional file. Check
    `supabase_migrations.schema_migrations`, `to_regclass` for every
    `fp_billing_*` relation, and `to_regprocedure` for both the former 12-argument
@@ -282,11 +278,12 @@ returns `access_suspended`; attach refuses; a replayed paid event returns
 completion is rejected; and an offer-ready save/notification cannot be
 committed. Repeat with two orders and a resolved review on the older order to
 prove the hold is product-wide rather than order- or queue-state-scoped.
-3. Do not execute this Price step while the commercial decision is pending.
-   After explicit confirmation and any required implementation update, create
-   only the approved one-time Sell Price or Prices for a distinct First Profit
-   Round 1: Sell product. Configure the approved Price identifier or identifiers,
-   then independently verify each currency and amount before enabling checkout.
+3. In Stripe test mode, create one distinct `First Profit Round 1: Sell`
+   Product with exactly two active one-time Prices: USD $250 and CAD $350.
+   Configure their identifiers as `FP_ROUND_ONE_STRIPE_PRICE_ID_USD` and
+   `FP_ROUND_ONE_STRIPE_PRICE_ID_CAD`, then independently retrieve and verify
+   each currency and amount before enabling checkout. Do not create or attach
+   the later Build prices to this Product.
 4. Add a webhook destination at
    `/api/fp/billing/round-one/webhook` and subscribe only to:
    - `checkout.session.completed`
@@ -353,7 +350,8 @@ webhook ledger remain available for audit.
 
 Checkout enables Stripe Promotion Codes. Before granting access, the webhook
 retrieves the signed Session's line items and requires exactly one quantity of
-the configured Round One Price. It pins the undiscounted subtotal to CAD $250,
+the configured Round One Price for the order currency. It pins the undiscounted
+subtotal to USD $250 or CAD $350,
 requires zero tax, and verifies `amount_total + amount_discount =
 amount_subtotal`. Stripe remains the ledger for the discounted amount actually
 collected. Stripe reports a legitimate 100% code as `no_payment_required`; the
@@ -448,15 +446,20 @@ from the verified child token/profile. Both status routes return the same shape:
     "version": 1,
     "name": "First Profit Round 1 — Sell",
     "phase": "sell",
-    "amount": 25000,
+    "amount": 35000,
     "currency": "cad",
+    "prices": [
+      { "amount": 35000, "currency": "cad" },
+      { "amount": 25000, "currency": "usd" }
+    ],
     "freeThroughTaskId": "1.1.1",
     "unlocksFromTaskId": "1.1.2",
     "unlocksThroughTaskId": "1.5.5"
   },
   "state": "not_started",
   "access": { "granted": false, "code": null, "reason": null },
-  "canStartCheckout": true
+  "canStartCheckout": true,
+  "pendingCheckout": null
 }
 ```
 
@@ -466,6 +469,9 @@ processing stays `pending`; Stripe's terminal `async_payment_failed` event
 becomes `failed`, while an abandoned/expired Checkout becomes `cancelled`.
 `suspended` means a Stripe dispute was observed; access is false and checkout
 cannot be restarted while the case awaits staff review.
+When `state` is `pending`, `pendingCheckout` contains the immutable amount and
+currency of the open Session. The parent UI must restore that currency and must
+not offer a switch until the Session is completed or expires.
 The task runner must use only
 `access.granted === true` and `access.code === "phase:sell"` to open paid tasks.
 Do not infer access from `state`, a query string, local storage, or a Stripe
@@ -682,13 +688,12 @@ database read failure sends nothing and remains retryable.
 
 ## Operational gaps before live funds
 
-- **GST/HST treatment.** A K-12 audience alone does not establish a Canadian
-  education exemption. Before live funds, obtain written accountant/CRA support
-  for First Profit's actual entity, registration status, course and curriculum.
-  If exempt, use “GST/HST exempt”; if relying on small-supplier treatment, use
-  “GST/HST not charged”; if taxable, update the Stripe Price/tax configuration
-  and the signed webhook proof before enabling checkout. Until then the product
-  remains test-mode-only and customer copy says only “CAD $250 total today.”
+- **Tax treatment.** The owner confirmed that no sales tax should be added and
+  asked the payment page to identify First Profit as tax-exempt for K-12
+  education. Before live funds, retain the supporting tax documentation for the
+  actual selling entity and both intended markets. If that position changes,
+  update the Checkout copy, Stripe tax configuration, and signed webhook proof
+  together before enabling billing.
 
 - **Notification operations.** `fp_parent_notification_outbox` is the durable
   delivery ledger. `/api/cron/path-notifications` drains it every ten minutes,

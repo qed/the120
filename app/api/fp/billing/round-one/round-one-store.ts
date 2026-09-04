@@ -8,6 +8,7 @@ import type {
 import type {
   RoundOneEntitlementRow,
   RoundOneOrderSummaryRow,
+  RoundOneProductPriceRow,
   RoundOneProductRow,
   RoundOneWebhookPlan,
 } from "./round-one-rules";
@@ -54,6 +55,20 @@ export function buildRoundOneCoreDeps(db: SupabaseClient): RoundOneCoreDeps {
       }
       return (data as RoundOneProductRow | null) ?? null;
     },
+    readPrices: async (productKey, version) => {
+      const { data, error } = await db
+        .from("fp_billing_product_prices")
+        .select("product_key, product_version, amount, currency, active")
+        .eq("product_key", productKey)
+        .eq("product_version", version)
+        .eq("active", true)
+        .order("currency", { ascending: true });
+      if (error) {
+        console.error(`[fp/billing/round-one] product prices read failed: ${error.message}`);
+        return "error";
+      }
+      return (data as RoundOneProductPriceRow[] | null) ?? [];
+    },
     readEntitlement: async (parentId, childId, productKey, version) => {
       const { data, error } = await db
         .from("fp_billing_entitlements")
@@ -91,7 +106,7 @@ export function buildRoundOneCoreDeps(db: SupabaseClient): RoundOneCoreDeps {
     readLatestOrder: async (parentId, childId, productKey, version) => {
       const { data, error } = await db
         .from("fp_billing_orders")
-        .select("status, created_at, updated_at")
+        .select("status, amount, currency, created_at, updated_at")
         .eq("parent_id", parentId)
         .eq("child_id", childId)
         .eq("product_key", productKey)
@@ -105,12 +120,13 @@ export function buildRoundOneCoreDeps(db: SupabaseClient): RoundOneCoreDeps {
       }
       return (data as RoundOneOrderSummaryRow | null) ?? null;
     },
-    beginOrder: async (parentId, childId, productKey, version) => {
+    beginOrder: async (parentId, childId, productKey, version, currency) => {
       const { data, error } = await db.rpc("fp_billing_begin_order", {
         p_parent_id: parentId,
         p_child_id: childId,
         p_product_key: productKey,
         p_product_version: version,
+        p_currency: currency,
       });
       if (error) {
         console.error(`[fp/billing/round-one] begin-order rpc failed: ${error.message}`);

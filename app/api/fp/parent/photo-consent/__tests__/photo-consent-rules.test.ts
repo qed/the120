@@ -180,7 +180,7 @@ describe("rate limiting — its OWN namespaces and budgets", () => {
   });
 
   it("is TOTAL on a lone surrogate — a throw here would land before either strike", () => {
-    expect(() => derivePhotoConsentRateLimitKeys("1.2.3.4", "\uD800")).not.toThrow();
+    expect(() => derivePhotoConsentRateLimitKeys("1.2.3.4", "\uD800", "grant")).not.toThrow();
   });
 });
 

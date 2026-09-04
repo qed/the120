@@ -8,9 +8,9 @@
 -- preserve its applied file and write a new additive upgrade migration instead;
 -- this foundation file is not an in-place upgrade or blanket-idempotent script.
 --
--- This is deliberately NOT an extension of `deposits`. A $250 Round One
+-- This is deliberately NOT an extension of `deposits`. A Round One
 -- purchase buys one child's access to First Profit's Sell phase. It is a
--- non-refundable CAD $250 Round One course fee rather than The 120's
+-- non-refundable USD $250 or CAD $350 Round One course fee rather than The 120's
 -- refundable seat reservation; it consumes no seat, provisions no school
 -- account, and carries none of the deposit lifecycle's admissions semantics.
 
@@ -70,13 +70,39 @@ values (
   'sell',
   '1.1.2',
   '1.5.5',
-  25000,
+  35000,
   'cad',
   true,
   false,
   false
 )
 on conflict (product_key, version) do nothing;
+
+-- One curriculum product can be sold in either of Peter's confirmed billing
+-- currencies. Orders snapshot exactly one immutable price variant; Build's
+-- later USD $1,000 / CAD $1,400 prices intentionally do not appear here.
+create table if not exists public.fp_billing_product_prices (
+  product_key text not null,
+  product_version integer not null,
+  amount integer not null check (amount > 0),
+  currency text not null check (currency ~ '^[a-z]{3}$'),
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  primary key (product_key, product_version, currency),
+  unique (product_key, product_version, currency, amount),
+  constraint fp_billing_product_prices_product_fk
+    foreign key (product_key, product_version)
+    references public.fp_billing_products (product_key, version)
+    on delete restrict
+);
+
+insert into public.fp_billing_product_prices (
+  product_key, product_version, amount, currency, active
+)
+values
+  ('round_one_sell', 1, 35000, 'cad', true),
+  ('round_one_sell', 1, 25000, 'usd', true)
+on conflict (product_key, product_version, currency) do nothing;
 
 -- A composite key lets orders/entitlements make "this parent owns this child"
 -- a database invariant rather than a route convention.
@@ -118,6 +144,12 @@ create table if not exists public.fp_billing_orders (
   constraint fp_billing_orders_product_fk
     foreign key (product_key, product_version)
     references public.fp_billing_products (product_key, version)
+    on delete restrict,
+  constraint fp_billing_orders_price_fk
+    foreign key (product_key, product_version, currency, amount)
+    references public.fp_billing_product_prices (
+      product_key, product_version, currency, amount
+    )
     on delete restrict,
   constraint fp_billing_orders_paid_shape check (
     (status = 'paid' and paid_at is not null)
@@ -359,6 +391,7 @@ create index if not exists fp_billing_access_events_child_idx
 -- ───────────────────────────────────────────────────────────────────── RLS
 
 alter table public.fp_billing_products enable row level security;
+alter table public.fp_billing_product_prices enable row level security;
 alter table public.fp_billing_orders enable row level security;
 alter table public.fp_billing_entitlements enable row level security;
 alter table public.fp_billing_webhook_events enable row level security;
@@ -379,6 +412,7 @@ drop policy if exists "fp billing orders: read own" on public.fp_billing_orders;
 drop policy if exists "fp billing entitlements: read own" on public.fp_billing_entitlements;
 
 revoke all on public.fp_billing_products from anon, authenticated;
+revoke all on public.fp_billing_product_prices from anon, authenticated;
 revoke all on public.fp_billing_orders from anon, authenticated;
 revoke all on public.fp_billing_entitlements from anon, authenticated;
 revoke all on public.fp_billing_webhook_events from anon, authenticated;
@@ -619,14 +653,17 @@ create or replace function public.fp_billing_begin_order(
   p_parent_id uuid,
   p_child_id uuid,
   p_product_key text,
-  p_product_version integer
+  p_product_version integer,
+  p_currency text
 )
 returns table (
   outcome text,
   order_id uuid,
   stripe_session_id text,
   stripe_session_expires_at timestamptz,
-  grant_kind text
+  grant_kind text,
+  amount integer,
+  currency text
 )
 language plpgsql
 security definer
@@ -634,6 +671,7 @@ set search_path = public, pg_temp
 as $$
 declare
   v_product public.fp_billing_products%rowtype;
+  v_price public.fp_billing_product_prices%rowtype;
   v_order public.fp_billing_orders%rowtype;
   v_entitlement public.fp_billing_entitlements%rowtype;
 begin
@@ -643,7 +681,18 @@ begin
     and p.version = p_product_version
     and p.active = true;
   if not found then
-    return query select 'product_unavailable', null::uuid, null::text, null::timestamptz, null::text;
+    return query select 'product_unavailable', null::uuid, null::text, null::timestamptz, null::text, null::integer, null::text;
+    return;
+  end if;
+
+  select * into v_price
+  from public.fp_billing_product_prices price
+  where price.product_key = p_product_key
+    and price.product_version = p_product_version
+    and price.currency = lower(coalesce(p_currency, ''))
+    and price.active = true;
+  if not found then
+    return query select 'product_unavailable', null::uuid, null::text, null::timestamptz, null::text, null::integer, null::text;
     return;
   end if;
 
@@ -651,7 +700,7 @@ begin
     select 1 from public.children c
     where c.id = p_child_id and c.parent_id = p_parent_id
   ) then
-    return query select 'not_owned', null::uuid, null::text, null::timestamptz, null::text;
+    return query select 'not_owned', null::uuid, null::text, null::timestamptz, null::text, null::integer, null::text;
     return;
   end if;
 
@@ -679,7 +728,7 @@ begin
   for update;
   if found then
     return query
-      select 'access_suspended', v_order.id, null::text, null::timestamptz, null::text;
+      select 'access_suspended', v_order.id, null::text, null::timestamptz, null::text, v_order.amount, v_order.currency;
     return;
   end if;
 
@@ -691,13 +740,13 @@ begin
   for update;
   if found and v_entitlement.status = 'active' then
     return query
-      select 'already_entitled', v_entitlement.source_order_id, null::text, null::timestamptz, v_entitlement.grant_kind;
+      select 'already_entitled', v_entitlement.source_order_id, null::text, null::timestamptz, v_entitlement.grant_kind, null::integer, null::text;
     return;
   elsif found and v_entitlement.status = 'suspended' then
     -- A chargeback is an operational review, not permission to pay twice. The
     -- parent/child status routes expose the suspension while Checkout stays shut.
     return query
-      select 'access_suspended', v_entitlement.source_order_id, null::text, null::timestamptz, v_entitlement.grant_kind;
+      select 'access_suspended', v_entitlement.source_order_id, null::text, null::timestamptz, v_entitlement.grant_kind, null::integer, null::text;
     return;
   end if;
 
@@ -724,7 +773,7 @@ begin
         parent_id, child_id, product_key, product_version, amount, currency, status
       ) values (
         p_parent_id, p_child_id, p_product_key, p_product_version,
-        v_product.amount, v_product.currency, 'pending'
+        v_price.amount, v_price.currency, 'pending'
       )
       returning * into v_order;
     exception when unique_violation then
@@ -743,7 +792,7 @@ begin
 
   return query
     select 'checkout', v_order.id, v_order.stripe_checkout_session_id,
-      v_order.stripe_session_expires_at, null::text;
+      v_order.stripe_session_expires_at, null::text, v_order.amount, v_order.currency;
 end;
 $$;
 
@@ -862,6 +911,7 @@ as $$
 declare
   v_order public.fp_billing_orders%rowtype;
   v_product public.fp_billing_products%rowtype;
+  v_price public.fp_billing_product_prices%rowtype;
   v_entitlement public.fp_billing_entitlements%rowtype;
   v_review public.fp_billing_review_items%rowtype;
   v_review_kind text;
@@ -926,10 +976,18 @@ begin
   where p.product_key = v_order.product_key and p.version = v_order.product_version;
   if not found then return 'product_missing'; end if;
 
+  select * into v_price
+  from public.fp_billing_product_prices price
+  where price.product_key = v_order.product_key
+    and price.product_version = v_order.product_version
+    and price.currency = v_order.currency
+    and price.amount = v_order.amount;
+  if not found then return 'product_missing'; end if;
+
   if p_effect in ('pending', 'paid') then
-    if p_amount is null or p_amount <> v_order.amount or p_amount <> v_product.amount
+    if p_amount is null or p_amount <> v_order.amount or p_amount <> v_price.amount
        or lower(coalesce(p_currency, '')) <> v_order.currency
-       or lower(coalesce(p_currency, '')) <> v_product.currency then
+       or lower(coalesce(p_currency, '')) <> v_price.currency then
       -- Do not record this event: a corrected deployment should be able to
       -- accept Stripe's retry. Most importantly, no mismatched payment grants
       -- access merely because the client reached a success URL.
@@ -1588,7 +1646,7 @@ begin
 end;
 $$;
 
-revoke all on function public.fp_billing_begin_order(uuid, uuid, text, integer)
+revoke all on function public.fp_billing_begin_order(uuid, uuid, text, integer, text)
   from public, anon, authenticated;
 revoke all on function public.fp_billing_attach_checkout(uuid, text, timestamptz)
   from public, anon, authenticated;
@@ -1605,7 +1663,7 @@ revoke all on function public.fp_round_one_completed_task_ids(jsonb)
 revoke all on function public.fp_round_one_completion_guard()
   from public, anon, authenticated;
 
-grant execute on function public.fp_billing_begin_order(uuid, uuid, text, integer)
+grant execute on function public.fp_billing_begin_order(uuid, uuid, text, integer, text)
   to service_role;
 grant execute on function public.fp_billing_attach_checkout(uuid, text, timestamptz)
   to service_role;

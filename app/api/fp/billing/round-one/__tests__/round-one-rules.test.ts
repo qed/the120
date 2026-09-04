@@ -3,6 +3,7 @@ import {
   buildRoundOneCheckoutSession,
   deriveRoundOneRateLimitKeys,
   isExpectedRoundOneProduct,
+  isExpectedRoundOneProductPrices,
   parseRoundOneAdminAccessRequest,
   parseRoundOneCheckoutRequest,
   parseRoundOneStatusChildId,
@@ -39,6 +40,11 @@ const product = (): RoundOneProductRow => ({
   active: true,
 });
 
+const prices = () => ([
+  { product_key: ROUND_ONE_PRODUCT_KEY, product_version: 1, amount: 35_000, currency: "cad" as const, active: true },
+  { product_key: ROUND_ONE_PRODUCT_KEY, product_version: 1, amount: 25_000, currency: "usd" as const, active: true },
+]);
+
 const metadata = () => ({
   billingKind: ROUND_ONE_BILLING_KIND,
   orderId: ORDER_ID,
@@ -49,13 +55,15 @@ const metadata = () => ({
 });
 
 describe("Round One request/config rules", () => {
-  it("accepts exactly one UUID childId and rejects smuggled keys", () => {
-    expect(parseRoundOneCheckoutRequest({ childId: CHILD_ID })).toEqual({
+  it("accepts exactly one UUID childId plus a supported currency and rejects smuggled keys", () => {
+    expect(parseRoundOneCheckoutRequest({ childId: CHILD_ID, currency: "cad" })).toEqual({
       ok: true,
-      value: { childId: CHILD_ID },
+      value: { childId: CHILD_ID, currency: "cad" },
     });
-    expect(parseRoundOneCheckoutRequest({ childId: "not-a-uuid" })).toEqual({ ok: false });
-    expect(parseRoundOneCheckoutRequest({ childId: CHILD_ID, accessGranted: true })).toEqual({
+    expect(parseRoundOneCheckoutRequest({ childId: "not-a-uuid", currency: "cad" })).toEqual({ ok: false });
+    expect(parseRoundOneCheckoutRequest({ childId: CHILD_ID, currency: "eur" })).toEqual({ ok: false });
+    expect(parseRoundOneCheckoutRequest({ childId: CHILD_ID })).toEqual({ ok: false });
+    expect(parseRoundOneCheckoutRequest({ childId: CHILD_ID, currency: "cad", accessGranted: true })).toEqual({
       ok: false,
     });
     expect(parseRoundOneStatusChildId(CHILD_ID)).toBe(CHILD_ID);
@@ -123,6 +131,26 @@ describe("Round One request/config rules", () => {
     }
   });
 
+  it("requires exactly the two confirmed Round One Sell prices", () => {
+    expect(isExpectedRoundOneProductPrices(prices(), 1)).toBe(true);
+    expect(isExpectedRoundOneProductPrices(prices().slice(0, 1), 1)).toBe(false);
+    expect(
+      isExpectedRoundOneProductPrices(
+        [...prices(), { ...prices()[0] }],
+        1
+      )
+    ).toBe(false);
+    expect(
+      isExpectedRoundOneProductPrices(
+        prices().map((row) =>
+          row.currency === "usd" ? { ...row, amount: 100_000 } : row
+        ),
+        1
+      )
+    ).toBe(false);
+    expect(isExpectedRoundOneProductPrices(prices(), 2)).toBe(false);
+  });
+
   it("uses injective, endpoint-separated rate-limit keys", () => {
     const a = deriveRoundOneRateLimitKeys("checkout", "2001:db8::1", "parent:x");
     const b = deriveRoundOneRateLimitKeys("status", "2001:db8::1", "parent:x");
@@ -150,6 +178,7 @@ describe("Stripe Checkout shape", () => {
       childId: CHILD_ID,
       productVersion: 1,
       priceId: "price_round_one_test",
+      currency: "cad" as const,
       customerEmail: "parent@example.com",
     };
     const built = buildRoundOneCheckoutSession(input);
@@ -165,7 +194,7 @@ describe("Stripe Checkout shape", () => {
     expect(built.params.phone_number_collection).toEqual({ enabled: true });
     const submitCopy = built.params.custom_text?.submit;
     expect(typeof submitCopy === "string" ? submitCopy : submitCopy?.message).toMatch(
-      /one-child, non-refundable CAD \$250 total today.*program-support calls/i
+      /one-child, non-refundable CAD \$350 total today.*tax-exempt for K-12 education.*program-support calls/i
     );
     expect(built.params.metadata).toEqual({
       billing_kind: ROUND_ONE_BILLING_KIND,
@@ -174,6 +203,7 @@ describe("Stripe Checkout shape", () => {
       child_id: CHILD_ID,
       product_key: ROUND_ONE_PRODUCT_KEY,
       product_version: "1",
+      billing_currency: "cad",
     });
     expect(built.params.payment_intent_data?.metadata).toEqual(built.params.metadata);
     expect("expires_at" in built.params).toBe(false);
@@ -185,6 +215,27 @@ describe("Stripe Checkout shape", () => {
     );
   });
 
+  it("builds the USD $250 variant from the same locked Sell product", () => {
+    const built = buildRoundOneCheckoutSession({
+      orderId: ORDER_ID,
+      parentId: PARENT_ID,
+      childId: CHILD_ID,
+      productVersion: 1,
+      priceId: "price_round_one_usd_test",
+      currency: "usd",
+      customerEmail: "parent@example.com",
+    });
+
+    expect(built.params.line_items).toEqual([
+      { price: "price_round_one_usd_test", quantity: 1 },
+    ]);
+    expect(built.params.metadata?.billing_currency).toBe("usd");
+    const submitCopy = built.params.custom_text?.submit;
+    expect(typeof submitCopy === "string" ? submitCopy : submitCopy?.message).toMatch(
+      /one-child, non-refundable USD \$250 total today.*tax-exempt for K-12 education/i
+    );
+  });
+
   it("keeps every Stripe creation parameter stable when wall-clock time advances", () => {
     const input = {
       orderId: ORDER_ID,
@@ -192,6 +243,7 @@ describe("Stripe Checkout shape", () => {
       childId: CHILD_ID,
       productVersion: 1,
       priceId: "price_round_one_test",
+      currency: "cad" as const,
       customerEmail: "parent@example.com",
     };
     const clock = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
@@ -209,6 +261,7 @@ describe("Stripe Checkout shape", () => {
       parentId: PARENT_ID,
       childId: CHILD_ID,
       priceId: "price_round_one_test",
+      currency: "cad" as const,
       customerEmail: "parent@example.com",
     };
     const first = buildRoundOneCheckoutSession({ ...base, productVersion: 1 });
@@ -244,6 +297,7 @@ describe("status shaping", () => {
     const body = shapeRoundOneStatus({
       childId: CHILD_ID,
       product: product(),
+      prices: prices(),
       entitlement: null,
       latestOrder: null,
     });
@@ -260,9 +314,12 @@ describe("status shaping", () => {
       const body = shapeRoundOneStatus({
         childId: CHILD_ID,
         product: product(),
+        prices: prices(),
         entitlement: null,
         latestOrder: {
           status: state,
+          amount: 35_000,
+          currency: "cad",
           created_at: "2026-01-01T00:00:00Z",
           updated_at: "2026-01-01T00:00:00Z",
         },
@@ -277,9 +334,12 @@ describe("status shaping", () => {
     const body = shapeRoundOneStatus({
       childId: CHILD_ID,
       product: product(),
+      prices: prices(),
       entitlement: null,
       latestOrder: {
         status: "failed",
+        amount: 35_000,
+        currency: "cad",
         created_at: "2026-01-01T00:00:00Z",
         updated_at: "2026-01-01T00:01:00Z",
       },
@@ -296,6 +356,7 @@ describe("status shaping", () => {
       const body = shapeRoundOneStatus({
         childId: CHILD_ID,
         product: product(),
+        prices: prices(),
         entitlement: {
           status: "active",
           grant_kind: grant,
@@ -321,6 +382,7 @@ describe("status shaping", () => {
     const body = shapeRoundOneStatus({
       childId: CHILD_ID,
       product: product(),
+      prices: prices(),
       entitlement: {
         status: "revoked",
         grant_kind: "comped",
@@ -332,6 +394,8 @@ describe("status shaping", () => {
       },
       latestOrder: {
         status: "comped",
+        amount: 35_000,
+        currency: "cad",
         created_at: "2026-01-01T00:00:00Z",
         updated_at: "2026-01-01T00:00:00Z",
       },
@@ -363,7 +427,7 @@ describe("status shaping", () => {
       },
     ]) {
       expect(
-        shapeRoundOneStatus({ childId: CHILD_ID, product: product(), entitlement, latestOrder: null })
+        shapeRoundOneStatus({ childId: CHILD_ID, product: product(), prices: prices(), entitlement, latestOrder: null })
           .access.granted
       ).toBe(false);
     }
@@ -373,6 +437,7 @@ describe("status shaping", () => {
     const body = shapeRoundOneStatus({
       childId: CHILD_ID,
       product: product(),
+      prices: prices(),
       entitlement: {
         status: "suspended",
         grant_kind: "paid",
@@ -384,6 +449,8 @@ describe("status shaping", () => {
       },
       latestOrder: {
         status: "paid",
+        amount: 35_000,
+        currency: "cad",
         created_at: "2026-01-01T00:00:00Z",
         updated_at: "2026-01-02T00:00:00Z",
       },
@@ -393,6 +460,27 @@ describe("status shaping", () => {
       access: { granted: false, code: null, reason: null },
       canStartCheckout: false,
     });
+  });
+
+  it("does not expose a stale pending checkout once a dispute overrides its state", () => {
+    const body = shapeRoundOneStatus({
+      childId: CHILD_ID,
+      product: product(),
+      prices: prices(),
+      entitlement: null,
+      latestOrder: {
+        status: "pending",
+        amount: 25_000,
+        currency: "usd",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+      disputeHeld: true,
+    });
+
+    expect(body.state).toBe("suspended");
+    expect(body.canStartCheckout).toBe(false);
+    expect(body.pendingCheckout).toBeNull();
   });
 
   it("lets a product-wide hold override missing, revoked, or accidentally active entitlement state", () => {
@@ -420,9 +508,12 @@ describe("status shaping", () => {
       expect(shapeRoundOneStatus({
         childId: CHILD_ID,
         product: product(),
+        prices: prices(),
         entitlement,
         latestOrder: {
           status: "refunded",
+          amount: 35_000,
+          currency: "cad",
           created_at: "2026-01-01T00:00:00Z",
           updated_at: "2026-01-02T00:00:00Z",
         },
@@ -556,8 +647,8 @@ describe("signed webhook planning", () => {
 
   it("accepts a reconciled promotion discount, including a zero-total checkout", () => {
     for (const [amountTotal, amountDiscount] of [
-      [20_000, 5_000],
-      [0, 25_000],
+      [30_000, 5_000],
+      [0, ROUND_ONE_AMOUNT_CENTS],
     ]) {
       const plan = planRoundOneWebhook({
         ...input(),
@@ -565,7 +656,7 @@ describe("signed webhook planning", () => {
         amountDiscount,
       });
       expect(plan.kind).toBe("apply");
-      if (plan.kind === "apply") expect(plan.amount).toBe(25_000);
+      if (plan.kind === "apply") expect(plan.amount).toBe(ROUND_ONE_AMOUNT_CENTS);
     }
   });
 

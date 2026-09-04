@@ -4,14 +4,18 @@ import type Stripe from "stripe";
 import {
   buildRoundOneCheckoutSession,
   isExpectedRoundOneProduct,
+  isExpectedRoundOneProductPrices,
   isExpectedRoundOneStripePrice,
   reusableCheckoutSession,
   shapeRoundOneStatus,
   type RoundOneEntitlementRow,
   type RoundOneOrderSummaryRow,
+  type RoundOneCurrency,
   type RoundOneProductRow,
+  type RoundOneProductPriceRow,
   type RoundOneStripePrice,
   type RoundOneStatusBody,
+  ROUND_ONE_PRICES,
 } from "./round-one-rules";
 
 export type RoundOneBeginRow = {
@@ -25,6 +29,8 @@ export type RoundOneBeginRow = {
   stripe_session_id: string | null;
   stripe_session_expires_at: string | null;
   grant_kind: "paid" | "comped" | "grandfathered" | null;
+  amount: number | null;
+  currency: string | null;
 };
 
 export type RoundOneCoreDeps = {
@@ -33,6 +39,10 @@ export type RoundOneCoreDeps = {
     productKey: string,
     version: number
   ) => Promise<RoundOneProductRow | null | "error">;
+  readPrices: (
+    productKey: string,
+    version: number
+  ) => Promise<RoundOneProductPriceRow[] | "error">;
   readEntitlement: (
     parentId: string,
     childId: string,
@@ -55,7 +65,8 @@ export type RoundOneCoreDeps = {
     parentId: string,
     childId: string,
     productKey: string,
-    version: number
+    version: number,
+    currency: RoundOneCurrency
   ) => Promise<RoundOneBeginRow | "error">;
   attachCheckout: (
     orderId: string,
@@ -101,7 +112,8 @@ export async function readRoundOneStatus(
   if (product === "error" || !isExpectedRoundOneProduct(product, input.productVersion)) {
     return { kind: "unavailable" };
   }
-  const [entitlement, latestOrder, disputeHeld] = await Promise.all([
+  const [prices, entitlement, latestOrder, disputeHeld] = await Promise.all([
+    deps.readPrices(input.productKey, input.productVersion),
     deps.readEntitlement(
       input.parentId,
       input.childId,
@@ -121,7 +133,13 @@ export async function readRoundOneStatus(
       input.productVersion
     ),
   ]);
-  if (entitlement === "error" || latestOrder === "error" || disputeHeld === "error") {
+  if (
+    prices === "error"
+    || !isExpectedRoundOneProductPrices(prices, input.productVersion)
+    || entitlement === "error"
+    || latestOrder === "error"
+    || disputeHeld === "error"
+  ) {
     return { kind: "unavailable" };
   }
   return {
@@ -129,6 +147,7 @@ export async function readRoundOneStatus(
     body: shapeRoundOneStatus({
       childId: input.childId,
       product,
+      prices,
       entitlement,
       latestOrder,
       disputeHeld,
@@ -141,6 +160,7 @@ export type StartRoundOneCheckoutResult =
   | { kind: "already_granted"; grantKind: "paid" | "comped" | "grandfathered" }
   | { kind: "suspended" }
   | { kind: "awaiting_webhook" }
+  | { kind: "currency_locked"; currency: RoundOneCurrency }
   | { kind: "refused" }
   | { kind: "unavailable" };
 
@@ -158,6 +178,7 @@ export async function startRoundOneCheckout(
     productKey: string;
     productVersion: number;
     priceId: string;
+    currency: RoundOneCurrency;
     nowEpochSeconds: number;
   }
 ): Promise<StartRoundOneCheckoutResult> {
@@ -180,7 +201,7 @@ export async function startRoundOneCheckout(
   } catch {
     return { kind: "unavailable" };
   }
-  if (!isExpectedRoundOneStripePrice(stripePrice, input.priceId)) {
+  if (!isExpectedRoundOneStripePrice(stripePrice, input.priceId, input.currency)) {
     return { kind: "unavailable" };
   }
 
@@ -192,7 +213,8 @@ export async function startRoundOneCheckout(
       input.parentId,
       input.childId,
       input.productKey,
-      input.productVersion
+      input.productVersion,
+      input.currency
     );
     if (begun === "error" || begun.outcome === "product_unavailable") {
       return { kind: "unavailable" };
@@ -205,6 +227,14 @@ export async function startRoundOneCheckout(
         : { kind: "unavailable" };
     }
     if (!begun.order_id) return { kind: "unavailable" };
+    if (
+      begun.amount !== ROUND_ONE_PRICES[input.currency]
+      || begun.currency !== input.currency
+    ) {
+      return begun.currency === "cad" || begun.currency === "usd"
+        ? { kind: "currency_locked", currency: begun.currency }
+        : { kind: "unavailable" };
+    }
 
     if (begun.stripe_session_id) {
       let existing;
@@ -257,6 +287,7 @@ export async function startRoundOneCheckout(
       childId: input.childId,
       productVersion: input.productVersion,
       priceId: input.priceId,
+      currency: input.currency,
       customerEmail: input.customerEmail,
     });
     let session;

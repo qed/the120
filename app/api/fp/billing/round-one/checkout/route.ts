@@ -42,13 +42,10 @@ export async function POST(req: Request): Promise<Response> {
         process.env.FP_ROUND_ONE_PRODUCT_VERSION
       );
       const stripeKey = process.env.STRIPE_SECRET_KEY?.trim();
-      const priceId = process.env.FP_ROUND_ONE_STRIPE_PRICE_ID?.trim();
-      if (!productVersion || !stripeKey || !priceId) {
-        console.error("[fp/billing/round-one] checkout configuration is incomplete");
-        ctx.releaseStrikes();
-        return ctx.unavailable();
-      }
-
+      const priceIds = {
+        cad: process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_CAD?.trim(),
+        usd: process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_USD?.trim(),
+      };
       let body: unknown;
       try {
         body = await req.json();
@@ -64,6 +61,14 @@ export async function POST(req: Request): Promise<Response> {
           status: 400,
           headers: ctx.headers,
         });
+      }
+      const priceId = priceIds[parsed.value.currency];
+      // Require the complete Sell catalog before opening either variant. A
+      // Checkout that the webhook cannot validate must never be created.
+      if (!productVersion || !stripeKey || !priceIds.cad || !priceIds.usd || !priceId) {
+        console.error("[fp/billing/round-one] checkout configuration is incomplete");
+        ctx.releaseStrikes();
+        return ctx.unavailable();
       }
 
       const stripe = new Stripe(stripeKey, {
@@ -93,6 +98,7 @@ export async function POST(req: Request): Promise<Response> {
           productKey: ROUND_ONE_PRODUCT_KEY,
           productVersion,
           priceId,
+          currency: parsed.value.currency,
           nowEpochSeconds: Math.floor(Date.now() / 1000),
         }
       );
@@ -131,6 +137,17 @@ export async function POST(req: Request): Promise<Response> {
           return new Response(
             JSON.stringify({ ok: true, status: "pending", accessGranted: false }),
             { status: 202, headers: ctx.headers }
+          );
+        case "currency_locked":
+          return new Response(
+            JSON.stringify({
+              ok: false,
+              status: "currency_locked",
+              accessGranted: false,
+              currency: result.currency,
+              error: `A checkout is already open in ${result.currency.toUpperCase()}.`,
+            }),
+            { status: 409, headers: ctx.headers }
           );
         case "refused":
           return ctx.refuse();

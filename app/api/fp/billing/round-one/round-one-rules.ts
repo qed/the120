@@ -7,8 +7,9 @@
  * never reads a cookie, database, clock, or environment variable.
  *
  * Round One is the SELL phase. Task 1.1.1 stays free; an active entitlement
- * opens 1.1.2 through 1.5.5. This is intentionally unrelated to The 120's $250
- * refundable seat deposit even though the amount happens to match.
+ * opens 1.1.2 through 1.5.5. This is intentionally unrelated to The 120's
+ * refundable seat deposit. A parent deliberately chooses the confirmed Sell
+ * price in USD or CAD before Stripe Checkout opens.
  */
 
 import type Stripe from "stripe";
@@ -25,8 +26,17 @@ export const ROUND_ONE_BILLING_KIND = "fp_round_one_sell";
 export const ROUND_ONE_ACCESS_CODE = "phase:sell";
 export const ROUND_ONE_FIRST_LOCKED_TASK_ID = "1.1.2";
 export const ROUND_ONE_LAST_INCLUDED_TASK_ID = "1.5.5";
-export const ROUND_ONE_AMOUNT_CENTS = 25_000;
-export const ROUND_ONE_CURRENCY = "cad";
+export const ROUND_ONE_CURRENCIES = ["cad", "usd"] as const;
+export type RoundOneCurrency = (typeof ROUND_ONE_CURRENCIES)[number];
+export const ROUND_ONE_DEFAULT_CURRENCY: RoundOneCurrency = "cad";
+export const ROUND_ONE_PRICES: Readonly<Record<RoundOneCurrency, number>> = {
+  cad: 35_000,
+  usd: 25_000,
+};
+/** Default-catalog aliases retained for the complimentary-access ledger. Paid
+ * orders are always pinned to the explicit variant selected by the parent. */
+export const ROUND_ONE_AMOUNT_CENTS = ROUND_ONE_PRICES[ROUND_ONE_DEFAULT_CURRENCY];
+export const ROUND_ONE_CURRENCY = ROUND_ONE_DEFAULT_CURRENCY;
 export const ROUND_ONE_STRIPE_API_VERSION = "2026-07-29.dahlia" as const;
 /** One canonical return host keeps Stripe idempotency parameters stable even
  * when the parent starts on `www` or an allowed preview origin. */
@@ -79,10 +89,16 @@ export const ROUND_ONE_STATUS_IP_RATE_LIMIT: RateLimitConfig = {
 };
 
 const checkoutRequestSchema = z
-  .object({ childId: z.string().uuid() })
+  .object({
+    childId: z.string().uuid(),
+    currency: z.enum(ROUND_ONE_CURRENCIES),
+  })
   .strict();
 
-export type RoundOneCheckoutRequest = { childId: string };
+export type RoundOneCheckoutRequest = {
+  childId: string;
+  currency: RoundOneCurrency;
+};
 
 export function parseRoundOneCheckoutRequest(body: unknown):
   | { ok: true; value: RoundOneCheckoutRequest }
@@ -202,14 +218,42 @@ export type RoundOneStripePrice = {
  */
 export function isExpectedRoundOneStripePrice(
   price: RoundOneStripePrice | null,
-  expectedPriceId: string
+  expectedPriceId: string,
+  currency: RoundOneCurrency
 ): price is RoundOneStripePrice {
   return !!price
     && price.id === expectedPriceId
     && price.active === true
-    && price.currency.toLowerCase() === ROUND_ONE_CURRENCY
-    && price.unit_amount === ROUND_ONE_AMOUNT_CENTS
+    && price.currency.toLowerCase() === currency
+    && price.unit_amount === ROUND_ONE_PRICES[currency]
     && price.type === "one_time";
+}
+
+export type RoundOneProductPriceRow = {
+  product_key: string;
+  product_version: number;
+  amount: number;
+  currency: string;
+  active: boolean;
+};
+
+export function isExpectedRoundOneProductPrices(
+  rows: RoundOneProductPriceRow[],
+  version: number
+): rows is Array<RoundOneProductPriceRow & { currency: RoundOneCurrency }> {
+  if (rows.length !== ROUND_ONE_CURRENCIES.length) return false;
+  return ROUND_ONE_CURRENCIES.every((currency) => {
+    const matching = rows.filter((row) => row.currency === currency);
+    return matching.length === 1
+      && matching[0].product_key === ROUND_ONE_PRODUCT_KEY
+      && matching[0].product_version === version
+      && matching[0].amount === ROUND_ONE_PRICES[currency]
+      && matching[0].active === true;
+  });
+}
+
+export function roundOnePriceLabel(currency: RoundOneCurrency): string {
+  return `${currency.toUpperCase()} $${ROUND_ONE_PRICES[currency] / 100}`;
 }
 
 export type BuildRoundOneCheckoutInput = {
@@ -218,6 +262,7 @@ export type BuildRoundOneCheckoutInput = {
   childId: string;
   productVersion: number;
   priceId: string;
+  currency: RoundOneCurrency;
   customerEmail: string | null | undefined;
 };
 
@@ -234,6 +279,7 @@ export function buildRoundOneCheckoutSession(
     child_id: input.childId,
     product_key: ROUND_ONE_PRODUCT_KEY,
     product_version: String(input.productVersion),
+    billing_currency: input.currency,
   };
   const child = encodeURIComponent(input.childId);
   return {
@@ -243,7 +289,7 @@ export function buildRoundOneCheckoutSession(
       line_items: [{ price: input.priceId, quantity: 1 }],
       // Beta/test families use Stripe-managed Promotion Codes rather than a
       // second, staff-created access path. The webhook verifies the original
-      // CAD $250 subtotal, while Stripe remains authoritative for the discount
+      // selected catalog subtotal, while Stripe remains authoritative for the discount
       // and final amount collected.
       allow_promotion_codes: true,
       // The staff follow-up workflow needs a reliable parent phone number.
@@ -265,7 +311,7 @@ export function buildRoundOneCheckoutSession(
       custom_text: {
         submit: {
           message:
-            "First Profit Round 1 is a one-child, non-refundable CAD $250 total today. Your phone number is used for First Profit program-support calls about this child.",
+            `First Profit Round 1 is a one-child, non-refundable ${roundOnePriceLabel(input.currency)} total today. No sales tax is added because First Profit is tax-exempt for K-12 education. Your phone number is used for First Profit program-support calls about this child.`,
         },
       },
       // Deliberately omit `expires_at` and accept Stripe's assigned expiry.
@@ -323,6 +369,8 @@ export type RoundOneEntitlementRow = {
 
 export type RoundOneOrderSummaryRow = {
   status: RoundOneOrderStatus;
+  amount: number;
+  currency: string;
   created_at: string;
   updated_at: string;
 };
@@ -337,6 +385,7 @@ export type RoundOneStatusBody = {
     phase: "sell";
     amount: number;
     currency: string;
+    prices: Array<{ amount: number; currency: RoundOneCurrency }>;
     freeThroughTaskId: "1.1.1";
     unlocksFromTaskId: string;
     unlocksThroughTaskId: string;
@@ -348,11 +397,13 @@ export type RoundOneStatusBody = {
     reason: "paid" | "comped" | "grandfathered" | null;
   };
   canStartCheckout: boolean;
+  pendingCheckout: { amount: number; currency: RoundOneCurrency } | null;
 };
 
 export function shapeRoundOneStatus(input: {
   childId: string;
   product: RoundOneProductRow;
+  prices: Array<RoundOneProductPriceRow & { currency: RoundOneCurrency }>;
   entitlement: RoundOneEntitlementRow | null;
   latestOrder: RoundOneOrderSummaryRow | null;
   disputeHeld?: boolean;
@@ -390,6 +441,10 @@ export function shapeRoundOneStatus(input: {
       phase: "sell",
       amount: input.product.amount,
       currency: input.product.currency,
+      prices: input.prices.map((price) => ({
+        amount: price.amount,
+        currency: price.currency,
+      })),
       freeThroughTaskId: "1.1.1",
       unlocksFromTaskId: input.product.first_locked_task_id,
       unlocksThroughTaskId: input.product.last_included_task_id,
@@ -407,6 +462,15 @@ export function shapeRoundOneStatus(input: {
     // A dispute suspension is also not a fresh chance to pay: staff must review
     // the existing payment instead of sending the family through Checkout again.
     canStartCheckout: !active && !suspended,
+    pendingCheckout:
+      state === "pending"
+      && input.latestOrder
+      && ROUND_ONE_CURRENCIES.includes(input.latestOrder.currency as RoundOneCurrency)
+        ? {
+            amount: input.latestOrder.amount,
+            currency: input.latestOrder.currency as RoundOneCurrency,
+          }
+        : null,
   };
 }
 

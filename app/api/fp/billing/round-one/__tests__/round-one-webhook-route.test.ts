@@ -153,8 +153,8 @@ function paidEvent(): Record<string, unknown> {
         id: "cs_test_round_one",
         payment_status: "paid",
         payment_intent: "pi_round_one",
-        amount_subtotal: 25_000,
-        amount_total: 25_000,
+        amount_subtotal: 35_000,
+        amount_total: 35_000,
         total_details: { amount_discount: 0, amount_tax: 0 },
         currency: "cad",
         metadata: {
@@ -181,7 +181,7 @@ function disputeOpenedEvent(): Record<string, unknown> {
         payment_intent: "pi_round_one",
         status: "needs_response",
         reason: "fraudulent",
-        amount: 25_000,
+        amount: 35_000,
         currency: "cad",
       },
     },
@@ -200,7 +200,8 @@ describe("Round One webhook route", () => {
   beforeEach(() => {
     process.env.STRIPE_SECRET_KEY = "sk_test_not_live";
     process.env.FP_ROUND_ONE_STRIPE_WEBHOOK_SECRET = "whsec_test";
-    process.env.FP_ROUND_ONE_STRIPE_PRICE_ID = "price_round_one_test";
+    process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_CAD = "price_round_one_test";
+    process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_USD = "price_round_one_usd_test";
     refs.event.value = paidEvent();
     refs.signatureError.value = null;
     refs.applied.value = { ok: true, outcome: "granted" };
@@ -251,6 +252,43 @@ describe("Round One webhook route", () => {
     const res = await POST(request());
     expect(res.status).toBe(200);
     expect(refs.stripeConfigs).toEqual([{ apiVersion: "2026-07-29.dahlia" }]);
+  });
+
+  it("requires both configured Sell price variants before accepting events", async () => {
+    delete process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_USD;
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(503);
+    expect(refs.stripeConfigs).toEqual([]);
+    expect(refs.plans).toEqual([]);
+  });
+
+  it("validates and fulfils the confirmed USD $250 variant", async () => {
+    const event = paidEvent();
+    refs.event.value = {
+      ...event,
+      data: {
+        object: {
+          ...(event.data as { object: Record<string, unknown> }).object,
+          amount_subtotal: 25_000,
+          amount_total: 25_000,
+          currency: "usd",
+        },
+      },
+    };
+    refs.lineItems.value = {
+      data: [{ quantity: 1, price: { id: "price_round_one_usd_test" } }],
+    };
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(200);
+    expect(refs.plans[0]).toMatchObject({
+      effect: "paid",
+      amount: 25_000,
+      currency: "usd",
+    });
   });
 
   it("emails the verified parent only after the paid entitlement is granted", async () => {
@@ -325,9 +363,9 @@ describe("Round One webhook route", () => {
         object: {
           ...(paidEvent().data as { object: Record<string, unknown> }).object,
           payment_status: "no_payment_required",
-          amount_subtotal: 25_000,
+          amount_subtotal: 35_000,
           amount_total: 0,
-          total_details: { amount_discount: 25_000, amount_tax: 0 },
+          total_details: { amount_discount: 35_000, amount_tax: 0 },
         },
       },
     };
@@ -337,7 +375,7 @@ describe("Round One webhook route", () => {
     expect(res.status).toBe(200);
     expect(refs.plans[0]).toMatchObject({
       effect: "paid",
-      amount: 25_000,
+      amount: 35_000,
       currency: "cad",
     });
   });
@@ -439,7 +477,7 @@ describe("Round One webhook route", () => {
         object: {
           id: "ch_round_one",
           refunded: false,
-          amount: 25_000,
+          amount: 35_000,
           amount_refunded: 5_000,
           currency: "cad",
           payment_intent: "pi_round_one",
@@ -477,7 +515,7 @@ describe("Round One webhook route", () => {
           payment_intent: null,
           status: "needs_response",
           reason: "fraudulent",
-          amount: 25_000,
+          amount: 35_000,
           currency: "cad",
         },
       },
@@ -501,7 +539,7 @@ describe("Round One webhook route", () => {
       processorObjectId: "dp_round_one",
       processorStatus: "needs_response",
       processorReason: "fraudulent",
-      processorAmount: 25_000,
+      processorAmount: 35_000,
     });
     expect(refs.emails).toEqual([]);
   });
@@ -697,7 +735,7 @@ describe("Round One webhook route", () => {
           payment_intent: "pi_round_one",
           status: "won",
           reason: "fraudulent",
-          amount: 25_000,
+          amount: 35_000,
           currency: "cad",
         },
       },
@@ -751,7 +789,7 @@ describe("Round One webhook route", () => {
       data: {
         object: {
           ...(event.data as { object: Record<string, unknown> }).object,
-          amount_subtotal: 25_000,
+          amount_subtotal: 35_000,
           amount_total: 10_000,
           total_details: { amount_discount: 10_000, amount_tax: 0 },
         },

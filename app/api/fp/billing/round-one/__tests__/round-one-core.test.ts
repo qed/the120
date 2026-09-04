@@ -37,6 +37,8 @@ const newOrder = (patch?: Partial<RoundOneBeginRow>): RoundOneBeginRow => ({
   stripe_session_id: null,
   stripe_session_expires_at: null,
   grant_kind: null,
+  amount: 35_000,
+  currency: "cad",
   ...patch,
 });
 
@@ -47,6 +49,10 @@ beforeEach(() => {
   deps = {
     ownsChild: vi.fn().mockResolvedValue("owned"),
     readProduct: vi.fn().mockResolvedValue(product()),
+    readPrices: vi.fn().mockResolvedValue([
+      { product_key: ROUND_ONE_PRODUCT_KEY, product_version: 1, amount: 35_000, currency: "cad", active: true },
+      { product_key: ROUND_ONE_PRODUCT_KEY, product_version: 1, amount: 25_000, currency: "usd", active: true },
+    ]),
     readEntitlement: vi.fn().mockResolvedValue(null),
     hasDisputeHold: vi.fn().mockResolvedValue(false),
     readLatestOrder: vi.fn().mockResolvedValue(null),
@@ -59,7 +65,7 @@ beforeEach(() => {
       id: "price_round_one_test",
       active: true,
       currency: "cad",
-      unit_amount: 25_000,
+      unit_amount: 35_000,
       type: "one_time",
     }),
     createSession: vi.fn().mockResolvedValue({
@@ -84,6 +90,7 @@ const checkoutInput = () => ({
   ...statusInput(),
   customerEmail: "parent@example.com",
   priceId: "price_round_one_test",
+  currency: "cad" as const,
   nowEpochSeconds: 1_800_000_000,
 });
 
@@ -137,6 +144,8 @@ describe("readRoundOneStatus", () => {
     });
     vi.mocked(deps.readLatestOrder).mockResolvedValue({
       status: "refunded",
+      amount: 35_000,
+      currency: "cad",
       created_at: "2026-01-02T00:00:00Z",
       updated_at: "2026-01-03T00:00:00Z",
     });
@@ -165,6 +174,8 @@ describe("readRoundOneStatus", () => {
     });
     vi.mocked(deps.readLatestOrder).mockResolvedValue({
       status: "refunded",
+      amount: 35_000,
+      currency: "cad",
       created_at: "2026-01-02T00:00:00Z",
       updated_at: "2026-01-03T00:00:00Z",
     });
@@ -185,6 +196,8 @@ describe("readRoundOneStatus", () => {
     vi.mocked(deps.hasDisputeHold).mockResolvedValue(true);
     vi.mocked(deps.readLatestOrder).mockResolvedValue({
       status: "refunded",
+      amount: 35_000,
+      currency: "cad",
       created_at: "2026-01-02T00:00:00Z",
       updated_at: "2026-01-03T00:00:00Z",
     });
@@ -209,6 +222,8 @@ describe("readRoundOneStatus", () => {
   it("does not let a paid-looking order substitute for an entitlement", async () => {
     vi.mocked(deps.readLatestOrder).mockResolvedValue({
       status: "paid",
+      amount: 35_000,
+      currency: "cad",
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
     });
@@ -243,6 +258,62 @@ describe("startRoundOneCheckout", () => {
       "cs_test_1",
       new Date(1_800_001_800 * 1000).toISOString()
     );
+  });
+
+  it("creates the confirmed USD $250 variant without changing the Sell entitlement", async () => {
+    vi.mocked(stripe.retrievePrice).mockResolvedValue({
+      id: "price_round_one_usd_test",
+      active: true,
+      currency: "usd",
+      unit_amount: 25_000,
+      type: "one_time",
+    });
+    vi.mocked(deps.beginOrder).mockResolvedValue(
+      newOrder({ amount: 25_000, currency: "usd" })
+    );
+
+    const result = await startRoundOneCheckout(deps, stripe, {
+      ...checkoutInput(),
+      priceId: "price_round_one_usd_test",
+      currency: "usd",
+    });
+
+    expect(result).toEqual({
+      kind: "checkout",
+      url: "https://checkout.stripe.com/c/pay/cs_test_1",
+      reused: false,
+    });
+    expect(deps.beginOrder).toHaveBeenCalledWith(
+      PARENT_ID,
+      CHILD_ID,
+      ROUND_ONE_PRODUCT_KEY,
+      1,
+      "usd"
+    );
+    const [params] = vi.mocked(stripe.createSession).mock.calls[0];
+    expect(params.line_items).toEqual([
+      { price: "price_round_one_usd_test", quantity: 1 },
+    ]);
+    expect(params.metadata).toMatchObject({
+      billing_currency: "usd",
+      product_key: ROUND_ONE_PRODUCT_KEY,
+    });
+    const submitCopy = params.custom_text?.submit;
+    expect(typeof submitCopy === "string" ? submitCopy : submitCopy?.message).toMatch(
+      /USD \$250/
+    );
+  });
+
+  it("keeps an existing pending checkout in its original currency", async () => {
+    vi.mocked(deps.beginOrder).mockResolvedValue(
+      newOrder({ amount: 25_000, currency: "usd" })
+    );
+
+    await expect(startRoundOneCheckout(deps, stripe, checkoutInput())).resolves.toEqual({
+      kind: "currency_locked",
+      currency: "usd",
+    });
+    expect(stripe.createSession).not.toHaveBeenCalled();
   });
 
   it("refuses another family's child before Stripe or order creation", async () => {

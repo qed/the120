@@ -134,8 +134,9 @@ async function finishDisputeCheckoutCleanup(
 export async function POST(req: Request): Promise<Response> {
   const stripeKey = process.env.STRIPE_SECRET_KEY?.trim();
   const webhookSecret = process.env.FP_ROUND_ONE_STRIPE_WEBHOOK_SECRET?.trim();
-  const expectedPriceId = process.env.FP_ROUND_ONE_STRIPE_PRICE_ID?.trim();
-  if (!stripeKey || !webhookSecret || !expectedPriceId) {
+  const expectedCadPriceId = process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_CAD?.trim();
+  const expectedUsdPriceId = process.env.FP_ROUND_ONE_STRIPE_PRICE_ID_USD?.trim();
+  if (!stripeKey || !webhookSecret || !expectedCadPriceId || !expectedUsdPriceId) {
     console.error("[fp/billing/round-one/webhook] configuration is incomplete");
     return Response.json({ error: "Webhook unavailable" }, { status: 503 });
   }
@@ -203,6 +204,11 @@ export async function POST(req: Request): Promise<Response> {
     event.type === "checkout.session.completed"
     || event.type === "checkout.session.async_payment_succeeded"
   );
+  const expectedPriceId = session?.currency === "cad"
+    ? expectedCadPriceId
+    : session?.currency === "usd"
+      ? expectedUsdPriceId
+      : null;
   let catalogPriceMatches = false;
   if (needsCatalogProof) {
     try {

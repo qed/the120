@@ -1,14 +1,20 @@
 # First Profit Round One billing runbook
 
-Status: the reviewed foundation
-`20260927120000_fp_round_one_billing.sql` was applied to the linked production
-Supabase project on 2026-09-04, followed by the dependent site-offer and
-Watchtower migrations. A post-apply dry run reports the remote database fully
-up to date. The isolated Stripe Test catalog, discounts, webhook, restricted
-credential, and release-branch Preview configuration are prepared. The two
-application Preview flags are enabled only for their release branches; no live
-payment or Production application activation has occurred. Both database
-rollout switches remain at the migration's explicit `false` seed values.
+Status: released to Production with activation intentionally off. The reviewed
+foundation `20260927120000_fp_round_one_billing.sql` was applied to the linked
+production Supabase project on 2026-09-04, followed by the dependent site-offer
+and Watchtower migrations. A post-apply dry run reported the remote database
+fully up to date. The backend was merged through `qed/the120#146`, reached a
+fresh Ready Production deployment, and passed unauthenticated-route, CORS, and
+kill-switch smoke checks. The matching First Profit client was then merged
+through `qed/first-profit#39` and deployed from `main`.
+
+The isolated Stripe Test catalog, discounts, webhook, restricted credential,
+and release-branch Preview configuration remain test-only. Production has no
+Round One billing variables or activation flag, no live Round One Stripe
+catalog was created, and both database rollout switches remain at the
+migration's explicit `false` seed values. This preserves the pre-activation
+rollback boundary while the documented tax/live-catalog gate remains open.
 
 ## Product contract
 

@@ -478,6 +478,11 @@ pending Checkout already exists in the other currency, the API refuses the
 switch and returns that pending currency instead of creating a second payable
 Session.
 
+Checkout disables Stripe Adaptive Pricing for this flow. The parent has already
+made an explicit USD $250 or CAD $350 choice in First Profit, so Stripe must
+present and collect that selected catalog currency rather than silently
+localizing it again from the payer's IP address.
+
 Success:
 
 ```json

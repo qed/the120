@@ -287,6 +287,10 @@ export function buildRoundOneCheckoutSession(
       mode: "payment",
       integration_identifier: roundOneIntegrationIdentifier(input.orderId),
       line_items: [{ price: input.priceId, quantity: 1 }],
+      // The parent already made an explicit USD/CAD choice in First Profit.
+      // Do not let account-level Adaptive Pricing silently replace that choice
+      // with an IP-localized amount on Stripe Checkout.
+      adaptive_pricing: { enabled: false },
       // Beta/test families use Stripe-managed Promotion Codes rather than a
       // second, staff-created access path. The webhook verifies the original
       // selected catalog subtotal, while Stripe remains authoritative for the discount

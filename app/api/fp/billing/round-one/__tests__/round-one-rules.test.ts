@@ -190,6 +190,7 @@ describe("Stripe Checkout shape", () => {
     expect(built.params.line_items).toEqual([{ price: "price_round_one_test", quantity: 1 }]);
     expect("payment_method_types" in built.params).toBe(false);
     expect("automatic_tax" in built.params).toBe(false);
+    expect(built.params.adaptive_pricing).toEqual({ enabled: false });
     expect(built.params.allow_promotion_codes).toBe(true);
     expect(built.params.phone_number_collection).toEqual({ enabled: true });
     const submitCopy = built.params.custom_text?.submit;

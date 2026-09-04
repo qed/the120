@@ -72,14 +72,15 @@ directly in the isolated Preview environment.
   payable QA Session remains open from this matrix.
 
 The Preview is deliberately **not ready to enable**. A no-signature probe to
-the deployed webhook returned `503 Webhook unavailable` rather than the
-expected configured-path `400 Missing signature`, so the complete runtime
-Stripe configuration is not yet present or verifiable. Vercel also has
-Deployment Protection on this Preview, which means Stripe cannot deliver to the
-current URL without a project-scoped automation bypass or a deliberately public
-test endpoint. Before enabling either application flag, configure a dedicated
-test-mode server credential for the same Stripe sandbox, resolve the Preview
-protection path, redeploy, and require the no-signature probe to return `400`.
+the final branch-aware deployment returned `503 Webhook unavailable`, and its
+safe diagnostic named exactly one missing value:
+`FP_ROUND_ONE_STRIPE_SECRET_KEY`. Vercel also has Deployment Protection on this
+Preview, which means Stripe cannot deliver to the current URL without a
+project-scoped [Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation)
+token in the webhook URL or a deliberately public test endpoint. Before
+enabling either application flag, configure a dedicated test-mode server
+credential for the same Stripe sandbox, resolve the Preview protection path,
+redeploy, and require the no-signature probe to return `400 Missing signature`.
 Production remains untouched.
 
 ## Required server environment

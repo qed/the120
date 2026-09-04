@@ -1,7 +1,8 @@
 # First Profit Round One billing runbook
 
-Status: backend foundation only. No migration, Stripe object, environment
-change, deployment, or live payment was performed while authoring this work.
+Status: backend foundation plus an isolated Stripe Test mode catalog. No
+migration, environment change, preview deployment, production change, or live
+payment has been performed.
 
 ## Product contract
 
@@ -29,6 +30,18 @@ Peter confirmed the USD $250 / CAD $350 choice for Round One Sell. The proposed
 USD $1,000 / CAD $1,400 prices belong to the later Build phase and must not be
 created under, displayed by, or grant access through this Round One flow. This
 branch contains only the two confirmed Sell variants.
+
+### Stripe Test mode catalog created 2026-09-04
+
+- Stripe context: `Hatch Coding CDN · sandbox` (`acct_103s7v25N9cbf3wU`)
+- Product: `First Profit Round 1: Sell` (`prod_VCNRdrRPJs0yOi`)
+- USD $250 one-time Price: `price_1UBygU25N9cbf3wUoIPe7BjV`
+- CAD $350 one-time Price: `price_1UBygW25N9cbf3wULX116M5V`
+
+All three objects were retrieved after creation and reported `livemode=false`.
+No Build price, live-mode object, webhook destination, or Promotion Code was
+created. These identifiers are non-secret; credentials and webhook signing
+secrets must still be configured directly in the isolated Preview environment.
 
 ## Required server environment
 

@@ -64,6 +64,12 @@ directly in the isolated Preview environment.
   `ROUND1QA100` (100% off). Each is test-mode only, one-time, limited to 50
   redemptions, and backed by a coupon restricted to
   `prod_VCNRdrRPJs0yOi`.
+- A direct Stripe sandbox compatibility matrix created USD $250 and CAD $350
+  full-price Sessions with Promotion Code entry enabled, a USD 20%-off Session
+  with a $200 total, and a CAD 100%-off Session with a $0 total. Every Session
+  reported `livemode=false`, the expected currency/subtotal/discount equation,
+  and was immediately expired after retrieval. No charge was completed and no
+  payable QA Session remains open from this matrix.
 
 The Preview is deliberately **not ready to enable**. A no-signature probe to
 the deployed webhook returned `503 Webhook unavailable` rather than the

@@ -43,6 +43,10 @@ import {
 import { PATH_EVIDENCE_BUCKET } from "../erase-family-rules";
 import { IMAGE_LAB_BUCKET } from "@/app/staff/image-lab/lib/image-lab-rules";
 import { FP_CHILD_MEDIA_BUCKET } from "@/app/lib/fp/child-photo/child-photo-rules";
+import {
+  ROUND_ONE_BILLING_MIGRATION_SPEC,
+  safelyResolveMigrationContract,
+} from "@/app/lib/test-utils/migration-contract";
 import { parseMigrationSchema } from "./helpers/migration-schema";
 
 const schema = parseMigrationSchema();
@@ -109,10 +113,12 @@ describe("R28 erasure coverage — the ledger matches the real schema", () => {
       );
     }
 
-    const migration = readFileSync(
-      path.resolve(process.cwd(), "supabase/migrations/20260927120000_fp_round_one_billing.sql"),
-      "utf8"
+    const resolution = safelyResolveMigrationContract(
+      path.resolve(process.cwd(), "supabase/migrations"),
+      ROUND_ONE_BILLING_MIGRATION_SPEC
     );
+    if (!resolution.ok) throw resolution.error;
+    const migration = resolution.value.raw;
     const webhookTable = migration.match(
       /create table if not exists public\.fp_billing_webhook_events\s*\(([\s\S]*?)\);/i
     )?.[1];

@@ -642,6 +642,7 @@ export function webhookRpcOutcomeIsSuccess(outcome: unknown): boolean {
     "dispute_suspended",
     "dispute_closed_review",
     "partial_refund_review",
+    "partial_refund_stale",
     "refund_stands",
     "cancelled",
     "failed",

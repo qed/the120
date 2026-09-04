@@ -2,6 +2,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  lastCreateOrReplaceFunction,
+  ROUND_ONE_BILLING_MIGRATION_SPEC,
+  safelyResolveMigrationContract,
+} from "@/app/lib/test-utils/migration-contract";
+import {
   ROUND_ONE_ACCESS_CODE,
   ROUND_ONE_AMOUNT_CENTS,
   ROUND_ONE_CURRENCY,
@@ -10,13 +15,40 @@ import {
   ROUND_ONE_PRODUCT_KEY,
 } from "../round-one-rules";
 
-const raw = readFileSync(
-  path.resolve(process.cwd(), "supabase/migrations/20260927120000_fp_round_one_billing.sql"),
-  "utf8"
+const migrationsDir = path.resolve(process.cwd(), "supabase/migrations");
+const migrationResolution = safelyResolveMigrationContract(
+  migrationsDir,
+  ROUND_ONE_BILLING_MIGRATION_SPEC
 );
+const raw = migrationResolution.ok ? migrationResolution.value.raw : "";
 const sql = raw.replace(/--[^\n]*/g, "").toLowerCase();
+const effectiveFunction = (name: string): string => migrationResolution.ok
+  ? lastCreateOrReplaceFunction(raw, `public.${name}`)
+      .replace(/--[^\n]*/g, "")
+      .toLowerCase()
+  : "";
+const beginOrderSql = effectiveFunction("fp_billing_begin_order");
+const attachCheckoutSql = effectiveFunction("fp_billing_attach_checkout");
+const applyEventSql = effectiveFunction("fp_billing_apply_stripe_event");
+const staffAccessSql = effectiveFunction("fp_billing_set_round_one_access");
+const completionGuardSql = effectiveFunction("fp_round_one_completion_guard");
+const fillParentPhoneSql = effectiveFunction("fp_billing_fill_parent_phone");
+const offerReadyNotificationSql = effectiveFunction("fp_round_one_offer_ready_notification");
 
-describe("Round One migration parity", () => {
+describe("Round One migration manifest", () => {
+  it("resolves one renamed foundation plus all ordered additive upgrades", () => {
+    if (!migrationResolution.ok) throw migrationResolution.error;
+    expect(migrationResolution.value.foundation).toMatch(
+      /^\d{14}_fp_round_one_billing\.sql$/
+    );
+    expect(migrationResolution.value.orderedFiles).toEqual([
+      migrationResolution.value.foundation,
+      ...migrationResolution.value.upgrades,
+    ]);
+  });
+});
+
+describe.skipIf(!migrationResolution.ok)("Round One migration parity", () => {
   it("pins the separate Sell product and task range to the server constants", () => {
     for (const value of [
       ROUND_ONE_PRODUCT_KEY,
@@ -84,44 +116,26 @@ describe("Round One migration parity", () => {
   });
 
   it("preserves the pending order until Stripe-aware checkout reconciliation", () => {
-    const beginStart = sql.indexOf(
-      "create or replace function public.fp_billing_begin_order"
-    );
-    const attachStart = sql.indexOf(
-      "create or replace function public.fp_billing_attach_checkout"
-    );
-    const beginOrder = sql.slice(beginStart, attachStart);
-    expect(beginStart).toBeGreaterThanOrEqual(0);
-    expect(attachStart).toBeGreaterThan(beginStart);
-    expect(beginOrder).not.toContain("update public.fp_billing_orders");
-    expect(beginOrder).not.toContain("interval '1 hour'");
-    expect(beginOrder).toContain("exception when unique_violation");
-    expect(beginOrder).toContain("and o.status = 'pending'");
+    expect(beginOrderSql).not.toContain("update public.fp_billing_orders");
+    expect(beginOrderSql).not.toContain("interval '1 hour'");
+    expect(beginOrderSql).toContain("exception when unique_violation");
+    expect(beginOrderSql).toContain("and o.status = 'pending'");
   });
 
   it("serializes duplicate and out-of-order events before changing order state", () => {
-    const applyStart = sql.indexOf(
-      "create or replace function public.fp_billing_apply_stripe_event"
-    );
-    const accessStart = sql.indexOf(
-      "create or replace function public.fp_billing_set_round_one_access"
-    );
-    const apply = sql.slice(applyStart, accessStart);
-    const eventLock = apply.indexOf(
+    const eventLock = applyEventSql.indexOf(
       "pg_advisory_xact_lock(hashtextextended(p_event_id, 0))"
     );
-    const replayRead = apply.indexOf(
+    const replayRead = applyEventSql.indexOf(
       "select 1 from public.fp_billing_webhook_events w"
     );
-    const childLock = apply.indexOf(
+    const childLock = applyEventSql.indexOf(
       "concat_ws(':', p_child_id::text, p_product_key, p_product_version::text)"
     );
-    const orderMutation = apply.indexOf("if p_effect = 'pending' then");
-    const eventStamp = apply.indexOf(
+    const orderMutation = applyEventSql.indexOf("if p_effect = 'pending' then");
+    const eventStamp = applyEventSql.indexOf(
       "insert into public.fp_billing_webhook_events"
     );
-    expect(applyStart).toBeGreaterThanOrEqual(0);
-    expect(accessStart).toBeGreaterThan(applyStart);
     expect(eventLock).toBeGreaterThanOrEqual(0);
     expect(replayRead).toBeGreaterThan(eventLock);
     expect(childLock).toBeGreaterThan(replayRead);
@@ -130,17 +144,17 @@ describe("Round One migration parity", () => {
   });
 
   it("keeps terminal and refund transitions monotonic", () => {
-    expect(sql).toMatch(
+    expect(applyEventSql).toMatch(
       /if v_order\.status = 'refunded' or v_order\.refunded_at is not null then\s+v_outcome := 'refund_stands'/
     );
     for (const effect of ["cancelled", "failed"]) {
-      expect(sql).toMatch(
+      expect(applyEventSql).toMatch(
         new RegExp(
           `elsif p_effect = '${effect}' then[\\s\\S]*?if v_order\\.status = 'pending' then[\\s\\S]*?v_outcome := '${effect}'[\\s\\S]*?else[\\s\\S]*?v_outcome := 'terminal_stands'`
         )
       );
     }
-    expect(sql).toMatch(
+    expect(applyEventSql).toMatch(
       /elsif p_effect = 'refunded' then[\s\S]*?set status = 'refunded'[\s\S]*?o\.status = 'paid'[\s\S]*?source_order_id = v_replacement_order_id[\s\S]*?set status = 'revoked'/
     );
   });
@@ -152,33 +166,33 @@ describe("Round One migration parity", () => {
     expect(sql).toMatch(
       /revoke all on public\.fp_billing_review_items from anon, authenticated/
     );
-    expect(sql).toMatch(
+    expect(applyEventSql).toMatch(
       /elsif p_effect = 'partial_refund' then[\s\S]*?v_outcome := 'partial_refund_review'[\s\S]*?elsif p_effect in \('dispute_opened', 'dispute_closed'\)/
     );
-    expect(sql).toMatch(
+    expect(applyEventSql).toMatch(
       /p_effect in \('dispute_opened', 'dispute_closed'\)[\s\S]*?set dispute_suspended_at = coalesce\(dispute_suspended_at, now\(\)\)[\s\S]*?set status = 'suspended'[\s\S]*?suspension_reason = 'stripe_dispute'/
     );
     expect(sql).toMatch(
       /insert into public\.fp_billing_review_items[\s\S]*?on conflict \(review_kind, stripe_object_id\) do update[\s\S]*?insert into public\.fp_billing_webhook_events/
     );
-    expect(sql).toContain("p_effect = 'dispute_closed' then 'dispute_closed_review'");
-    expect(sql).toMatch(
+    expect(applyEventSql).toContain("p_effect = 'dispute_closed' then 'dispute_closed_review'");
+    expect(applyEventSql).toMatch(
       /select min\(held\.dispute_suspended_at\)[\s\S]*?v_outcome := 'dispute_stands'/
     );
   });
 
   it("keeps a dispute product-wide across multiple orders, refund ordering, and review resolution", () => {
-    const disputeBranch = sql.match(
+    const disputeBranch = applyEventSql.match(
       /elsif p_effect in \('dispute_opened', 'dispute_closed'\) then([\s\S]*?)elsif p_effect = 'refunded' then/
     )?.[1] ?? "";
     expect(disputeBranch.indexOf("set dispute_suspended_at")).toBeGreaterThanOrEqual(0);
     expect(disputeBranch.indexOf("set dispute_suspended_at")).toBeLessThan(
       disputeBranch.indexOf("if v_order.status = 'refunded'")
     );
-    expect(sql).toMatch(
+    expect(applyEventSql).toMatch(
       /select min\(held\.dispute_suspended_at\)[\s\S]*?held\.child_id = v_order\.child_id[\s\S]*?held\.product_key = v_order\.product_key[\s\S]*?held\.product_version = v_order\.product_version/
     );
-    expect(sql).not.toMatch(
+    expect(applyEventSql).not.toMatch(
       /select min\(held\.dispute_suspended_at\)[\s\S]{0,500}review_state = 'open'/
     );
   });
@@ -186,29 +200,98 @@ describe("Round One migration parity", () => {
   it("serializes begin and attach with the webhook lock and blocks a second payable URL", () => {
     const lockKey =
       "concat_ws(':', p_child_id::text, p_product_key, p_product_version::text)";
-    expect(sql).toContain(lockKey);
-    expect(sql).toMatch(
-      /create or replace function public\.fp_billing_begin_order[\s\S]*?pg_advisory_xact_lock[\s\S]*?dispute_suspended_at is not null[\s\S]*?select 'access_suspended'/
+    expect(beginOrderSql).toContain(lockKey);
+    expect(beginOrderSql).toMatch(
+      /pg_advisory_xact_lock[\s\S]*?dispute_suspended_at is not null[\s\S]*?select 'access_suspended'/
     );
-    expect(sql).toMatch(
-      /create or replace function public\.fp_billing_attach_checkout[\s\S]*?pg_advisory_xact_lock[\s\S]*?not exists \([\s\S]*?held\.dispute_suspended_at is not null/
+    expect(attachCheckoutSql).toMatch(
+      /pg_advisory_xact_lock[\s\S]*?not exists \([\s\S]*?held\.dispute_suspended_at is not null/
     );
   });
 
   it("system-supersedes partial-refund work after full-refund finality without deleting audit", () => {
     expect(sql).toContain("review_state in ('open', 'resolved', 'superseded')");
-    expect(sql).toMatch(
+    expect(applyEventSql).toMatch(
       /elsif p_effect = 'refunded' then[\s\S]*?update public\.fp_billing_review_items review[\s\S]*?set review_state = 'superseded'[\s\S]*?review\.review_kind = 'partial_refund'/
     );
-    expect(sql).toMatch(
+    expect(applyEventSql).toMatch(
       /on conflict \(review_kind, stripe_object_id\) do update[\s\S]*?v_order\.status = 'refunded'[\s\S]*?then 'superseded'/
     );
-    expect(sql).toContain("insert into public.fp_billing_webhook_events");
-    expect(sql).not.toMatch(/delete from public\.fp_billing_review_items/);
+    expect(applyEventSql).toContain("insert into public.fp_billing_webhook_events");
+    expect(applyEventSql).not.toMatch(/delete from public\.fp_billing_review_items/);
+  });
+
+  it("keeps cumulative partial-refund amount and event provenance monotonic across a staff resolution", () => {
+    expect(applyEventSql).toMatch(
+      /elsif p_effect = 'partial_refund' then[\s\S]*?p_processor_amount <= v_review\.processor_amount[\s\S]*?v_outcome := 'partial_refund_stale'/
+    );
+    expect(applyEventSql).toMatch(
+      /last_stripe_event_id = case[\s\S]*?excluded\.processor_amount <= fp_billing_review_items\.processor_amount[\s\S]*?then fp_billing_review_items\.last_stripe_event_id/
+    );
+    expect(applyEventSql).toMatch(
+      /processor_amount = case[\s\S]*?greatest\([\s\S]*?coalesce\(fp_billing_review_items\.processor_amount, 0\),[\s\S]*?excluded\.processor_amount/
+    );
+    expect(applyEventSql).toMatch(
+      /review_state = case[\s\S]*?excluded\.processor_amount <= fp_billing_review_items\.processor_amount[\s\S]*?then fp_billing_review_items\.review_state/
+    );
+    expect(applyEventSql).toMatch(
+      /resolved_at = case[\s\S]*?excluded\.processor_amount <= fp_billing_review_items\.processor_amount[\s\S]*?then fp_billing_review_items\.resolved_at/
+    );
+  });
+
+  it("models 5000, staff resolution, then delayed 2000 as a stale audit delivery", () => {
+    expect(applyEventSql).toMatch(
+      /p_processor_amount <= v_review\.processor_amount[\s\S]*?v_outcome := 'partial_refund_stale'/
+    );
+    expect(applyEventSql).toMatch(
+      /excluded\.processor_amount <= fp_billing_review_items\.processor_amount[\s\S]*?then fp_billing_review_items\.review_state/
+    );
+    expect(applyEventSql).toMatch(
+      /excluded\.processor_amount <= fp_billing_review_items\.processor_amount[\s\S]*?then fp_billing_review_items\.resolved_at/
+    );
+  });
+
+  it("models 2000, staff resolution, then cumulative 5000 as new review work", () => {
+    expect(applyEventSql).toMatch(
+      /when p_effect = 'partial_refund'[\s\S]*?excluded\.processor_amount <= fp_billing_review_items\.processor_amount[\s\S]*?then fp_billing_review_items\.review_state[\s\S]*?else 'open'/
+    );
+    expect(applyEventSql).toMatch(
+      /processor_amount = case[\s\S]*?greatest\([\s\S]*?excluded\.processor_amount/
+    );
+    expect(applyEventSql).toMatch(
+      /resolved_at = case[\s\S]*?excluded\.processor_amount <= fp_billing_review_items\.processor_amount[\s\S]*?then fp_billing_review_items\.resolved_at[\s\S]*?else null/
+    );
+  });
+
+  it("keeps full-refund finality ahead of stale or larger partial snapshots in either delivery order", () => {
+    const lastEventCase = applyEventSql.match(
+      /last_stripe_event_id = case([\s\S]*?)end,\s*processor_status/
+    )?.[1] ?? "";
+    const amountCase = applyEventSql.match(
+      /processor_amount = case([\s\S]*?)end,\s*processor_currency/
+    )?.[1] ?? "";
+    const eventFullFinality = lastEventCase.indexOf("v_order.status = 'refunded'");
+    const staleEvent = lastEventCase.indexOf(
+      "excluded.processor_amount <= fp_billing_review_items.processor_amount"
+    );
+    expect(eventFullFinality).toBeGreaterThanOrEqual(0);
+    expect(staleEvent).toBeGreaterThan(eventFullFinality);
+    const amountFullFinality = amountCase.indexOf("v_order.status = 'refunded'");
+    const greatestAmount = amountCase.indexOf("greatest(");
+    expect(amountFullFinality).toBeGreaterThanOrEqual(0);
+    expect(greatestAmount).toBeGreaterThan(amountFullFinality);
+    expect(applyEventSql).toMatch(
+      /v_order\.status = 'refunded'[\s\S]*?then fp_billing_review_items\.processor_amount[\s\S]*?greatest/
+    );
+  });
+
+  it("persists a replay-safe dispute cleanup completion stamp", () => {
+    expect(sql).toContain("checkout_cleanup_completed_at timestamptz");
+    expect(raw).toContain("original ledger provenance");
   });
 
   it("does not let the emergency access seam clear a dispute suspension", () => {
-    expect(sql).toMatch(
+    expect(staffAccessSql).toMatch(
       /v_dispute_hold_order_id is not null[\s\S]*?v_entitlement\.status = 'suspended'[\s\S]*?v_outcome := 'dispute_requires_review'/
     );
   });
@@ -218,44 +301,44 @@ describe("Round One migration parity", () => {
     expect(sql).toContain("request_id uuid not null unique");
     expect(sql).toContain("actor_id uuid not null references public.staff");
     expect(sql).toContain("note text not null");
-    expect(sql).toContain("active admin staff actor required");
-    expect(sql).toContain("v_outcome := 'paid_requires_refund'");
+    expect(staffAccessSql).toContain("active admin staff actor required");
+    expect(staffAccessSql).toContain("v_outcome := 'paid_requires_refund'");
     expect(sql).toMatch(
       /grant execute on function public\.fp_billing_set_round_one_access\(uuid, text, text, uuid, uuid\)[\s\S]*?to service_role/
     );
-    expect(sql).toContain("round one request id reused with different payload");
-    expect(sql).toMatch(
+    expect(staffAccessSql).toContain("round one request id reused with different payload");
+    expect(staffAccessSql).toMatch(
       /v_prior\.child_id <> p_child_id[\s\S]*?v_prior\.action <> p_action[\s\S]*?v_prior\.actor_id <> p_actor[\s\S]*?v_prior\.note <> trim\(p_note\)/
     );
   });
 
   it("enforces paid task completion in the database while leaving 1.1.1 free", () => {
-    expect(sql).toContain("create or replace function public.fp_round_one_completion_guard()");
+    expect(completionGuardSql).toContain("create or replace function public.fp_round_one_completion_guard()");
     expect(sql).toContain("create trigger fp_round_one_completion_guard");
-    expect(sql).toContain("from public.fp_round_one_completed_task_ids(new.doc)");
-    expect(sql).toContain("from public.fp_round_one_completed_task_ids(old.doc)");
-    expect(sql).toContain("n.task_id <> '1.1.1'");
-    expect(sql).toContain("e.access_code = 'phase:sell'");
-    expect(sql).toContain("e.status = 'active'");
-    expect(sql).toContain("for share of e");
-    expect(sql).toContain("round one access is required to complete this task");
+    expect(completionGuardSql).toContain("from public.fp_round_one_completed_task_ids(new.doc)");
+    expect(completionGuardSql).toContain("from public.fp_round_one_completed_task_ids(old.doc)");
+    expect(completionGuardSql).toContain("n.task_id <> '1.1.1'");
+    expect(completionGuardSql).toContain("e.access_code = 'phase:sell'");
+    expect(completionGuardSql).toContain("e.status = 'active'");
+    expect(completionGuardSql).toContain("for share of e");
+    expect(completionGuardSql).toContain("round one access is required to complete this task");
     expect(sql).toContain("completion_enforcement_enabled boolean not null default false");
-    expect(sql).toContain("product.completion_enforcement_enabled = true");
+    expect(completionGuardSql).toContain("product.completion_enforcement_enabled = true");
   });
 
   it("binds signed Stripe effects to processor object identity once known", () => {
-    expect(sql).toContain("processor_identity_mismatch");
-    expect(sql).toMatch(
+    expect(applyEventSql).toContain("processor_identity_mismatch");
+    expect(applyEventSql).toMatch(
       /v_order\.stripe_checkout_session_id <> p_session_id[\s\S]*?v_order\.stripe_payment_intent_id <> p_payment_intent_id/
     );
   });
 
   it("fills the parent support phone safely without overwriting an existing number", () => {
-    expect(sql).toContain(
+    expect(fillParentPhoneSql).toContain(
       "create or replace function public.fp_billing_fill_parent_phone"
     );
-    expect(sql).toContain("v_phone !~ '^\\+[1-9][0-9]{6,14}$'");
-    expect(sql).toContain("trim(coalesce(p.phone, '')) = ''");
+    expect(fillParentPhoneSql).toContain("v_phone !~ '^\\+[1-9][0-9]{6,14}$'");
+    expect(fillParentPhoneSql).toContain("trim(coalesce(p.phone, '')) = ''");
     expect(sql).toMatch(
       /grant execute on function public\.fp_billing_fill_parent_phone\(uuid, text\)[\s\S]*?to service_role/
     );
@@ -273,7 +356,7 @@ describe("Round One migration parity", () => {
     expect(sql).toContain("claimed_at timestamptz");
     expect(sql).toContain("attempts integer not null default 0");
     expect(sql).toContain("fp_parent_notification_outbox_pending_idx");
-    expect(sql).toMatch(
+    expect(applyEventSql).toMatch(
       /v_outcome = 'granted'[\s\S]*?insert into public\.fp_parent_notification_outbox[\s\S]*?fp-round-one-stripe-setup:/
     );
     expect(sql).toContain(
@@ -282,7 +365,7 @@ describe("Round One migration parity", () => {
     expect(sql).toContain(
       "create trigger fp_round_one_offer_ready_notification"
     );
-    expect(sql).toMatch(
+    expect(offerReadyNotificationSql).toMatch(
       /fp_round_one_price_picker_ready\(new\.doc\)[\s\S]*?fp-offer-price-ready:/
     );
     expect(sql).toMatch(
@@ -305,13 +388,13 @@ describe("Round One migration parity", () => {
   });
 
   it("upgrades complimentary access after real payment and preserves another paid order on refund", () => {
-    expect(sql).toMatch(
+    expect(applyEventSql).toMatch(
       /v_entitlement\.grant_kind = 'paid'[\s\S]*?v_outcome := 'duplicate_paid'[\s\S]*?insert into public\.fp_billing_entitlements/
     );
-    expect(sql).toMatch(
+    expect(applyEventSql).toMatch(
       /v_replacement_order_id[\s\S]*?o\.status = 'paid'[\s\S]*?source_order_id = v_replacement_order_id/
     );
-    expect(sql).toMatch(
+    expect(applyEventSql).toMatch(
       /else[\s\S]*?set status = 'revoked', revoked_at = now\(\)[\s\S]*?e\.source_order_id = v_order\.id/
     );
   });
@@ -335,10 +418,10 @@ describe("Round One migration parity", () => {
   });
 
   it("serializes complimentary grants with the signed payment state machine", () => {
-    expect(sql).toContain(
+    expect(staffAccessSql).toContain(
       "concat_ws(':', p_child_id::text, v_product.product_key, v_product.version::text)"
     );
-    expect(sql).toMatch(
+    expect(staffAccessSql).toMatch(
       /select \* into strict v_product[\s\S]*?pg_advisory_xact_lock[\s\S]*?select \* into v_entitlement/
     );
   });

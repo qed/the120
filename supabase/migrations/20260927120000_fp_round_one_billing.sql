@@ -202,6 +202,10 @@ create table if not exists public.fp_billing_webhook_events (
   event_type text not null,
   order_id uuid references public.fp_billing_orders (id) on delete set null,
   outcome text not null,
+  -- Dispute cleanup crosses the Postgres/Stripe boundary after the durable hold
+  -- commits. This stamp lets a retry use original ledger provenance and prove
+  -- that every already-issued sibling Checkout reached a terminal state.
+  checkout_cleanup_completed_at timestamptz,
   processed_at timestamptz not null default now()
 );
 
@@ -849,6 +853,7 @@ declare
   v_replacement_order_id uuid;
   v_dispute_hold_at timestamptz;
   v_entitlement_found boolean := false;
+  v_review_found boolean := false;
 begin
   -- Serialize duplicate deliveries before checking the durable event ledger.
   perform pg_advisory_xact_lock(hashtextextended(p_event_id, 0));
@@ -973,7 +978,8 @@ begin
     where review.review_kind = v_review_kind
       and review.stripe_object_id = p_processor_object_id
     for update;
-    if found and (
+    v_review_found := found;
+    if v_review_found and (
       v_review.order_id <> v_order.id
       or v_review.parent_id <> v_order.parent_id
       or v_review.child_id <> v_order.child_id
@@ -1123,6 +1129,13 @@ begin
     -- below is the durable, staff-actionable effect of this event.
     if v_order.status = 'refunded' or v_order.refunded_at is not null then
       v_outcome := 'refund_stands';
+    elsif v_review_found
+      and v_review.processor_amount is not null
+      and p_processor_amount <= v_review.processor_amount then
+      -- Charge.amount_refunded is cumulative. Equal or smaller snapshots are
+      -- historical observations, not new review work: retain the highest
+      -- amount/event and preserve any staff resolution.
+      v_outcome := 'partial_refund_stale';
     else
       v_outcome := 'partial_refund_review';
     end if;
@@ -1246,23 +1259,53 @@ begin
       end
     )
     on conflict (review_kind, stripe_object_id) do update
-    set last_stripe_event_id = excluded.last_stripe_event_id,
+    set last_stripe_event_id = case
+          when p_effect = 'partial_refund'
+               and (v_order.status = 'refunded' or v_order.refunded_at is not null)
+            then fp_billing_review_items.last_stripe_event_id
+          when p_effect = 'partial_refund'
+               and fp_billing_review_items.processor_amount is not null
+               and excluded.processor_amount <= fp_billing_review_items.processor_amount
+            then fp_billing_review_items.last_stripe_event_id
+          else excluded.last_stripe_event_id
+        end,
         -- Stripe does not guarantee event order. A late `created` delivery must
         -- not overwrite the terminal status already learned from `closed`.
         processor_status = case
+          when p_effect = 'partial_refund'
+               and (v_order.status = 'refunded' or v_order.refunded_at is not null)
+            then fp_billing_review_items.processor_status
           when fp_billing_review_items.processor_closed_at is not null
                and p_effect = 'dispute_opened'
             then fp_billing_review_items.processor_status
           else excluded.processor_status
         end,
         processor_reason = case
+          when p_effect = 'partial_refund'
+               and (v_order.status = 'refunded' or v_order.refunded_at is not null)
+            then fp_billing_review_items.processor_reason
           when fp_billing_review_items.processor_closed_at is not null
                and p_effect = 'dispute_opened'
             then fp_billing_review_items.processor_reason
           else excluded.processor_reason
         end,
-        processor_amount = excluded.processor_amount,
-        processor_currency = excluded.processor_currency,
+        processor_amount = case
+          when p_effect = 'partial_refund'
+               and (v_order.status = 'refunded' or v_order.refunded_at is not null)
+            then fp_billing_review_items.processor_amount
+          when p_effect = 'partial_refund'
+            then greatest(
+              coalesce(fp_billing_review_items.processor_amount, 0),
+              excluded.processor_amount
+            )
+          else excluded.processor_amount
+        end,
+        processor_currency = case
+          when p_effect = 'partial_refund'
+               and (v_order.status = 'refunded' or v_order.refunded_at is not null)
+            then fp_billing_review_items.processor_currency
+          else excluded.processor_currency
+        end,
         processor_closed_at = coalesce(
           fp_billing_review_items.processor_closed_at,
           excluded.processor_closed_at
@@ -1279,12 +1322,20 @@ begin
           when p_effect = 'partial_refund'
                and (v_order.status = 'refunded' or v_order.refunded_at is not null)
             then 'superseded'
+          when p_effect = 'partial_refund'
+               and fp_billing_review_items.processor_amount is not null
+               and excluded.processor_amount <= fp_billing_review_items.processor_amount
+            then fp_billing_review_items.review_state
           else 'open'
         end,
         resolved_at = case
           when p_effect = 'partial_refund'
                and (v_order.status = 'refunded' or v_order.refunded_at is not null)
             then coalesce(fp_billing_review_items.resolved_at, now())
+          when p_effect = 'partial_refund'
+               and fp_billing_review_items.processor_amount is not null
+               and excluded.processor_amount <= fp_billing_review_items.processor_amount
+            then fp_billing_review_items.resolved_at
           else null
         end,
         resolved_by = case
@@ -1292,12 +1343,20 @@ begin
                and (v_order.status = 'refunded' or v_order.refunded_at is not null)
                and fp_billing_review_items.review_state = 'resolved'
             then fp_billing_review_items.resolved_by
+          when p_effect = 'partial_refund'
+               and fp_billing_review_items.processor_amount is not null
+               and excluded.processor_amount <= fp_billing_review_items.processor_amount
+            then fp_billing_review_items.resolved_by
           else null
         end,
         resolution_note = case
           when p_effect = 'partial_refund'
                and (v_order.status = 'refunded' or v_order.refunded_at is not null)
                and fp_billing_review_items.review_state = 'resolved'
+            then fp_billing_review_items.resolution_note
+          when p_effect = 'partial_refund'
+               and fp_billing_review_items.processor_amount is not null
+               and excluded.processor_amount <= fp_billing_review_items.processor_amount
             then fp_billing_review_items.resolution_note
           else null
         end,

@@ -17,6 +17,13 @@ const errorMessage = (value: unknown): string =>
     ? (value as { message: string }).message
     : "unknown error";
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const STRIPE_EVENT_ID = /^evt_[A-Za-z0-9_]+$/;
+const STRIPE_SESSION_ID = /^cs_[A-Za-z0-9_]+$/;
+
+const validBoundedId = (value: string, pattern: RegExp): boolean =>
+  value.length >= 4 && value.length <= 255 && pattern.test(value);
+
 export function buildRoundOneCoreDeps(db: SupabaseClient): RoundOneCoreDeps {
   return {
     ownsChild: async (parentId, childId) => {
@@ -186,6 +193,144 @@ export type RoundOnePendingCheckout = {
   sessionId: string;
 };
 
+export type RoundOneWebhookCleanupScope = {
+  orderId: string;
+  parentId: string;
+  childId: string;
+  productKey: string;
+  productVersion: number;
+};
+
+export type RoundOneWebhookCleanupProvenance =
+  | { state: "complete" }
+  | { state: "pending"; scope: RoundOneWebhookCleanupScope };
+
+/**
+ * Resolve dispute cleanup only from the immutable event ledger and its order
+ * FK. Stripe metadata is required to apply a new event, but it is deliberately
+ * not authoritative on replay: PaymentIntent metadata can be edited later.
+ */
+export async function readRoundOneWebhookCleanupProvenance(
+  db: SupabaseClient,
+  eventId: string,
+  eventType: "charge.dispute.created" | "charge.dispute.closed"
+): Promise<RoundOneWebhookCleanupProvenance | "missing" | "error"> {
+  try {
+    if (!validBoundedId(eventId, STRIPE_EVENT_ID)) {
+      console.error("[fp/billing/round-one] dispute cleanup event id is malformed");
+      return "error";
+    }
+    const { data: event, error: eventError } = await db
+      .from("fp_billing_webhook_events")
+      .select("event_type, order_id, checkout_cleanup_completed_at")
+      .eq("stripe_event_id", eventId)
+      .maybeSingle();
+    if (eventError) {
+      console.error(
+        `[fp/billing/round-one] dispute cleanup ledger read failed: ${eventError.message}`
+      );
+      return "error";
+    }
+    if (!event) return "missing";
+    const eventRow = event as {
+      event_type?: unknown;
+      order_id?: unknown;
+      checkout_cleanup_completed_at?: unknown;
+    };
+    if (eventRow.event_type !== eventType) {
+      console.error("[fp/billing/round-one] dispute cleanup ledger type mismatch");
+      return "error";
+    }
+    if (eventRow.checkout_cleanup_completed_at !== null) {
+      return typeof eventRow.checkout_cleanup_completed_at === "string"
+        && Number.isFinite(Date.parse(eventRow.checkout_cleanup_completed_at))
+        ? { state: "complete" }
+        : "error";
+    }
+    if (typeof eventRow.order_id !== "string" || !UUID.test(eventRow.order_id)) {
+      console.error("[fp/billing/round-one] dispute cleanup ledger order is unavailable");
+      return "error";
+    }
+
+    const { data: order, error: orderError } = await db
+      .from("fp_billing_orders")
+      .select("id, parent_id, child_id, product_key, product_version")
+      .eq("id", eventRow.order_id)
+      .maybeSingle();
+    if (orderError || !order) {
+      console.error(
+        `[fp/billing/round-one] dispute cleanup order read failed: ${orderError?.message ?? "missing order"}`
+      );
+      return "error";
+    }
+    const row = order as {
+      id?: unknown;
+      parent_id?: unknown;
+      child_id?: unknown;
+      product_key?: unknown;
+      product_version?: unknown;
+    };
+    if (
+      row.id !== eventRow.order_id
+      || typeof row.parent_id !== "string"
+      || !UUID.test(row.parent_id)
+      || typeof row.child_id !== "string"
+      || !UUID.test(row.child_id)
+      || typeof row.product_key !== "string"
+      || !row.product_key.trim()
+      || !Number.isInteger(row.product_version)
+      || (row.product_version as number) < 1
+    ) {
+      console.error("[fp/billing/round-one] dispute cleanup provenance is malformed");
+      return "error";
+    }
+    return {
+      state: "pending",
+      scope: {
+        orderId: row.id,
+        parentId: row.parent_id,
+        childId: row.child_id,
+        productKey: row.product_key,
+        productVersion: row.product_version as number,
+      },
+    };
+  } catch (err) {
+    console.error(
+      `[fp/billing/round-one] dispute cleanup provenance threw: ${errorMessage(err)}`
+    );
+    return "error";
+  }
+}
+
+export async function markRoundOneWebhookCleanupComplete(
+  db: SupabaseClient,
+  input: { eventId: string; orderId: string }
+): Promise<boolean> {
+  try {
+    if (!validBoundedId(input.eventId, STRIPE_EVENT_ID) || !UUID.test(input.orderId)) {
+      return false;
+    }
+    const { data, error } = await db
+      .from("fp_billing_webhook_events")
+      .update({ checkout_cleanup_completed_at: new Date().toISOString() })
+      .eq("stripe_event_id", input.eventId)
+      .eq("order_id", input.orderId)
+      .in("event_type", ["charge.dispute.created", "charge.dispute.closed"])
+      .select("stripe_event_id")
+      .maybeSingle();
+    if (error) {
+      console.error(`[fp/billing/round-one] dispute cleanup stamp failed: ${error.message}`);
+      return false;
+    }
+    return data?.stripe_event_id === input.eventId;
+  } catch (err) {
+    console.error(
+      `[fp/billing/round-one] dispute cleanup stamp threw: ${errorMessage(err)}`
+    );
+    return false;
+  }
+}
+
 /**
  * Read every still-pending Checkout Session for the disputed child/product.
  * The signed event has already installed the durable database hold before this
@@ -194,14 +339,20 @@ export type RoundOnePendingCheckout = {
  */
 export async function readRoundOnePendingCheckouts(
   db: SupabaseClient,
-  input: {
-    parentId: string;
-    childId: string;
-    productKey: string;
-    productVersion: number;
-  }
+  input: RoundOneWebhookCleanupScope
 ): Promise<RoundOnePendingCheckout[] | "error"> {
   try {
+    if (
+      !UUID.test(input.orderId)
+      || !UUID.test(input.parentId)
+      || !UUID.test(input.childId)
+      || !/^[a-z0-9_]{1,80}$/.test(input.productKey)
+      || !Number.isSafeInteger(input.productVersion)
+      || input.productVersion < 1
+    ) {
+      console.error("[fp/billing/round-one] pending Checkout scope is malformed");
+      return "error";
+    }
     const { data, error } = await db
       .from("fp_billing_orders")
       .select("id, stripe_checkout_session_id")
@@ -215,22 +366,31 @@ export async function readRoundOnePendingCheckouts(
       console.error(`[fp/billing/round-one] pending Checkout read failed: ${error.message}`);
       return "error";
     }
-    if (!Array.isArray(data)) return [];
-    return data.flatMap((row) => {
+    if (!Array.isArray(data)) {
+      console.error("[fp/billing/round-one] pending Checkout result is malformed");
+      return "error";
+    }
+    const parsed: RoundOnePendingCheckout[] = [];
+    for (const row of data) {
       const candidate = row as {
         id?: unknown;
         stripe_checkout_session_id?: unknown;
       };
-      return typeof candidate.id === "string"
-        && typeof candidate.stripe_checkout_session_id === "string"
-        && candidate.id.trim()
-        && candidate.stripe_checkout_session_id.trim()
-        ? [{
-            orderId: candidate.id,
-            sessionId: candidate.stripe_checkout_session_id,
-          }]
-        : [];
-    });
+      if (
+        typeof candidate.id !== "string"
+        || !UUID.test(candidate.id)
+        || typeof candidate.stripe_checkout_session_id !== "string"
+        || !validBoundedId(candidate.stripe_checkout_session_id, STRIPE_SESSION_ID)
+      ) {
+        console.error("[fp/billing/round-one] pending Checkout row is malformed");
+        return "error";
+      }
+      parsed.push({
+        orderId: candidate.id,
+        sessionId: candidate.stripe_checkout_session_id,
+      });
+    }
+    return parsed;
   } catch (err) {
     console.error(
       `[fp/billing/round-one] pending Checkout read threw: ${errorMessage(err)}`

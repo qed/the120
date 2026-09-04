@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const ORDER_ID = "33333333-3333-4333-8333-333333333333";
 const PARENT_ID = "11111111-1111-4111-8111-111111111111";
 const CHILD_ID = "22222222-2222-4222-8222-222222222222";
+const OTHER_ORDER_ID = "66666666-6666-4666-8666-666666666666";
+const OTHER_PARENT_ID = "77777777-7777-4777-8777-777777777777";
+const OTHER_CHILD_ID = "88888888-8888-4888-8888-888888888888";
 
 const refs = vi.hoisted(() => ({
   event: { value: {} as Record<string, unknown> },
@@ -27,6 +30,12 @@ const refs = vi.hoisted(() => ({
   pendingCheckouts: {
     value: [] as Array<{ orderId: string; sessionId: string }> | "error",
   },
+  cleanupProvenance: {
+    values: [] as Array<Record<string, unknown> | "missing" | "error">,
+  },
+  provenanceEventIds: [] as string[],
+  markedCleanup: [] as Record<string, unknown>[],
+  markCleanupOk: { value: true },
   pendingCheckoutScopes: [] as Record<string, unknown>[],
   cancelledCheckouts: [] as Record<string, unknown>[],
   cancelCheckoutOk: { value: true },
@@ -112,6 +121,20 @@ vi.mock("../round-one-store", () => ({
     refs.cancelledCheckouts.push(input);
     return refs.cancelCheckoutOk.value;
   },
+  readRoundOneWebhookCleanupProvenance: async (
+    _db: unknown,
+    eventId: string,
+    eventType: string
+  ) => {
+    refs.cleanupTimeline.push("db:ledger-scope");
+    refs.provenanceEventIds.push(`${eventId}:${eventType}`);
+    return refs.cleanupProvenance.values.shift() ?? "missing";
+  },
+  markRoundOneWebhookCleanupComplete: async (_db: unknown, input: Record<string, unknown>) => {
+    refs.cleanupTimeline.push("db:mark-clean");
+    refs.markedCleanup.push(input);
+    return refs.markCleanupOk.value;
+  },
 }));
 
 vi.mock("../round-one-setup-email", () => ({
@@ -194,6 +217,22 @@ describe("Round One webhook route", () => {
       data: [{ quantity: 1, price: { id: "price_round_one_test" } }],
     };
     refs.pendingCheckouts.value = [];
+    refs.cleanupProvenance.values = [
+      "missing",
+      {
+        state: "pending",
+        scope: {
+          orderId: ORDER_ID,
+          parentId: PARENT_ID,
+          childId: CHILD_ID,
+          productKey: "round_one_sell",
+          productVersion: 1,
+        },
+      },
+    ];
+    refs.provenanceEventIds.length = 0;
+    refs.markedCleanup.length = 0;
+    refs.markCleanupOk.value = true;
     refs.pendingCheckoutScopes.length = 0;
     refs.cancelledCheckouts.length = 0;
     refs.cancelCheckoutOk.value = true;
@@ -497,21 +536,40 @@ describe("Round One webhook route", () => {
       sessionId: "cs_replacement",
     }]);
     expect(refs.cleanupTimeline).toEqual([
+      "db:ledger-scope",
       "db:hold",
+      "db:ledger-scope",
       "db:list-pending",
       "stripe:retrieve",
       "stripe:expire",
       "db:cancel-expired",
+      "db:mark-clean",
     ]);
   });
 
-  it("finishes dispute cleanup on event replay when Stripe already expired the sibling Session", async () => {
+  it("uses original ledger provenance on replay even when PaymentIntent metadata now names another child", async () => {
     refs.event.value = disputeOpenedEvent();
     refs.paymentIntent.value = {
-      metadata: (paidEvent().data as { object: { metadata: Record<string, string> } })
-        .object.metadata,
+      metadata: {
+        billing_kind: "fp_round_one_sell",
+        order_id: OTHER_ORDER_ID,
+        parent_id: OTHER_PARENT_ID,
+        child_id: OTHER_CHILD_ID,
+        product_key: "round_one_sell",
+        product_version: "1",
+      },
     };
     refs.applied.value = { ok: true, outcome: "replay" };
+    refs.cleanupProvenance.values = [{
+      state: "pending",
+      scope: {
+        orderId: ORDER_ID,
+        parentId: PARENT_ID,
+        childId: CHILD_ID,
+        productKey: "round_one_sell",
+        productVersion: 1,
+      },
+    }];
     refs.pendingCheckouts.value = [{
       orderId: "44444444-4444-4444-8444-444444444444",
       sessionId: "cs_replacement",
@@ -522,8 +580,18 @@ describe("Round One webhook route", () => {
     const res = await POST(request());
 
     expect(res.status).toBe(200);
+    expect(refs.paymentIntentIds).toEqual([]);
+    expect(refs.plans).toEqual([]);
+    expect(refs.pendingCheckoutScopes[0]).toEqual({
+      orderId: ORDER_ID,
+      parentId: PARENT_ID,
+      childId: CHILD_ID,
+      productKey: "round_one_sell",
+      productVersion: 1,
+    });
     expect(refs.expiredCheckoutSessionIds).toEqual([]);
     expect(refs.cancelledCheckouts).toHaveLength(1);
+    expect(refs.markedCleanup).toEqual([{ eventId: "evt_round_one_dispute_created", orderId: ORDER_ID }]);
   });
 
   it("retries a dispute webhook when an open sibling Session cannot be expired", async () => {
@@ -544,6 +612,7 @@ describe("Round One webhook route", () => {
 
     expect(res.status).toBe(500);
     expect(refs.cancelledCheckouts).toEqual([]);
+    expect(refs.markedCleanup).toEqual([]);
   });
 
   it("keeps a raced completed sibling charge held instead of cancelling financial truth", async () => {
@@ -565,6 +634,56 @@ describe("Round One webhook route", () => {
     expect(res.status).toBe(200);
     expect(refs.expiredCheckoutSessionIds).toEqual([]);
     expect(refs.cancelledCheckouts).toEqual([]);
+    expect(refs.markedCleanup).toEqual([{ eventId: "evt_round_one_dispute_created", orderId: ORDER_ID }]);
+  });
+
+  it("acknowledges a dispute replay only after its original cleanup ledger is stamped complete", async () => {
+    refs.event.value = disputeOpenedEvent();
+    refs.paymentIntent.value = {
+      metadata: (paidEvent().data as { object: { metadata: Record<string, string> } })
+        .object.metadata,
+    };
+    refs.applied.value = { ok: true, outcome: "replay" };
+    refs.cleanupProvenance.values = [{ state: "complete" }];
+
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(200);
+    expect(refs.provenanceEventIds).toEqual([
+      "evt_round_one_dispute_created:charge.dispute.created",
+    ]);
+    expect(refs.pendingCheckoutScopes).toEqual([]);
+    expect(refs.markedCleanup).toEqual([]);
+  });
+
+  it("does not acknowledge a replay with cleared metadata while original cleanup may be incomplete", async () => {
+    refs.event.value = disputeOpenedEvent();
+    refs.paymentIntent.value = { metadata: {} };
+    refs.cleanupProvenance.values = [{
+      state: "pending",
+      scope: {
+        orderId: ORDER_ID,
+        parentId: PARENT_ID,
+        childId: CHILD_ID,
+        productKey: "round_one_sell",
+        productVersion: 1,
+      },
+    }];
+    refs.pendingCheckouts.value = [{
+      orderId: "44444444-4444-4444-8444-444444444444",
+      sessionId: "cs_replacement",
+    }];
+    refs.checkoutExpireError.value = new Error("Stripe unavailable");
+
+    const { POST } = await import("../webhook/route");
+    const res = await POST(request());
+
+    expect(res.status).toBe(500);
+    expect(refs.paymentIntentIds).toEqual([]);
+    expect(refs.plans).toEqual([]);
+    expect(refs.pendingCheckoutScopes).toHaveLength(1);
+    expect(refs.markedCleanup).toEqual([]);
   });
 
   it("keeps a closed won dispute suspended for explicit staff review", async () => {

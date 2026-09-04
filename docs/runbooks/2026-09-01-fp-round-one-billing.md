@@ -71,6 +71,137 @@ locks paid tasks closed; it never grants fallback access.
 2. Apply only the ledger-safe migration selected above before deploying code
    that calls the new RPCs. The provisional foundation is not a general
    idempotent upgrade script.
+
+### Existing-install additive upgrade
+
+If the live ledger or catalog shows any earlier Round One billing schema, the
+operator must create a **new, next-free, ledger-versioned additive upgrade**.
+Do not assign that version until the live ledger has been read, and do not
+rename, edit, or rerun the provisional foundation. The upgrade must, in one
+database transaction:
+
+1. add missing columns and constraints, including
+   `fp_billing_orders.dispute_suspended_at`, the `superseded` review state, and
+   `fp_billing_webhook_events.checkout_cleanup_completed_at`;
+2. install the final function bodies from the reviewed foundation, preserving
+   grants, and only then drop the obsolete 12-argument
+   `fp_billing_apply_stripe_event` overload;
+3. stamp **every** historical `stripe_dispute` review onto its matching order,
+   including reviews whose `review_state` is already `resolved` or
+   `superseded`; and
+4. suspend every currently active entitlement for the held order's complete
+   child/product/version scope. A resolved review is evidence, not permission
+   to clear a hold.
+
+Use the following as a shape/checklist, not as a ready-to-run migration. Table
+and column names must first be confirmed against the live catalog, and the
+final reviewed RPC bodies must replace the placeholder comment:
+
+```sql
+begin;
+
+alter table public.fp_billing_orders
+  add column if not exists dispute_suspended_at timestamptz;
+alter table public.fp_billing_webhook_events
+  add column if not exists checkout_cleanup_completed_at timestamptz;
+
+-- Replace the review-state constraint only after inspecting its live name.
+-- Install the final reviewed RPC/function bodies and grants here.
+-- Drop the old 12-argument RPC overload only after the replacement exists.
+
+with historical_holds as (
+  select r.order_id, min(r.first_observed_at) as held_at
+  from public.fp_billing_review_items r
+  where r.review_kind = 'stripe_dispute'
+  group by r.order_id
+)
+update public.fp_billing_orders o
+set dispute_suspended_at = case
+      when o.dispute_suspended_at is null then h.held_at
+      else least(o.dispute_suspended_at, h.held_at)
+    end,
+    updated_at = now()
+from historical_holds h
+where o.id = h.order_id;
+
+with held_products as (
+  select o.child_id, o.product_key, o.product_version,
+         min(o.dispute_suspended_at) as held_at
+  from public.fp_billing_orders o
+  where o.dispute_suspended_at is not null
+  group by o.child_id, o.product_key, o.product_version
+)
+update public.fp_billing_entitlements e
+set status = 'suspended',
+    suspended_at = coalesce(e.suspended_at, h.held_at),
+    suspension_reason = 'stripe_dispute',
+    revoked_at = null,
+    updated_at = now()
+from held_products h
+where e.child_id = h.child_id
+  and e.product_key = h.product_key
+  and e.product_version = h.product_version
+  and e.status = 'active';
+
+commit;
+```
+
+The database transaction cannot atomically expire Stripe Sessions. At the
+operational cutover, query every `pending` sibling order in every held
+child/product/version scope. Retrieve each Session from the correct Stripe
+mode/account. Expire it if it is still open, and mark its database order
+cancelled only after Stripe confirms expiry. Already-expired Sessions can be
+reconciled as cancelled. A completed Session is financial truth: process its
+paid event, retain the product hold, and send it to staff for refund review.
+Stop the cutover on any Stripe/read ambiguity; do not stamp cleanup complete.
+Only after all sibling Sessions are terminal may historical dispute webhook
+rows be stamped `checkout_cleanup_completed_at`.
+
+Run these zero-row checks before enabling either application flag:
+
+```sql
+-- Every historical dispute review has an immutable order hold.
+select r.id, r.order_id
+from public.fp_billing_review_items r
+join public.fp_billing_orders o on o.id = r.order_id
+where r.review_kind = 'stripe_dispute'
+  and o.dispute_suspended_at is null;
+
+-- No held child/product/version still has active access.
+select e.id
+from public.fp_billing_entitlements e
+where e.status = 'active'
+  and exists (
+    select 1 from public.fp_billing_orders o
+    where o.child_id = e.child_id
+      and o.product_key = e.product_key
+      and o.product_version = e.product_version
+      and o.dispute_suspended_at is not null
+  );
+
+-- No held child/product/version still has a pending Checkout order.
+select pending.id, pending.stripe_checkout_session_id
+from public.fp_billing_orders pending
+where pending.status = 'pending'
+  and exists (
+    select 1 from public.fp_billing_orders held
+    where held.child_id = pending.child_id
+      and held.product_key = pending.product_key
+      and held.product_version = pending.product_version
+      and held.dispute_suspended_at is not null
+  );
+```
+
+Upgrade regression fixture: begin with an old fully refunded order, a resolved
+`stripe_dispute` review whose order has no hold marker, an incorrectly active
+entitlement for that child/product/version, and a pending replacement Session.
+After the database backfill and Stripe reconciliation, prove: the order is
+stamped; the entitlement is suspended; the Session is terminal; checkout begin
+returns `access_suspended`; attach refuses; a replayed paid event returns
+`dispute_stands` without restoring access or sending setup mail; paid-task
+completion is rejected; and an offer-ready save/notification cannot be
+committed. Repeat with two orders and a resolved review on the older order to
+prove the hold is product-wide rather than order- or queue-state-scoped.
 3. In Stripe test mode, create a one-time CAD $250 Price for a distinct First
    Profit Round 1: Sell product. Set its id in
    `FP_ROUND_ONE_STRIPE_PRICE_ID`. Re-open the Price in Stripe and independently
@@ -417,6 +548,12 @@ validation, and approval of the Buy, Order, or Book button.
 - A partial refund preserves access, upserts one open review case per Charge,
   and redelivery remains idempotent. A later full refund system-supersedes that
   follow-up, and an out-of-order stale partial delivery cannot reopen it.
+- Deliver a cumulative partial refund of 5000, resolve the review, then deliver
+  a delayed 2000 snapshot: the amount and event provenance remain at 5000, the
+  resolution remains intact, and the delivery is ledgered as stale. Repeat in
+  the other order (2000, resolve, then 5000): the cumulative amount advances to
+  5000 and the genuinely new processor fact reopens the review. In both cases,
+  a full refund before or after the snapshots is final and cannot be reopened.
 - `charge.dispute.created` immediately suspends access and upserts one open
   review case per Dispute. A late paid event on the same or another order cannot
   restore access.

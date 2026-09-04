@@ -21,7 +21,10 @@ import {
   applyRoundOneWebhookPlan,
   cancelRoundOneExpiredCheckout,
   fillRoundOneParentPhone,
+  markRoundOneWebhookCleanupComplete,
   readRoundOnePendingCheckouts,
+  readRoundOneWebhookCleanupProvenance,
+  type RoundOneWebhookCleanupScope,
 } from "../round-one-store";
 
 export const dynamic = "force-dynamic";
@@ -56,15 +59,10 @@ function stripeObjectId(value: unknown): string | null {
  * `complete` remains financial truth, but its paid event cannot restore access.
  */
 async function closePendingCheckoutsAfterDispute(
+  db: ReturnType<typeof supabaseAdmin>,
   stripe: Stripe,
-  input: {
-    parentId: string;
-    childId: string;
-    productKey: string;
-    productVersion: number;
-  }
+  input: RoundOneWebhookCleanupScope
 ): Promise<boolean> {
-  const db = supabaseAdmin();
   const pending = await readRoundOnePendingCheckouts(db, input);
   if (pending === "error") return false;
 
@@ -109,6 +107,30 @@ async function closePendingCheckoutsAfterDispute(
   return allClosed;
 }
 
+async function finishDisputeCheckoutCleanup(
+  db: ReturnType<typeof supabaseAdmin>,
+  stripe: Stripe,
+  eventId: string,
+  eventType: "charge.dispute.created" | "charge.dispute.closed"
+): Promise<"complete" | "missing" | "error"> {
+  const provenance = await readRoundOneWebhookCleanupProvenance(
+    db,
+    eventId,
+    eventType
+  );
+  if (provenance === "missing" || provenance === "error") return provenance;
+  if (provenance.state === "complete") return "complete";
+  if (!(await closePendingCheckoutsAfterDispute(db, stripe, provenance.scope))) {
+    return "error";
+  }
+  return await markRoundOneWebhookCleanupComplete(db, {
+    eventId,
+    orderId: provenance.scope.orderId,
+  })
+    ? "complete"
+    : "error";
+}
+
 export async function POST(req: Request): Promise<Response> {
   const stripeKey = process.env.STRIPE_SECRET_KEY?.trim();
   const webhookSecret = process.env.FP_ROUND_ONE_STRIPE_WEBHOOK_SECRET?.trim();
@@ -143,6 +165,32 @@ export async function POST(req: Request): Promise<Response> {
     || event.type === "charge.dispute.closed"
     ? (event.data.object as Stripe.Dispute)
     : null;
+  const disputeEventType = event.type === "charge.dispute.created"
+    || event.type === "charge.dispute.closed"
+    ? event.type
+    : null;
+  const db = supabaseAdmin();
+
+  if (disputeEventType) {
+    // Preflight before retrieving mutable PaymentIntent metadata. If the event
+    // already committed, its ledger/order FK is the only cleanup provenance;
+    // changed or cleared Stripe metadata cannot redirect or bypass the retry.
+    const replayCleanup = await finishDisputeCheckoutCleanup(
+      db,
+      stripe,
+      event.id,
+      disputeEventType
+    );
+    if (replayCleanup === "error") {
+      return Response.json(
+        { error: "Disputed checkout cleanup incomplete" },
+        { status: 500 }
+      );
+    }
+    if (replayCleanup === "complete") {
+      return Response.json({ received: true });
+    }
+  }
 
   let metadata = metadataFrom(session?.metadata);
   let paymentIntentId = stripeObjectId(session?.payment_intent);
@@ -289,7 +337,7 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: "Invalid Round One metadata" }, { status: 500 });
   }
 
-  const applied = await applyRoundOneWebhookPlan(supabaseAdmin(), plan);
+  const applied = await applyRoundOneWebhookPlan(db, plan);
   if (!applied.ok || !webhookRpcOutcomeIsSuccess(applied.outcome)) {
     console.error(
       `[fp/billing/round-one/webhook] event effect refused: ${applied.ok ? applied.outcome : "db_error"}`
@@ -316,16 +364,21 @@ export async function POST(req: Request): Promise<Response> {
       "[fp/billing/round-one/webhook] Round One dispute recorded; access remains suspended pending staff review"
     );
   }
-  if (
-    (plan.effect === "dispute_opened" || plan.effect === "dispute_closed")
-    && !(await closePendingCheckoutsAfterDispute(stripe, plan))
-  ) {
-    // The durable hold is already committed. Non-2xx asks Stripe to retry the
-    // signed event so a transient Stripe/database cleanup failure can finish.
-    return Response.json(
-      { error: "Disputed checkout cleanup incomplete" },
-      { status: 500 }
+  if (disputeEventType) {
+    const cleanup = await finishDisputeCheckoutCleanup(
+      db,
+      stripe,
+      event.id,
+      disputeEventType
     );
+    if (cleanup !== "complete") {
+      // The durable hold is already committed. Non-2xx asks Stripe to retry the
+      // signed event so a transient Stripe/database cleanup failure can finish.
+      return Response.json(
+        { error: "Disputed checkout cleanup incomplete" },
+        { status: 500 }
+      );
+    }
   }
   if (plan.effect === "paid") {
     const phone = session?.customer_details?.phone?.trim() ?? "";

@@ -10,7 +10,7 @@
  * is commented here.
  *
  * ── CONTRACT (for the FP staff client) ──
- *   GET /api/fp/progress?tasks=1.1.5,1.2.1,1.2.2,1.2.3,1.2.4,1.2.5
+ *   GET /api/fp/progress?tasks=1.1.5,1.2.1,...&scope=included
  *   Origin: an allowed FP origin (exact match — the child-gateway CORS list)
  *   Authorization: Bearer <staff Supabase session access token>
  *
@@ -21,10 +21,29 @@
  *   `deriveRequestedTaskIds` for why an explicit list replaced an earlier
  *   criterion-PREFIX design.
  *
- *   200 {ok: true, children: [ProgressChild]} — the shape documented in full at
- *   the top of ./progress-rules.ts (username, truncated, docUnreadable,
- *   ideas[], businesses[]). The server sends the completion maps essentially
- *   raw, filtered to the requested task ids; the CLIENT owns every semantic.
+ *   `scope` is REQUIRED and must be exactly `included` (the normal Watchtower)
+ *   or `all` (the explicit QA-inclusive comparison). Excluded parent families
+ *   are removed before parent/profile/save reads, not hidden after shaping.
+ *
+ *   200 {ok: true, children: [ProgressChild], analyticsScope: {
+ *          revision, includedFamilies, excludedFamilies
+ *        }, round1Payments?, round1BillingReviews?} — the child shape is documented in full at the
+ *   top of ./progress-rules.ts. `revision` is an opaque cohort merge token:
+ *   criterion responses with different revisions must never be combined.
+ *   `round1Payments`, when present, is exactly
+ *   `{unit:"child",paidPurchases,complimentaryAccess,pending,unpaid,
+ *   refundedPaid,revokedComplimentary}` for the requested analytics scope. It
+ *   contains counts only — no child names, ids, order ids, amounts or Stripe
+ *   details — and is omitted when the provisional billing schema/read is
+ *   unavailable rather than fabricated as zeros. The server sends completion
+ *   maps essentially raw, filtered to the requested task ids; the CLIENT owns
+ *   every progress semantic. `round1BillingReviews`, when present, is an
+ *   independent staff-only queue:
+ *   `{unit:"review_item",openCount,items:[{reviewKey,parentKey,parentName,
+ *   parentPhone,childUsername,childName,reason,observedAt}]}`. `reason` is only
+ *   `partial_refund` or `stripe_dispute`. It intentionally contains no Stripe
+ *   object, order, amount, currency, status, or processor detail, and is
+ *   independently omitted on an unavailable or malformed review read.
  *
  *   401 — byte-identical for EVERY AUTHORIZATION-shaped refusal (missing/bad
  *   token, a genuine non-staff session, rate limit, outage). 403 only for a
@@ -33,7 +52,7 @@
  *
  *   400 — the ONE documented exception, generic-bodied, and reachable ONLY by an
  *   ALREADY-AUTHENTICATED staff caller. Two things reach it:
- *     - an unusable `tasks` list (missing, malformed, oversized, non-list), and
+ *     - an unusable `tasks` list or `scope` value, and
  *     - a CAPACITY bound: more rows than PROGRESS_MAX_ROWS, more round trips
  *       than PROGRESS_MAX_ROUND_TRIPS, or a body past
  *       PROGRESS_MAX_RESPONSE_BYTES.
@@ -50,21 +69,18 @@
  *   deterministic, and refunding would make the most expensive path free to
  *   loop).
  *
- * ── No test-family exclusion ──
- * `families.is_test` is a CRM/NURTURE-VISIBILITY flag, not an FP-enrolment flag:
- * app/crm/lib/test-family-filter.ts calls itself "the ONE place" that rule
- * lives, and scripts/provision-fp-cohort.ts records that provisioning "NEVER
- * stamps families.is_test — these are real". An earlier draft of this route
- * joined against it, which would have meant that stamping a real beta family
- * purely to stop nurture mail SILENTLY DELETED their children from the very
- * dashboard that exists to notice children who are stuck — no error, no way to
- * see it. Two independent meanings must not share one column. If test-row skew
- * ever becomes a real problem the fix is an explicit FP-scoped marker, not a
- * re-use of this one.
+ * ── Dedicated analytics scope, never the CRM test flag ──
+ * `families.is_test` remains a CRM/NURTURE-VISIBILITY flag and is never read
+ * here. Watchtower exclusions live only in `fp_watchtower_family_scope`, keyed
+ * by the First Profit parent's id and changed only by the staff-only
+ * `/api/fp/qa-families` POST. This keeps nurture suppression from silently
+ * changing product analytics. The route reads that decision snapshot first,
+ * then removes excluded families BEFORE contact/profile/save reads.
  *
  * ── Reads, not embeds ──
- * The roster is followed by batched parent-contact, profile and save reads,
- * never a PostgREST embedded select: the same proven pattern the suggestions
+ * The roster is followed by batched parent-contact, profile, save and optional
+ * billing reads, never a PostgREST embedded select: the same proven pattern the
+ * suggestions
  * route uses, and the one the in-memory fake-supabase harness can actually
  * exercise. All reads run with the SERVICE ROLE; the staff gate is the sole
  * authorization for this data.
@@ -116,6 +132,15 @@ import {
 } from "../login/login-rules";
 import { extractBearerToken, unverifiedJwtSub } from "../grade/grade-rules";
 import {
+  ROUND_ONE_PRODUCT_KEY,
+  ROUND_ONE_PRODUCT_VERSION,
+} from "../billing/round-one/round-one-rules";
+import {
+  deriveAnalyticsScope,
+  deriveAnalyticsScopeMode,
+} from "../qa-families/qa-families-rules";
+import { readWatchtowerScopeRows } from "../qa-families/scope-store";
+import {
   deriveProgressRateLimitKeys,
   deriveRequestedTaskIds,
   isAllowedProgressStaffRole,
@@ -139,6 +164,19 @@ import {
   type ProgressSaveRowLike,
   type ProgressWalkNote,
 } from "./progress-rules";
+import {
+  classifyRoundOnePaymentReadError,
+  deriveRoundOnePaymentSummary,
+  type RoundOnePaymentEntitlementRowLike,
+  type RoundOnePaymentOrderRowLike,
+  type RoundOnePaymentReadErrorCategory,
+  type RoundOnePaymentSummary,
+} from "./round-one-payment-rules";
+import {
+  deriveRoundOneBillingReviews,
+  type RoundOneBillingReviewRowLike,
+  type RoundOneBillingReviewSummary,
+} from "./round-one-billing-review-rules";
 
 export const dynamic = "force-dynamic";
 
@@ -168,7 +206,7 @@ export const maxDuration = 60;
 
 type PageResult<T> = {
   data: T[] | null;
-  error: { message: string } | null;
+  error: { message: string; code?: string } | null;
 };
 
 type ProgressParentContactRow = {
@@ -364,6 +402,79 @@ async function readByIdSet<T>(
     );
     if (!res.ok) return res;
     rows.push(...res.rows);
+  }
+  return { ok: true, rows };
+}
+
+/* ------------------------------------------------ optional Round One billing */
+
+type RoundOnePaymentOmissionCategory =
+  | RoundOnePaymentReadErrorCategory
+  | "timed_out"
+  | "capacity";
+
+type OptionalBillingReadResult<T> =
+  | { ok: true; rows: T[] }
+  | { ok: false; category: RoundOnePaymentOmissionCategory };
+
+/**
+ * The billing enrichment is optional during its provisional rollout. It keeps
+ * the progress route's keyset-pagination and aggregate bounds, but a failure is
+ * returned as a value-free omission category instead of taking down the already
+ * available cohort dashboard. In particular, no database error message reaches
+ * a log: messages may quote failed predicate values, while the stable error code
+ * is enough to distinguish a schema-cache rollout gap.
+ */
+async function readOptionalBillingByIdSet<T>(
+  label: "entitlements" | "orders" | "reviews",
+  ids: readonly string[],
+  keyOf: (row: T) => string,
+  page: (
+    chunk: string[],
+    after: string | null,
+    limit: number
+  ) => PromiseLike<PageResult<T>>,
+  budget: ReadBudget
+): Promise<OptionalBillingReadResult<T>> {
+  const rows: T[] = [];
+  for (let i = 0; i < ids.length; i += PROGRESS_ID_CHUNK) {
+    const chunk = ids.slice(i, i + PROGRESS_ID_CHUNK);
+    let after: string | null = null;
+    for (;;) {
+      if (budget.roundTrips >= PROGRESS_MAX_ROUND_TRIPS) {
+        return { ok: false, category: "capacity" };
+      }
+      const remainingMs = budget.deadlineAt - Date.now();
+      if (remainingMs <= 0) return { ok: false, category: "timed_out" };
+      budget.roundTrips += 1;
+
+      let raced;
+      try {
+        raced = await withFwTimeout(
+          page(chunk, after, PROGRESS_PAGE_SIZE),
+          `fp/progress Round One ${label} page`,
+          Math.min(PROGRESS_READ_TIMEOUT_MS, remainingMs)
+        );
+      } catch {
+        return { ok: false, category: "read_failed" };
+      }
+      if (raced.timedOut) return { ok: false, category: "timed_out" };
+      const result = raced.value;
+      if (result.error) {
+        return {
+          ok: false,
+          category: classifyRoundOnePaymentReadError(result.error),
+        };
+      }
+      const got = result.data ?? [];
+      if (got.length === 0) break;
+      rows.push(...got);
+      budget.rowsRead += got.length;
+      if (budget.rowsRead > PROGRESS_MAX_ROWS) {
+        return { ok: false, category: "capacity" };
+      }
+      after = keyOf(got[got.length - 1]!);
+    }
   }
   return { ok: true, rows };
 }
@@ -579,7 +690,8 @@ export async function GET(req: Request): Promise<Response> {
     // caller must not be able to probe which ids parse — no oracle) and BEFORE
     // any cohort read (a bad request costs nothing). The refusal is 400-class
     // and generic; the submitted value reaches neither the body nor a log.
-    const requested = deriveRequestedTaskIds(new URL(req.url).searchParams.get("tasks"));
+    const requestUrl = new URL(req.url);
+    const requested = deriveRequestedTaskIds(requestUrl.searchParams.get("tasks"));
     if (!requested.ok) {
       // REFUND both strikes. This request touched no cohort read at all, and a
       // client-side regression that sends a malformed list on every render would
@@ -591,6 +703,18 @@ export async function GET(req: Request): Promise<Response> {
       releaseStrikes();
       return badRequest(requested.reason);
     }
+    const requestedScope = deriveAnalyticsScopeMode(requestUrl.searchParams.get("scope"));
+    if (!requestedScope.ok) {
+      releaseStrikes();
+      return badRequest(requestedScope.reason);
+    }
+
+    // Read the complete scope decision set BEFORE the roster. A concurrent
+    // toggle after this read therefore yields a self-consistent old snapshot
+    // and revision; the next criterion request receives a new revision and the
+    // client discards rather than merges the old cache.
+    const scopeRowsRead = await readWatchtowerScopeRows(admin, deadlineAt);
+    if (!scopeRowsRead.ok) return refuseRead(scopeRowsRead.reason);
 
     // ── 1. The roster. `fp_username is not null` is the enrolled-in-FP filter
     // (the column is server-managed and only set at provisioning), and
@@ -614,6 +738,35 @@ export async function GET(req: Request): Promise<Response> {
     );
     if (!childrenRead.ok) return refuseRead(childrenRead.reason);
 
+    const derivedScope = deriveAnalyticsScope(
+      scopeRowsRead.rows,
+      childrenRead.rows
+        .filter(
+          (child) =>
+            typeof child.parent_id === "string" &&
+            typeof child.fp_username === "string" &&
+            child.fp_username.length > 0
+        )
+        .map((child) => ({
+          parentId: child.parent_id as string,
+          childId: child.id,
+          username: child.fp_username as string,
+        }))
+    );
+    if (!derivedScope.ok) {
+      console.error("[fp/progress] invalid Watchtower scope row");
+      releaseStrikes();
+      return refuse("outage");
+    }
+    const scopedChildren =
+      requestedScope.scope === "all"
+        ? childrenRead.rows
+        : childrenRead.rows.filter(
+            (child) =>
+              typeof child.parent_id === "string" &&
+              !derivedScope.value.excludedParentIds.has(child.parent_id)
+          );
+
     // ── 2. Parent contacts for the ACTIONABLE follow-up disclosure. The main
     // Watchtower remains aggregate-only; the client projects these fields out
     // of every aggregate calculation and renders them only after staff opens a
@@ -622,7 +775,7 @@ export async function GET(req: Request): Promise<Response> {
     // the dashboard into a general family export.
     const parentIds = [
       ...new Set(
-        childrenRead.rows
+        scopedChildren
           .map((child) => child.parent_id)
           .filter((id): id is string => typeof id === "string" && id.length > 0),
       ),
@@ -644,7 +797,7 @@ export async function GET(req: Request): Promise<Response> {
     );
     if (!parentsRead.ok) return refuseRead(parentsRead.reason);
     const parentById = new Map(parentsRead.rows.map((parent) => [parent.id, parent]));
-    const childrenWithContacts: ProgressChildRowLike[] = childrenRead.rows.map((child) => {
+    const childrenWithContacts: ProgressChildRowLike[] = scopedChildren.map((child) => {
       const parentId = typeof child.parent_id === "string" ? child.parent_id : null;
       const parent = parentId ? parentById.get(parentId) : undefined;
       return {
@@ -666,7 +819,7 @@ export async function GET(req: Request): Promise<Response> {
     // ── 3. Profiles by child id. A child with no profile row is KEPT by the
     // pure module with empty ideas — that is the "never signed in" signal, and
     // dropping it would hide exactly the child this board exists to notice.
-    const childIds = childrenRead.rows.map((c) => c.id);
+    const childIds = scopedChildren.map((c) => c.id);
     const profilesRead = await readByIdSet<ProgressProfileRowLike>(
       "profiles read",
       childIds,
@@ -706,6 +859,113 @@ export async function GET(req: Request): Promise<Response> {
     );
     if (!savesRead.ok) return refuseRead(savesRead.reason);
 
+    // ── 5. Optional Round One payment funnel. The enrolled roster is the unit
+    // set, and both billing reads are constrained to the one product/version
+    // this deployment sells. We deliberately read only classification fields:
+    // no parent id, amount, grant note, Stripe id or order detail can reach the
+    // shaper or the response. The fixed product/version also makes child_id a
+    // unique key for entitlement pagination (its table PK adds those two keys).
+    //
+    // This is an additive rollout seam. A missing provisional table/schema-cache
+    // entry — or any other optional-read failure — omits the WHOLE summary and
+    // logs one value-free category. Returning partial counts or fake zeros would
+    // be worse than returning no card: staff would act on a plausible lie.
+    let round1Payments: RoundOnePaymentSummary | undefined;
+    const omitRoundOnePayments = (category: RoundOnePaymentOmissionCategory): void => {
+      console.error(`[fp/progress] Round One payments omitted: ${category}`);
+    };
+    const entitlementRead = await readOptionalBillingByIdSet<
+      RoundOnePaymentEntitlementRowLike & { child_id: string }
+    >(
+      "entitlements",
+      childIds,
+      (row) => row.child_id,
+      (chunk, after, limit) => {
+        let q = admin
+          .from("fp_billing_entitlements")
+          .select("child_id, status, grant_kind, revoked_at, updated_at")
+          .eq("product_key", ROUND_ONE_PRODUCT_KEY)
+          .eq("product_version", ROUND_ONE_PRODUCT_VERSION)
+          .in("child_id", chunk);
+        if (after !== null) q = q.gt("child_id", after);
+        return q.order("child_id", { ascending: true }).limit(limit);
+      },
+      { rowsRead: 0, roundTrips: 0, deadlineAt }
+    );
+    if (!entitlementRead.ok) {
+      omitRoundOnePayments(entitlementRead.category);
+    } else {
+      const ordersRead = await readOptionalBillingByIdSet<
+        RoundOnePaymentOrderRowLike & { id: string; child_id: string }
+      >(
+        "orders",
+        childIds,
+        (row) => row.id,
+        (chunk, after, limit) => {
+          let q = admin
+            .from("fp_billing_orders")
+            .select("id, child_id, status, created_at, updated_at")
+            .eq("product_key", ROUND_ONE_PRODUCT_KEY)
+            .eq("product_version", ROUND_ONE_PRODUCT_VERSION)
+            .in("child_id", chunk);
+          if (after !== null) q = q.gt("id", after);
+          return q.order("id", { ascending: true }).limit(limit);
+        },
+        { rowsRead: 0, roundTrips: 0, deadlineAt }
+      );
+      if (!ordersRead.ok) {
+        omitRoundOnePayments(ordersRead.category);
+      } else {
+        round1Payments = deriveRoundOnePaymentSummary(
+          childIds,
+          entitlementRead.rows,
+          ordersRead.rows
+        );
+      }
+    }
+
+    // ── 6. Optional, independently fail-closed billing review queue. This is
+    // deliberately not nested under round1Payments: a schema/read/malformed-row
+    // failure here must not erase the six-field aggregate already available to
+    // staff. Read only the internal case key, roster join key, bounded reason,
+    // state and timestamp. Raw Stripe/order/financial columns remain server-only.
+    let round1BillingReviews: RoundOneBillingReviewSummary | undefined;
+    const omitRoundOneBillingReviews = (category: string): void => {
+      console.error(`[fp/progress] Round One billing reviews omitted: ${category}`);
+    };
+    const reviewRead = await readOptionalBillingByIdSet<
+      RoundOneBillingReviewRowLike & { id: string; child_id: string }
+    >(
+      "reviews",
+      childIds,
+      (row) => row.id,
+      (chunk, after, limit) => {
+        let q = admin
+          .from("fp_billing_review_items")
+          .select("id, child_id, review_kind, review_state, last_observed_at")
+          .eq("product_key", ROUND_ONE_PRODUCT_KEY)
+          .eq("product_version", ROUND_ONE_PRODUCT_VERSION)
+          .eq("review_state", "open")
+          .in("child_id", chunk);
+        if (after !== null) q = q.gt("id", after);
+        return q.order("id", { ascending: true }).limit(limit);
+      },
+      { rowsRead: 0, roundTrips: 0, deadlineAt }
+    );
+    if (!reviewRead.ok) {
+      omitRoundOneBillingReviews(reviewRead.category);
+    } else {
+      const shapedReviews = deriveRoundOneBillingReviews(
+        childrenWithContacts,
+        reviewRead.rows
+      );
+      if (shapedReviews.ok) {
+        round1BillingReviews = shapedReviews.value;
+      } else {
+        omitRoundOneBillingReviews("invalid_rows");
+      }
+    }
+
     // ONE clock for the whole response: it stamps the audit breadcrumb below AND
     // is the ceiling every child's future-dated stamps are clamped to. Two
     // `new Date()` calls would clamp two children against different instants,
@@ -739,10 +999,13 @@ export async function GET(req: Request): Promise<Response> {
     // CORS-less 500, which is a different response shape and therefore an
     // oracle. Deterministic like the row cap, so strikes are NOT refunded.
     const parts: string[] = [];
-    let bytes = 0;
+    const analyticsScopePart = JSON.stringify(derivedScope.value.scope);
+    const responsePrefix = `{"ok":true,"children":[`;
+    const responseSuffix = `],"analyticsScope":${analyticsScopePart}}`;
+    let bytes = Buffer.byteLength(responsePrefix + responseSuffix, "utf8");
     for (const child of children) {
       const part = JSON.stringify(child);
-      bytes += Buffer.byteLength(part, "utf8") + 1; // +1 for the joining comma
+      bytes += Buffer.byteLength(part, "utf8") + (parts.length === 0 ? 0 : 1);
       if (bytes > PROGRESS_MAX_RESPONSE_BYTES) {
         console.error(
           `[fp/progress] shaped body exceeded ${PROGRESS_MAX_RESPONSE_BYTES} bytes`
@@ -765,10 +1028,42 @@ export async function GET(req: Request): Promise<Response> {
       `[fp/progress] staff ${userId} read cohort progress at ${now.toISOString()} in ${elapsed()}`
     );
 
-    return new Response(`{"ok":true,"children":[${parts.join(",")}]}`, {
-      status: 200,
-      headers,
-    });
+    let roundOneFragment = round1Payments
+      ? `,"round1Payments":${JSON.stringify(round1Payments)}`
+      : "";
+    // The field is optional, so a response already sitting on the aggregate
+    // byte ceiling keeps the established progress payload and omits this tiny
+    // enrichment instead of turning a previously valid request into a 400.
+    if (
+      roundOneFragment
+      && bytes + Buffer.byteLength(roundOneFragment, "utf8") > PROGRESS_MAX_RESPONSE_BYTES
+    ) {
+      omitRoundOnePayments("capacity");
+      roundOneFragment = "";
+    }
+
+    let reviewFragment = round1BillingReviews
+      ? `,"round1BillingReviews":${JSON.stringify(round1BillingReviews)}`
+      : "";
+    if (
+      reviewFragment
+      && bytes
+        + Buffer.byteLength(roundOneFragment, "utf8")
+        + Buffer.byteLength(reviewFragment, "utf8")
+        > PROGRESS_MAX_RESPONSE_BYTES
+    ) {
+      omitRoundOneBillingReviews("capacity");
+      reviewFragment = "";
+    }
+
+    const finalSuffix = `],"analyticsScope":${analyticsScopePart}${roundOneFragment}${reviewFragment}}`;
+    return new Response(
+      `${responsePrefix}${parts.join(",")}${finalSuffix}`,
+      {
+        status: 200,
+        headers,
+      }
+    );
   } catch (err) {
     // Any unexpected throw collapses into the one generic refusal — never a
     // distinct error shape. Strikes stand (fail closed).

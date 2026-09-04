@@ -191,6 +191,7 @@ type RosterChild = {
   ageBand: string | null;
   photoConsentOpen: boolean | null;
   site: { handle: string | null; published: boolean; locked: boolean } | null;
+  coverUrl: string | null;
 };
 type Body = { ok: boolean; children: RosterChild[] };
 
@@ -296,6 +297,7 @@ describe("GET /api/fp/parent/roster — the parent dashboard roster feed", () =>
       ageBand: null,
       photoConsentOpen: false,
       site: { handle: null, published: false, locked: false },
+      coverUrl: null,
     });
 
     // Present, empty, and NOT flagged unreadable — "never signed in" is a card,
@@ -313,6 +315,7 @@ describe("GET /api/fp/parent/roster — the parent dashboard roster feed", () =>
       ageBand: null,
       photoConsentOpen: false,
       site: { handle: null, published: false, locked: false },
+      coverUrl: null,
     });
 
     expect(res.headers.get("cache-control")).toBe("no-store");
@@ -330,7 +333,7 @@ describe("GET /api/fp/parent/roster — the parent dashboard roster feed", () =>
     // and NOTHING else. Neither column reaches the wire (asserted in
     // roster-rules.test.ts). No `photo`, no `email`, no `applicant_state`.
     expect(childrenQuery()!.columns).toBe(
-      "id, first_name, last_name, fp_username, birth_year, grade"
+      "id, first_name, last_name, fp_username, birth_year, grade, fp_cover_data_url"
     );
     expect(new Set(callLog.filter((c) => c.startsWith("db:")))).toEqual(
       new Set([

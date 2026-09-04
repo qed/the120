@@ -31,12 +31,15 @@
  * regenerating with no source change produces a byte-identical file and the diff
  * is always the contract change and nothing else.
  */
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   shapeProgress,
   type ProgressChildRowLike,
   type ProgressProfileRowLike,
   type ProgressSaveRowLike,
 } from "@/app/api/fp/progress/progress-rules";
+import { deriveAnalyticsScope } from "@/app/api/fp/qa-families/qa-families-rules";
 
 /** Fixed instant. Everything below is stated as an offset from it, so the file
  *  never changes because a day passed. */
@@ -202,15 +205,50 @@ const saves: ProgressSaveRowLike[] = [
   { profile_id: "p-6", doc: { docVersion: 99, ideas: [{ id: "idea-f1" }] } },
 ];
 
-const body = {
-  ok: true,
-  children: shapeProgress(
-    children,
-    profiles,
-    saves,
-    [...REQUESTED, ...REQUESTED_GROW],
-    NOW
-  ),
-};
+const scope = deriveAnalyticsScope(
+  [
+    {
+      parent_id: "fixture-family-6",
+      excluded_from_analytics: true,
+      revision: "66666666-6666-4666-8666-666666666666",
+      updated_at: "2026-08-05T11:00:00.000Z",
+    },
+  ],
+  [
+    { parentId: "fixture-family-1", childId: "c-1", username: "ada.fp" },
+    { parentId: "fixture-family-2", childId: "c-2", username: "bo.fp" },
+    { parentId: "fixture-family-3", childId: "c-3", username: "cy.fp" },
+    { parentId: "fixture-family-4", childId: "c-4", username: "di.fp" },
+    { parentId: "fixture-family-5", childId: "c-5", username: "eve.fp" },
+    { parentId: "fixture-family-6", childId: "c-6", username: "fi.fp" },
+  ]
+);
+const fixtureAnalyticsScope = (() => {
+  if (!scope.ok) throw new Error("deterministic fixture scope is malformed");
+  return scope.value.scope;
+})();
 
-process.stdout.write(`${JSON.stringify(body, null, 2)}\n`);
+export function buildProgressFixture(): {
+  ok: true;
+  children: ReturnType<typeof shapeProgress>;
+  analyticsScope: typeof fixtureAnalyticsScope;
+} {
+  return {
+    ok: true,
+    children: shapeProgress(
+      children,
+      profiles,
+      saves,
+      [...REQUESTED, ...REQUESTED_GROW],
+      NOW
+    ),
+    analyticsScope: fixtureAnalyticsScope,
+  };
+}
+
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))
+) {
+  process.stdout.write(`${JSON.stringify(buildProgressFixture(), null, 2)}\n`);
+}

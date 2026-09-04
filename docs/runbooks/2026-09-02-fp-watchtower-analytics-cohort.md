@@ -1,0 +1,123 @@
+# First Profit Watchtower analytics cohort
+
+This release lets staff explicitly exclude QA/test families from Watchtower
+totals without deleting them or reusing the CRM `families.is_test` flag. The
+four-or-more-consecutive-digits signal is only a review suggestion. It never
+changes scope by itself.
+
+## Privacy and authorization contract
+
+- `public.fp_watchtower_family_scope` is service-role-only, has RLS enabled and
+  has no browser policy.
+- Both `GET` and `POST /api/fp/qa-families` require an allowed exact Origin, a
+  verified Supabase staff token with `app_metadata.role=admin`, and an active
+  `public.staff` row whose role is also `admin`.
+- The editor returns parent name and child usernames only. It does not select or
+  return email or phone.
+- `POST` accepts exactly `{parentId, excludedFromAnalytics}`. A restored family
+  keeps an explicit `false` row so attribution and the reversible decision
+  remain auditable.
+
+## API contracts
+
+`GET /api/fp/qa-families` returns:
+
+```json
+{
+  "ok": true,
+  "families": [
+    {
+      "parentId": "uuid",
+      "parentName": "Name or null",
+      "childUsernames": ["username"],
+      "heuristicSuggested": false,
+      "excludedFromAnalytics": false,
+      "updatedAt": null
+    }
+  ],
+  "scope": {
+    "revision": "sha256:opaque-token",
+    "includedFamilies": 1,
+    "excludedFamilies": 0
+  }
+}
+```
+
+`GET /api/fp/progress` now requires `scope=included` or `scope=all` and returns
+the same triple as `analyticsScope`. Criterion responses with different
+`analyticsScope.revision` values must never be merged. `scope=included` filters
+excluded families on the server before parent, profile or save reads;
+`scope=all` is an explicit staff comparison view. The opaque revision covers
+both explicit scope decisions and the enrolled child-id/username roster, so an
+enrolment or username change also invalidates mixed criterion caches.
+
+## Application and deployment order
+
+The combined Round One release contained three live-ledger-verified schema
+changes. A read-only check on 2026-09-04 found the ledger ending at
+`20260926120000`, no Round One billing or cohort-scope tables, and the existing
+empty `fp_public_sites` table. The remote dry run selected only these three
+files in this dependency order, and they were applied in that exact order on
+2026-09-04:
+
+1. Round One billing (`*_fp_round_one_billing.sql`).
+2. Hosted site offers (`*_fp_site_offers.sql`).
+3. Watchtower cohort scope (`20260929120000_fp_watchtower_family_scope.sql`).
+
+The versions shown in this branch (`20260927`, `20260928`, `20260929`) are now
+recorded in the live migration ledger. A post-apply dry run reported the remote
+database fully up to date. Never edit those applied migrations or write
+`schema_migrations` by hand.
+
+The release owner must execute the sequence as follows:
+
+1. Re-query `supabase_migrations.schema_migrations` immediately before release.
+2. Confirm the three reviewed `12:00:00` versions remain free, preserving
+   billing -> site offers -> cohort scope. If any is occupied, stop and
+   reconcile the complete sequence before the first apply.
+3. Apply and verify the billing migration using
+   `2026-09-01-fp-round-one-billing.md`.
+4. Apply and verify the site-offer migration using
+   `2026-09-01-fp-site-offers.md`.
+5. Apply and verify the cohort-scope migration. Do not deploy either cohort API
+   before `fp_watchtower_family_scope` exists and the PostgREST schema cache has
+   been reloaded.
+6. Use a coordinated maintenance window for the First Profit client and this
+   backend. Neither mixed pairing is supported: the old client omits the now
+   required `scope`, while the new client deliberately refuses a response with
+   no `analyticsScope`.
+7. Prepare both deployments before switching their production aliases, switch
+   them back-to-back, and do not leave a mixed-version window open. Do not add a
+   silent missing-scope compatibility default: the explicit scope is what
+   prevents accidental cohort mixing.
+8. Sign in as staff, open **Review analytics cohort**, and verify the family
+   list contains no email or phone.
+9. Exclude one known QA family. Verify `scope.revision` changes, included totals
+   fall by one family, and `scope=all` still shows the family.
+10. Restore the family. Verify totals and the revision change again.
+
+The three schema migrations have been applied. No application deployment,
+feature activation, or analytics-scope mutation was performed with them.
+
+## Rollback
+
+1. Stop staff from editing scope during rollback.
+2. Roll back both aliases in the same coordinated maintenance window. Neither
+   old-client/new-backend nor new-client/old-backend is a supported steady
+   state.
+3. Leave `fp_watchtower_family_scope` in place. It is inert under the old code
+   and preserves reversible staff decisions for a forward fix.
+4. Do not drop the table as an emergency rollback. A destructive schema rollback
+   destroys attribution and is unnecessary.
+
+## Operational checks
+
+- Direct anon/authenticated reads and writes to the scope table must return no
+  rows / permission denied.
+- A child/parent token and an inactive staff row must receive the same generic
+  401 body as a bad token.
+- A missing or malformed `scope` must receive the generic authenticated 400 and
+  must not perform cohort reads.
+- A malformed scope row fails closed; it is never treated as included.
+- The committed cross-repo fixture is generated by
+  `scripts/gen-fp-progress-fixture.ts` and includes `analyticsScope`.

@@ -71,6 +71,7 @@ import {
 } from "@/app/lib/fp/rate-limit-rules";
 import { ageBandFromGrade, resolveChildGrade } from "../../grade/grade-rules";
 import type { ChildAgeBand } from "../../signup/signup-rules";
+import { asStoredCoverDataUrl } from "@/app/lib/fp/cover-store-rules";
 
 /* --------------------------------------------------------- refusal shaping */
 
@@ -133,6 +134,9 @@ export const PARENT_ROSTER_CHILD_KEYS = [
   "ageBand",
   "photoConsentOpen",
   "site",
+  // The child's locked Day 1 cover. Appended so the existing wire order stays
+  // stable for independently deployed First Profit clients.
+  "coverUrl",
 ] as const;
 
 export function shapeParentRosterRefusal(
@@ -266,6 +270,8 @@ export type RosterChildRowLike = {
   first_name?: unknown;
   last_name?: unknown;
   fp_username?: unknown;
+  /** Bounded again at the read boundary before it is allowed onto the wire. */
+  fp_cover_data_url?: unknown;
   /** Text column; `''` is the unset sentinel. Consumed ONLY by
    *  `resolveChildGrade` → `ageBandFromGrade`, never serialized. */
   birth_year?: unknown;
@@ -345,6 +351,9 @@ export type ParentRosterChild = {
    * says, and this field must mean "a stranger can see it".
    */
   site: ParentRosterSite | null;
+  /** The child's locked Day 1 cover, or null when the stored artifact is not a
+   * valid bounded raster data URL. Render as an image; never inline it. */
+  coverUrl: string | null;
 };
 
 /**
@@ -483,6 +492,7 @@ export function shapeParentRoster(
       site: extras?.sitesByChildId
         ? extras.sitesByChildId.get(child.id) ?? { handle: null, published: false, locked: false }
         : null,
+      coverUrl: asStoredCoverDataUrl(child.fp_cover_data_url),
     });
   }
   return out;

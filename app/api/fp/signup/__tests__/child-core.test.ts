@@ -915,6 +915,40 @@ describe("createChild — fpv04 U5a cover seed + hero redraw inputs", () => {
     expect(deco?.filters).toMatchObject({ id: "child1" });
   });
 
+  it("carries the locked generated cover and full brief in one child decoration write", async () => {
+    const { deps, calls } = build();
+    await createChild(deps, {
+      ...fpv04Input,
+      heroPersona: "The fearless designer",
+      heroSetting: "garage",
+      heroCity: "Toronto",
+      coverDataUrl: "data:image/jpeg;base64,Y292ZXI=",
+      coverGenerationCount: 3,
+    });
+    const decorationWrites = calls.filter(
+      (c) =>
+        c.client === "admin" &&
+        c.table === "children" &&
+        c.op === "update" &&
+        c.row !== undefined &&
+        ("fp_story_answers" in (c.row as Record<string, unknown>) ||
+          "fp_cover_data_url" in (c.row as Record<string, unknown>))
+    );
+    expect(decorationWrites).toHaveLength(1);
+    expect(decorationWrites[0]?.row).toEqual({
+      fp_story_answers: {
+        fpv04_hero_vibe: "inventor",
+        fpv04_hero_gender: "girl",
+        fpv04_hero_persona: "The fearless designer",
+        fpv04_hero_setting: "garage",
+        fpv04_hero_city: "Toronto",
+      },
+      fp_cover_data_url: "data:image/jpeg;base64,Y292ZXI=",
+      fp_cover_status: "final",
+      fp_cover_generation_count: 3,
+    });
+  });
+
   it("no hero inputs → no decoration write (pre-fpv04 parity)", async () => {
     const { deps, calls } = build();
     await createChild(deps, input);
@@ -985,6 +1019,16 @@ describe("createChild — fpv04 U7d generated cover artifact", () => {
       coverGenerationCount: -7,
     });
     expect((coverWrite(calls)?.row as Record<string, unknown>).fp_cover_generation_count).toBe(1);
+  });
+
+  it("caps a carried generation count at the three-draft signup budget", async () => {
+    const { deps, calls } = build();
+    await createChild(deps, {
+      ...input,
+      coverDataUrl: "data:image/jpeg;base64,QUJDRA==",
+      coverGenerationCount: 999,
+    });
+    expect((coverWrite(calls)?.row as Record<string, unknown>).fp_cover_generation_count).toBe(3);
   });
 
   it("no artifact → no cover write (pre-U7d parity, byte-identical mint)", async () => {

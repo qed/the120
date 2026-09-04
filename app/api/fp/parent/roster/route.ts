@@ -435,7 +435,7 @@ export async function GET(req: Request): Promise<Response> {
           // `birth_year, grade` feed `ageBand` ONLY and never reach the wire —
           // see RosterChildRowLike for why a coarse band, and not a birth year,
           // is what the SPA is given.
-          .select("id, first_name, last_name, fp_username, birth_year, grade")
+          .select("id, first_name, last_name, fp_username, birth_year, grade, fp_cover_data_url")
           .eq("parent_id", userId)
           .not("fp_username", "is", null)
           .order("id", { ascending: true })

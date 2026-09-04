@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { MAX_SEND_ATTEMPTS, RECONCILE_WINDOW_MS } from "@/app/lib/fp/notify/notify-rules";
 import { drainPendingSends, reconcileNotifications } from "@/app/lib/fp/notify/send";
+import {
+  drainRoundOneParentNotifications,
+  ROUND_ONE_NOTIFICATION_MAX_ATTEMPTS,
+} from "@/app/api/fp/billing/round-one/round-one-parent-notifications";
 
 /**
  * First Profit notification cron (T1 Unit 12, Decision 8) — vercel.json schedules
@@ -30,6 +34,7 @@ import { drainPendingSends, reconcileNotifications } from "@/app/lib/fp/notify/s
 // Never send more than this per run — runaway protection if a derivation bug
 // ever floods the queue.
 const MAX_SENDS_PER_RUN = 100;
+const MAX_ROUND_ONE_SENDS_PER_RUN = 20;
 
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
@@ -50,6 +55,12 @@ export async function GET(req: Request) {
       windowMs: RECONCILE_WINDOW_MS,
     });
     const drained = await drainPendingSends(db, { limit: MAX_SENDS_PER_RUN });
+    // Round One's payment/setup milestones use a separate child/parent graph,
+    // but share this proven ten-minute retry worker and the same claim/stale-
+    // claim/Resend-idempotency discipline.
+    const roundOneDrained = await drainRoundOneParentNotifications(db, {
+      limit: MAX_ROUND_ONE_SENDS_PER_RUN,
+    });
 
     // Parked rows (attempt ceiling reached, still unsent) are a loud signal —
     // they no longer retry and need a human (or an attempts reset).
@@ -63,7 +74,29 @@ export async function GET(req: Request) {
       console.error(`[path/notify-cron] ${parked} send row(s) parked at the attempt ceiling`);
     }
 
-    return NextResponse.json({ ok: true, reconciled, drained, parked: parked ?? 0 });
+    const { count: roundOneParked, error: roundOneParkedError } = await db
+      .from("fp_parent_notification_outbox")
+      .select("id", { count: "exact", head: true })
+      .is("sent_at", null)
+      .gte("attempts", ROUND_ONE_NOTIFICATION_MAX_ATTEMPTS);
+    if (roundOneParkedError) {
+      console.error(
+        `[fp/parent-notify-cron] parked-row read failed: ${roundOneParkedError.message}`,
+      );
+    } else if ((roundOneParked ?? 0) > 0) {
+      console.error(
+        `[fp/parent-notify-cron] ${roundOneParked} send row(s) parked at the attempt ceiling`,
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      reconciled,
+      drained,
+      parked: parked ?? 0,
+      roundOneDrained,
+      roundOneParked: roundOneParked ?? 0,
+    });
   } catch (e) {
     console.error("[path/notify-cron] run failed:", e);
     return NextResponse.json({ error: "Notification cron run failed" }, { status: 500 });

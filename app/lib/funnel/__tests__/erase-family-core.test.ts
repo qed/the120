@@ -1056,6 +1056,19 @@ describe("eraseFamily — fp_public_sites dies FIRST (real-public-site Unit 2)",
         published: true,
         operator_locked: false,
         first_published_at: "2026-08-03T00:00:00Z",
+        storefront_headline: "Cedric makes useful things",
+        image_choice: "cover",
+        offer_name: "Starter kit",
+        offer_description: "Everything needed to begin.",
+        price_cents: 2500,
+        currency: "CAD",
+        cta_label: "Buy",
+        checkout_url: "https://buy.stripe.com/test_123",
+        checkout_enabled: true,
+        offer_edited_at: "2026-09-01T00:00:00Z",
+        offer_edited_by: "parentP",
+        checkout_approved_at: "2026-09-01T00:00:00Z",
+        checkout_approved_by: "parentP",
         ...site,
       },
     ];
@@ -1082,6 +1095,24 @@ describe("eraseFamily — fp_public_sites dies FIRST (real-public-site Unit 2)",
     const profileAt = deleteLog.findIndex((d) => d.startsWith("fp_player_profiles("));
     expect(siteAt).toBeGreaterThanOrEqual(0);
     expect(siteAt).toBeLessThan(profileAt);
+  });
+
+  it("deletes the parent-reviewed offer, Payment Link and approval provenance with the site row", async () => {
+    const seed = seedWithSite();
+    expect(seed.fp_public_sites?.[0]?.checkout_url).toBe("https://buy.stripe.com/test_123");
+    expect(seed.fp_public_sites?.[0]?.checkout_approved_by).toBe("parentP");
+    const { db, t } = makeDb(seed);
+    const { deps } = makeDeps(t);
+    deps.db = db;
+
+    const summary = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(summary.ok).toBe(true);
+    expect(summary.deleted.fp_public_sites).toBe(1);
+    expect(t.fp_public_sites).toHaveLength(0);
   });
 
   it("an OPERATOR-LOCKED site is deleted (data rights outrank the lock) but NEVER silently: loud log + order marker", async () => {

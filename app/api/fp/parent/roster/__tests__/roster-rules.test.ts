@@ -153,6 +153,7 @@ describe("shapeParentRoster — the join", () => {
       "ageBand",
       "photoConsentOpen",
       "site",
+      "coverUrl",
     ]);
     expect(out[0]).toMatchObject({
       id: "c-1",
@@ -160,6 +161,17 @@ describe("shapeParentRoster — the join", () => {
       lastName: "Ng",
       fpUsername: "alex",
     });
+  });
+
+  it("carries only a valid bounded cover artifact", () => {
+    const cover = `data:image/jpeg;base64,${"A".repeat(32)}`;
+    expect(shapeParentRoster([child({ fp_cover_data_url: cover })], [], [], now)[0]!.coverUrl).toBe(
+      cover
+    );
+    expect(
+      shapeParentRoster([child({ fp_cover_data_url: "javascript:alert(1)" })], [], [], now)[0]!
+        .coverUrl
+    ).toBeNull();
   });
 
   // ── fpv04 U8b: the three fields that are not progress ──

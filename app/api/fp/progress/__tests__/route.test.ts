@@ -148,6 +148,8 @@ vi.mock("@/app/api/fp/progress/progress-rules", async (importOriginal) => {
 
 const ORIGIN = "http://localhost:5173";
 const STAFF_ID = "staff-peter-1";
+const SCOPE_REVISION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const SCOPE_UPDATED_AT = "2026-09-01T12:00:00.000Z";
 /** A criterion view: five tasks on screen plus the ONE predecessor id. */
 const TASKS = ["1.1.5", "1.2.1", "1.2.2", "1.2.3", "1.2.4", "1.2.5"];
 
@@ -219,27 +221,40 @@ function seed(): void {
       },
       { profile_id: "p-3", doc: doc() },
     ],
+    fp_billing_entitlements: [],
+    fp_billing_orders: [],
+    fp_billing_review_items: [],
+    fp_watchtower_family_scope: [],
   } as Store;
 }
 
-const urlFor = (tasks: string | null): string =>
-  tasks === null
-    ? "http://localhost/api/fp/progress"
-    : `http://localhost/api/fp/progress?tasks=${encodeURIComponent(tasks)}`;
+const urlFor = (tasks: string | null, scope: string | null): string => {
+  const url = new URL("http://localhost/api/fp/progress");
+  if (tasks !== null) url.searchParams.set("tasks", tasks);
+  if (scope !== null) url.searchParams.set("scope", scope);
+  return url.toString();
+};
 
 const requestFor = (opts?: {
   origin?: string;
   token?: string | null;
   tasks?: string | null;
+  scope?: string | null;
 }): Request => {
   const headers: Record<string, string> = { origin: opts?.origin ?? ORIGIN };
   const token = opts?.token === undefined ? TOKEN : opts.token;
   if (token !== null) headers.authorization = `Bearer ${token}`;
   const tasks = opts?.tasks === undefined ? TASKS.join(",") : opts.tasks;
-  return new Request(urlFor(tasks), { method: "GET", headers });
+  const scope = opts?.scope === undefined ? "included" : opts.scope;
+  return new Request(urlFor(tasks, scope), { method: "GET", headers });
 };
 
-const get = (opts?: { origin?: string; token?: string | null; tasks?: string | null }) =>
+const get = (opts?: {
+  origin?: string;
+  token?: string | null;
+  tasks?: string | null;
+  scope?: string | null;
+}) =>
   import("@/app/api/fp/progress/route").then((m) => m.GET(requestFor(opts)));
 
 type Body = {
@@ -255,6 +270,34 @@ type Body = {
       childName: string | null;
     };
   }[];
+  round1Payments?: {
+    unit: "child";
+    paidPurchases: number;
+    complimentaryAccess: number;
+    pending: number;
+    unpaid: number;
+    refundedPaid: number;
+    revokedComplimentary: number;
+  };
+  round1BillingReviews?: {
+    unit: "review_item";
+    openCount: number;
+    items: Array<{
+      reviewKey: string;
+      parentKey: string;
+      parentName: string | null;
+      parentPhone: string | null;
+      childUsername: string;
+      childName: string | null;
+      reason: "partial_refund" | "stripe_dispute";
+      observedAt: string;
+    }>;
+  };
+  analyticsScope: {
+    revision: string;
+    includedFamilies: number;
+    excludedFamilies: number;
+  };
 };
 
 const usernames = async (res: Response): Promise<string[]> =>
@@ -308,6 +351,7 @@ const getUnderFakeClock = async (opts?: {
 function seedRoster(n: number): void {
   store.value.children = Array.from({ length: n }, (_, i) => ({
     id: `kid-${String(i).padStart(6, "0")}`,
+    parent_id: "parent-bulk",
     fp_username: `kid${i}`,
   }));
   store.value.fp_player_profiles = [];
@@ -330,6 +374,7 @@ function seedIdSetRows(totalProfiles: number): void {
   const pad = (i: number): string => String(i).padStart(6, "0");
   store.value.children = Array.from({ length: children }, (_, i) => ({
     id: `kid-${pad(i)}`,
+    parent_id: "parent-bulk",
     fp_username: `kid${i}`,
   }));
   store.value.fp_player_profiles = Array.from({ length: totalProfiles }, (_, i) => ({
@@ -360,6 +405,7 @@ function oversizedCohort(): string {
   const n = 60;
   store.value.children = Array.from({ length: n }, (_, i) => ({
     id: `kid-${String(i).padStart(6, "0")}`,
+    parent_id: "parent-bulk",
     fp_username: `kid${i}`,
   }));
   store.value.fp_player_profiles = Array.from({ length: n }, (_, i) => ({
@@ -473,6 +519,257 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(res.headers.get("vary")).toBe("Origin");
     expect(res.headers.get("access-control-allow-origin")).toBe(ORIGIN);
+    expect(body.round1Payments).toEqual({
+      unit: "child",
+      paidPurchases: 0,
+      complimentaryAccess: 0,
+      pending: 0,
+      unpaid: 3,
+      refundedPaid: 0,
+      revokedComplimentary: 0,
+    });
+    expect(body.round1BillingReviews).toEqual({
+      unit: "review_item",
+      openCount: 0,
+      items: [],
+    });
+  });
+
+  it("adds an independently actionable and processor-private Round One review queue", async () => {
+    store.value.fp_billing_review_items = [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        parent_id: "parent-1",
+        child_id: "c-1",
+        product_key: "round_one_sell",
+        product_version: 1,
+        order_id: "order-must-not-leave",
+        review_kind: "stripe_dispute",
+        stripe_object_id: "dp_must_not_leave",
+        processor_amount: 25_000,
+        processor_currency: "cad",
+        review_state: "open",
+        last_observed_at: "2026-09-02T12:00:00Z",
+      },
+    ];
+
+    const res = await get();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Body;
+    expect(body.round1BillingReviews).toEqual({
+      unit: "review_item",
+      openCount: 1,
+      items: [{
+        reviewKey: "11111111-1111-4111-8111-111111111111",
+        parentKey: "parent-1",
+        parentName: "Morgan Lee",
+        parentPhone: "416-555-0100",
+        childUsername: "alex",
+        childName: "Alex Lee",
+        reason: "stripe_dispute",
+        observedAt: "2026-09-02T12:00:00.000Z",
+      }],
+    });
+    expect(body.round1Payments).toBeDefined();
+    const wire = JSON.stringify(body.round1BillingReviews);
+    for (const privateValue of ["dp_must_not_leave", "order-must-not-leave", "25000", "cad"]) {
+      expect(wire).not.toContain(privateValue);
+    }
+    const read = dbCalls.find((call) => call.table === "fp_billing_review_items");
+    expect(read?.columns).toBe("id, child_id, review_kind, review_state, last_observed_at");
+  });
+
+  it("independently omits unavailable or malformed review data without erasing payments", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    faults.value["select:fp_billing_review_items"] = {
+      kind: "error",
+      error: { code: "PGRST205", message: "private-schema-error" },
+    };
+    const unavailable = (await (await get()).json()) as Body;
+    expect(unavailable).not.toHaveProperty("round1BillingReviews");
+    expect(unavailable.round1Payments).toBeDefined();
+
+    seed();
+    faults.value = {};
+    store.value.fp_billing_review_items = [{
+      id: "11111111-1111-4111-8111-111111111111",
+      child_id: "c-1",
+      product_key: "round_one_sell",
+      product_version: 1,
+      review_kind: "unexpected-private-reason",
+      review_state: "open",
+      last_observed_at: "2026-09-02T12:00:00Z",
+    }];
+    const malformed = (await (await get()).json()) as Body;
+    expect(malformed).not.toHaveProperty("round1BillingReviews");
+    expect(malformed.round1Payments).toBeDefined();
+    const logs = error.mock.calls.flat().map(String).join("\n");
+    expect(logs).toContain("schema_absent");
+    expect(logs).toContain("invalid_rows");
+    expect(logs).not.toContain("private-schema-error");
+    expect(logs).not.toContain("unexpected-private-reason");
+  });
+
+  it("adds the exact aggregate Round One child contract with one bucket per child", async () => {
+    // A valid enrolled child always belongs to a parent family. Keeping the
+    // linkage explicit also verifies the payment funnel uses the same scoped
+    // roster as the progress feed.
+    store.value.children.push({ id: "c-7", parent_id: "parent-2", fp_username: "jo" });
+    store.value.fp_billing_entitlements = [
+      {
+        child_id: "c-1",
+        product_key: "round_one_sell",
+        product_version: 1,
+        status: "active",
+        grant_kind: "comped",
+        revoked_at: null,
+        updated_at: "2026-09-03T00:00:00.000Z",
+      },
+      {
+        child_id: "c-5",
+        product_key: "round_one_sell",
+        product_version: 1,
+        status: "revoked",
+        grant_kind: "paid",
+        revoked_at: "2026-09-04T00:00:00.000Z",
+        updated_at: "2026-09-04T00:00:00.000Z",
+      },
+      // A different product version is outside this deployment's funnel.
+      {
+        child_id: "c-7",
+        product_key: "round_one_sell",
+        product_version: 99,
+        status: "active",
+        grant_kind: "paid",
+        revoked_at: null,
+        updated_at: "2026-09-09T00:00:00.000Z",
+      },
+    ];
+    store.value.fp_billing_orders = [
+      // Active access wins over historical refunded order truth.
+      {
+        id: "order-private-1",
+        child_id: "c-1",
+        product_key: "round_one_sell",
+        product_version: 1,
+        status: "refunded",
+        created_at: "2026-09-01T00:00:00.000Z",
+        updated_at: "2026-09-05T00:00:00.000Z",
+        stripe_checkout_session_id: "must-never-leave",
+      },
+      {
+        id: "order-private-2",
+        child_id: "c-3",
+        product_key: "round_one_sell",
+        product_version: 1,
+        status: "pending",
+        created_at: "2026-09-06T00:00:00.000Z",
+        updated_at: "2026-09-06T00:00:00.000Z",
+      },
+    ];
+
+    const res = await get();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Body;
+    expect(body.round1Payments).toEqual({
+      unit: "child",
+      paidPurchases: 0,
+      complimentaryAccess: 1,
+      pending: 1,
+      unpaid: 1,
+      refundedPaid: 1,
+      revokedComplimentary: 0,
+    });
+    expect(Object.keys(body.round1Payments!).sort()).toEqual(
+      [
+        "paidPurchases",
+        "complimentaryAccess",
+        "pending",
+        "unpaid",
+        "refundedPaid",
+        "revokedComplimentary",
+        "unit",
+      ].sort()
+    );
+    const paymentWire = JSON.stringify(body.round1Payments);
+    for (const forbidden of ["c-1", "alex", "order-private", "must-never-leave"]) {
+      expect(paymentWire).not.toContain(forbidden);
+    }
+  });
+
+  it("pages Round One order history so a latest state past row 1000 is not hidden", async () => {
+    store.value.fp_billing_orders = Array.from({ length: PROGRESS_PAGE_SIZE + 1 }, (_, i) => ({
+      id: `order-${String(i).padStart(6, "0")}`,
+      child_id: "c-1",
+      product_key: "round_one_sell",
+      product_version: 1,
+      status: i === PROGRESS_PAGE_SIZE ? "pending" : "cancelled",
+      created_at: new Date(1_700_000_000_000 + i).toISOString(),
+      updated_at: new Date(1_700_000_000_000 + i).toISOString(),
+    }));
+
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Body).round1Payments).toEqual({
+      unit: "child",
+      paidPurchases: 0,
+      complimentaryAccess: 0,
+      pending: 1,
+      unpaid: 2,
+      refundedPaid: 0,
+      revokedComplimentary: 0,
+    });
+    // A full first page, a one-row tail, and the empty terminator.
+    expect(callLog.filter((call) => call === "db:fp_billing_orders")).toHaveLength(3);
+  });
+
+  it("omits (never zero-fills) the optional summary across a billing-schema rollout gap", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const table of ["fp_billing_entitlements", "fp_billing_orders"] as const) {
+      seed();
+      faults.value = {
+        [`select:${table}`]: {
+          kind: "error",
+          error: {
+            code: "PGRST205",
+            message: "schema cache miss containing private-child-marker",
+          },
+        },
+      };
+      const res = await get();
+      expect(res.status, table).toBe(200);
+      const body = (await res.json()) as Body;
+      expect(body.children, table).toHaveLength(3);
+      expect(body, table).not.toHaveProperty("round1Payments");
+    }
+    const lines = error.mock.calls.map((call) => call.map(String).join(" ")).join("\n");
+    expect(lines).toContain("schema_absent");
+    expect(lines).not.toContain("private-child-marker");
+    for (const childValue of ["c-1", "alex", "cy", "eve"]) {
+      expect(lines).not.toContain(childValue);
+    }
+  });
+
+  it("keeps the dashboard 200 and omits a billing summary that crosses its read cap", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    store.value.fp_billing_orders = Array.from({ length: PROGRESS_MAX_ROWS + 1 }, (_, i) => ({
+      id: `private-order-${String(i).padStart(6, "0")}`,
+      child_id: "c-1",
+      product_key: "round_one_sell",
+      product_version: 1,
+      status: "cancelled",
+      created_at: "2026-09-01T00:00:00.000Z",
+      updated_at: "2026-09-01T00:00:00.000Z",
+    }));
+
+    const res = await get();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Body;
+    expect(body.children).toHaveLength(3);
+    expect(body).not.toHaveProperty("round1Payments");
+    const lines = error.mock.calls.map((call) => call.map(String).join(" ")).join("\n");
+    expect(lines).toContain("capacity");
+    expect(lines).not.toContain("private-order");
   });
 
   it("carries NO band, NO label and no task id the caller did not request, at any depth", async () => {
@@ -499,16 +796,104 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     expect(new Set(callLog.filter((c) => c.startsWith("db:")))).toEqual(
       new Set([
         "db:staff",
+        "db:fp_watchtower_family_scope",
         "db:children",
         "db:parents",
         "db:fp_player_profiles",
         "db:fp_player_saves",
+        "db:fp_billing_entitlements",
+        "db:fp_billing_orders",
+        "db:fp_billing_review_items",
       ])
     );
   });
 
   it("excludes a child with no fp_username — the roster filter is the FP-enrolment filter", async () => {
     expect(await usernames(await get())).toEqual(["alex", "cy", "eve"]);
+  });
+
+  it("scope=included removes an excluded family before parent/profile/save reads", async () => {
+    store.value.fp_watchtower_family_scope = [
+      {
+        parent_id: "parent-1",
+        excluded_from_analytics: true,
+        revision: SCOPE_REVISION,
+        updated_at: SCOPE_UPDATED_AT,
+      },
+    ];
+    const res = await get({ scope: "included" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Body;
+    expect(body.children.map((child) => child.username)).toEqual(["cy"]);
+    expect(body.analyticsScope).toMatchObject({
+      includedFamilies: 1,
+      excludedFamilies: 1,
+      revision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+    });
+    expect(body.round1Payments).toEqual({
+      unit: "child",
+      paidPurchases: 0,
+      complimentaryAccess: 0,
+      pending: 0,
+      unpaid: 1,
+      refundedPaid: 0,
+      revokedComplimentary: 0,
+    });
+
+    const parentRead = dbCalls.find((call) => call.table === "parents");
+    const profileRead = dbCalls.find((call) => call.table === "fp_player_profiles");
+    const saveRead = dbCalls.find((call) => call.table === "fp_player_saves");
+    expect(parentRead?.filters.find((filter) => filter.op === "in")?.value).toEqual([
+      "parent-2",
+    ]);
+    expect(profileRead?.filters.find((filter) => filter.op === "in")?.value).toEqual(["c-3"]);
+    expect(saveRead?.filters.find((filter) => filter.op === "in")?.value).toEqual(["p-3"]);
+  });
+
+  it("scope=all explicitly includes QA families while preserving the same scope metadata", async () => {
+    store.value.fp_watchtower_family_scope = [
+      {
+        parent_id: "parent-1",
+        excluded_from_analytics: true,
+        revision: SCOPE_REVISION,
+        updated_at: SCOPE_UPDATED_AT,
+      },
+    ];
+    const included = (await (await get({ scope: "included" })).json()) as Body;
+    const all = (await (await get({ scope: "all" })).json()) as Body;
+    expect(all.children.map((child) => child.username).sort()).toEqual(["alex", "cy", "eve"]);
+    expect(all.analyticsScope).toEqual(included.analyticsScope);
+    expect(included.round1Payments?.unpaid).toBe(1);
+    expect(all.round1Payments?.unpaid).toBe(3);
+  });
+
+  it("requires scope after both staff gates, refunds the bad request, and exposes no parser oracle", async () => {
+    const missing = await get({ scope: null });
+    expect(missing.status).toBe(400);
+    expect(rateRef.released).toHaveLength(2);
+    expect(callLog).not.toContain("db:fp_watchtower_family_scope");
+    expect(callLog).not.toContain("db:children");
+
+    const malformed = await get({ scope: "Included" });
+    expect(malformed.status).toBe(400);
+    const unauthenticated = await get({ scope: "Included", token: null });
+    expect(unauthenticated.status).toBe(401);
+  });
+
+  it("fails closed when a scope row is malformed", async () => {
+    store.value.fp_watchtower_family_scope = [
+      {
+        parent_id: "parent-1",
+        excluded_from_analytics: true,
+        revision: "bad-revision",
+        updated_at: SCOPE_UPDATED_AT,
+      },
+    ];
+    const res = await get();
+    expect(res.status).toBe(401);
+    expect(rateRef.released).toHaveLength(2);
+    expect(callLog).not.toContain("db:fp_player_profiles");
+    expect(callLog).not.toContain("db:fp_player_saves");
   });
 
   it("an empty roster answers {ok, children: []} without downstream round trips", async () => {
@@ -520,7 +905,29 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     faults.value["select:fp_player_saves"] = { kind: "error", error: { message: "must not run" } };
     const res = await get();
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, children: [] });
+    expect(await res.json()).toEqual({
+      ok: true,
+      children: [],
+      round1Payments: {
+        unit: "child",
+        paidPurchases: 0,
+        complimentaryAccess: 0,
+        pending: 0,
+        unpaid: 0,
+        refundedPaid: 0,
+        revokedComplimentary: 0,
+      },
+      round1BillingReviews: {
+        unit: "review_item",
+        openCount: 0,
+        items: [],
+      },
+      analyticsScope: {
+        revision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+        includedFamilies: 0,
+        excludedFamilies: 0,
+      },
+    });
   });
 
   // ── The requested task-id list ──
@@ -1000,6 +1407,7 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     const n = PROGRESS_ID_CHUNK + 100;
     store.value.children = Array.from({ length: n }, (_, i) => ({
       id: `kid-${String(i).padStart(6, "0")}`,
+      parent_id: "parent-bulk",
       fp_username: `kid${i}`,
     }));
     store.value.fp_player_profiles = Array.from({ length: n }, (_, i) => ({
@@ -1010,7 +1418,8 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     expect((await get()).status).toBe(200);
     const dbCalls = callLog.filter((c) => c.startsWith("db:")).length;
     // 1 staff + children (1 page + terminator) + profiles (2 chunks × 2) +
-    // saves (2 chunks × 1 empty) — comfortably inside three read budgets.
+    // saves (2 chunks × 1 empty) plus the two optional empty billing reads —
+    // comfortably inside the independent read budgets.
     expect(dbCalls).toBeLessThanOrEqual(1 + 3 * PROGRESS_MAX_ROUND_TRIPS);
     expect(dbCalls).toBeLessThan(20);
   });
@@ -1038,6 +1447,7 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     const n = PROGRESS_SAVES_PAGE_SIZE + 50;
     store.value.children = Array.from({ length: n }, (_, i) => ({
       id: `kid-${String(i).padStart(6, "0")}`,
+      parent_id: "parent-bulk",
       fp_username: `kid${i}`,
     }));
     store.value.fp_player_profiles = Array.from({ length: n }, (_, i) => ({
@@ -1082,6 +1492,7 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     const n = PROGRESS_ID_CHUNK + 100;
     store.value.children = Array.from({ length: n }, (_, i) => ({
       id: `kid-${String(i).padStart(6, "0")}`,
+      parent_id: "parent-bulk",
       fp_username: `kid${i}`,
     }));
     store.value.fp_player_profiles = Array.from({ length: n }, (_, i) => ({
@@ -1163,10 +1574,32 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
       ["parents", "id, first_name, last_name, phone"],
       ["fp_player_profiles", "id, child_id"],
       ["fp_player_saves", "profile_id, doc"],
+      [
+        "fp_billing_entitlements",
+        "child_id, status, grant_kind, revoked_at, updated_at",
+      ],
+      ["fp_billing_orders", "id, child_id, status, created_at, updated_at"],
     ] as const) {
       const reads = dbCalls.filter((c) => c.table === table);
       expect(reads.length, table).toBeGreaterThan(0);
       for (const call of reads) expect(call.columns, table).toBe(columns);
+    }
+    for (const table of ["fp_billing_entitlements", "fp_billing_orders"] as const) {
+      const reads = dbCalls.filter((c) => c.table === table);
+      for (const call of reads) {
+        expect(call.filters).toContainEqual({
+          op: "eq",
+          col: "product_key",
+          value: "round_one_sell",
+        });
+        expect(call.filters).toContainEqual({
+          op: "eq",
+          col: "product_version",
+          value: 1,
+        });
+        expect(call.filters.some((filter) => filter.op === "in" && filter.col === "child_id"))
+          .toBe(true);
+      }
     }
     // Sensitive child demographic columns and wildcard reads remain absent.
     const asked = dbCalls.flatMap((c) => (c.columns ?? "").split(",").map((s) => s.trim()));
@@ -1185,6 +1618,7 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     const pad = (i: number): string => String(i).padStart(6, "0");
     store.value.children = Array.from({ length: n }, (_, i) => ({
       id: `kid-${pad(i)}`,
+      parent_id: "parent-bulk",
       fp_username: `kid${i}`,
     }));
     store.value.fp_player_profiles = Array.from({ length: n }, (_, i) => ({
@@ -1201,6 +1635,8 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
       ["children", PROGRESS_PAGE_SIZE],
       ["fp_player_profiles", PROGRESS_PAGE_SIZE],
       ["fp_player_saves", PROGRESS_SAVES_PAGE_SIZE],
+      ["fp_billing_entitlements", PROGRESS_PAGE_SIZE],
+      ["fp_billing_orders", PROGRESS_PAGE_SIZE],
     ] as const) {
       const reads = dbCalls.filter((c) => c.table === table);
       expect(reads.length, table).toBeGreaterThan(0);
@@ -1225,6 +1661,25 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
     expect(res.headers.get("access-control-allow-origin")).toBe(ORIGIN);
     const badList = await get({ tasks: "garbage" });
     expect(await res.text()).toBe(await badList.text());
+  });
+
+  it("counts the analyticsScope suffix and JSON envelope in the response-byte budget", async () => {
+    const emptyChild = JSON.stringify({
+      username: "",
+      truncated: false,
+      docUnreadable: false,
+      ideas: [],
+      businesses: [],
+    });
+    // The child part alone sits 50 bytes under the limit. Only the required
+    // envelope + analyticsScope suffix can push the real response over it.
+    const usernameLength = PROGRESS_MAX_RESPONSE_BYTES - 50 - Buffer.byteLength(emptyChild);
+    store.value.children = [
+      { id: "hostile-kid", fp_username: "x".repeat(usernameLength) },
+    ];
+    store.value.fp_player_profiles = [];
+    store.value.fp_player_saves = [];
+    expect((await get({ scope: "all" })).status).toBe(400);
   });
 
   it("the byte-budget refusal does NOT release strikes — deterministic, like the row cap", async () => {

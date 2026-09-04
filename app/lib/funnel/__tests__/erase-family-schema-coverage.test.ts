@@ -43,6 +43,10 @@ import {
 import { PATH_EVIDENCE_BUCKET } from "../erase-family-rules";
 import { IMAGE_LAB_BUCKET } from "@/app/staff/image-lab/lib/image-lab-rules";
 import { FP_CHILD_MEDIA_BUCKET } from "@/app/lib/fp/child-photo/child-photo-rules";
+import {
+  ROUND_ONE_BILLING_MIGRATION_SPEC,
+  safelyResolveMigrationContract,
+} from "@/app/lib/test-utils/migration-contract";
 import { parseMigrationSchema } from "./helpers/migration-schema";
 
 const schema = parseMigrationSchema();
@@ -94,6 +98,33 @@ describe("R28 erasure coverage — the ledger matches the real schema", () => {
     // children delete first would orphan them. (The `children` delete is not in
     // this list at all; it happens after every entry in it.)
     expect(CHILD_LEAF_DELETE_ORDER.indexOf("fp_onboarding_drafts")).toBeGreaterThanOrEqual(0);
+  });
+
+  it("classifies Round One family data as cascaded while retaining only a de-identified webhook ledger", () => {
+    for (const table of [
+      "fp_billing_orders",
+      "fp_billing_entitlements",
+      "fp_billing_access_events",
+      "fp_billing_review_items",
+      "fp_parent_notification_outbox",
+    ]) {
+      expect(ERASURE_TABLE_LEDGER[table]?.disposition, `${table} must follow family erasure`).toBe(
+        "erased-by-cascade"
+      );
+    }
+
+    const resolution = safelyResolveMigrationContract(
+      path.resolve(process.cwd(), "supabase/migrations"),
+      ROUND_ONE_BILLING_MIGRATION_SPEC
+    );
+    if (!resolution.ok) throw resolution.error;
+    const migration = resolution.value.allRaw;
+    const webhookTable = migration.match(
+      /create table if not exists public\.fp_billing_webhook_events\s*\(([\s\S]*?)\);/i
+    )?.[1];
+    expect(webhookTable).toBeTruthy();
+    expect(webhookTable).toMatch(/order_id\s+uuid[\s\S]*?on delete set null/i);
+    expect(webhookTable).not.toMatch(/\b(parent_id|child_id)\b/i);
   });
 
   it("the kid's identity payload on `children` is accounted for column by column", () => {
@@ -299,6 +330,17 @@ describe("R28 coverage tripwire — it actually catches an ADDITION", () => {
     );
     expect(findings.map((f) => `${f.kind}:${f.subject}`)).toContain(
       "unclassified-column:children.fp_favourite_colour"
+    );
+  });
+
+  it("a NEW ordinary storefront column is reported, not only blob-looking site columns", () => {
+    const findings = auditErasureCoverage(
+      withChange((s) => {
+        s.fp_public_sites.push("customer_note");
+      })
+    );
+    expect(findings.map((f) => `${f.kind}:${f.subject}`)).toContain(
+      "unclassified-column:fp_public_sites.customer_note"
     );
   });
 

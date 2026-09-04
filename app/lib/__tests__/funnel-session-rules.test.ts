@@ -646,6 +646,7 @@ function fakeDeps(opts: {
   cookiesUnwritable?: boolean;
 }) {
   const calls: Call[] = [];
+  const insertedRows: Record<string, unknown>[] = [];
   const deps: ProvisionDeps = {
     assertCookiesWritable: async () => {
       calls.push("cookieProbe");
@@ -668,8 +669,9 @@ function fakeDeps(opts: {
         },
       },
       from: (table: string) => ({
-        insert: async () => {
+        insert: async (row: Record<string, unknown>) => {
           calls.push(`insert:${table}`);
+          insertedRows.push(row);
           return { error: opts.parentInsertError ?? null };
         },
       }),
@@ -683,7 +685,7 @@ function fakeDeps(opts: {
       },
     }),
   };
-  return { calls, deps };
+  return { calls, insertedRows, deps };
 }
 
 const INPUT = { email: "  Family@Example.COM ", firstName: "Pat", lastName: "Lee" };
@@ -694,6 +696,24 @@ describe("provisionOrRecognizeAccount — every branch, by execution", () => {
     const out = await provisionOrRecognizeAccount(INPUT, deps);
     expect(out).toEqual({ kind: "provisioned", userId: "user-1" });
     expect(calls).toEqual(["cookieProbe", "createUser", "insert:parents", "signIn"]);
+  });
+
+  it("persists a supplied normalized support phone on the private parent row", async () => {
+    const { deps, insertedRows } = fakeDeps({});
+    await provisionOrRecognizeAccount({ ...INPUT, phone: "+14165550123" }, deps);
+    expect(insertedRows).toContainEqual({
+      id: "user-1",
+      first_name: "Pat",
+      last_name: "Lee",
+      email: "family@example.com",
+      phone: "+14165550123",
+    });
+  });
+
+  it("keeps the existing blank-phone behavior for other provisioning callers", async () => {
+    const { deps, insertedRows } = fakeDeps({});
+    await provisionOrRecognizeAccount(INPUT, deps);
+    expect(insertedRows[0]?.phone).toBe("");
   });
 
   it("email_exists → existing_account, and NOTHING else runs — no insert, no session, no delete", async () => {

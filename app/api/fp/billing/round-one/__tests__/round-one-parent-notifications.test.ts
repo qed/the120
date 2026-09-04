@@ -1,0 +1,286 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const sendEmailMock = vi.hoisted(() =>
+  vi.fn<
+    (input: { idempotencyKey?: string }) => Promise<{ ok: boolean; error?: string }>
+  >(async () => ({ ok: true })),
+);
+vi.mock("@/app/lib/email", () => ({ sendEmail: sendEmailMock }));
+
+import {
+  attemptRoundOneParentNotification,
+  drainRoundOneParentNotifications,
+  narrowRoundOneParentNotificationKind,
+  type RoundOneParentNotificationRow,
+} from "../round-one-parent-notifications";
+
+type Reply = { data: unknown; error: { message: string } | null };
+
+function fakeDb(replies: Reply[]) {
+  const updates: Record<string, unknown>[] = [];
+  const deletes: string[] = [];
+  const filters: Array<[string, unknown]> = [];
+  const selects: string[] = [];
+  const next = () => replies.shift() ?? { data: null, error: null };
+  const db = {
+    from: () => {
+      const builder: Record<string, unknown> = {};
+      const chain = () => builder;
+      builder.select = (value: string) => {
+        selects.push(value);
+        return builder;
+      };
+      builder.update = (value: Record<string, unknown>) => {
+        updates.push(value);
+        return builder;
+      };
+      builder.delete = () => {
+        deletes.push("delete");
+        return builder;
+      };
+      builder.eq = (key: string, value: unknown) => {
+        filters.push([key, value]);
+        return builder;
+      };
+      builder.is = chain;
+      builder.not = chain;
+      builder.or = chain;
+      builder.lt = chain;
+      builder.order = chain;
+      builder.limit = chain;
+      builder.maybeSingle = async () => next();
+      builder.then = (
+        resolve: (value: Reply) => unknown,
+        reject?: (reason: unknown) => unknown,
+      ) => Promise.resolve(next()).then(resolve, reject);
+      return builder;
+    },
+  };
+  return { db: db as never, updates, deletes, filters, selects };
+}
+
+const SETUP_ROW: RoundOneParentNotificationRow = {
+  id: "notify-1",
+  dedupeKey: "fp-round-one-stripe-setup:order-1",
+  kind: "round_one_stripe_setup",
+  parentId: "parent-1",
+  childId: "child-1",
+  productKey: "round_one_sell",
+  productVersion: 1,
+  recipientEmail: "parent@example.com",
+  parentFirstName: "Pat",
+  childFirstName: "Kai",
+  attempts: 0,
+  sentAt: null,
+};
+
+afterEach(() => {
+  sendEmailMock.mockReset().mockResolvedValue({ ok: true });
+});
+
+describe("Round One parent notification outbox", () => {
+  it("narrows only the two migration-backed kinds", () => {
+    expect(narrowRoundOneParentNotificationKind("round_one_stripe_setup")).toBe(
+      "round_one_stripe_setup",
+    );
+    expect(narrowRoundOneParentNotificationKind("offer_price_ready")).toBe(
+      "offer_price_ready",
+    );
+    expect(narrowRoundOneParentNotificationKind("surprise")).toBeNull();
+  });
+
+  it("claims, sends with the stable semantic key, and stamps success", async () => {
+    const { db, updates } = fakeDb([
+      { data: [{ id: "notify-1" }], error: null },
+      { data: [{ id: "notify-1" }], error: null },
+    ]);
+    await expect(attemptRoundOneParentNotification(db, SETUP_ROW)).resolves.toBe(
+      "sent",
+    );
+    expect(sendEmailMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "parent@example.com",
+        from: "First Profit <hello@the120.school>",
+        idempotencyKey: SETUP_ROW.dedupeKey,
+      }),
+    );
+    expect(updates[0]).toEqual(
+      expect.objectContaining({ attempts: 1, claimed_at: expect.any(String) }),
+    );
+    expect(updates[1]).toEqual(
+      expect.objectContaining({ sent_at: expect.any(String), claimed_at: null }),
+    );
+  });
+
+  it("unclaims a provider failure so the cron can retry the same row", async () => {
+    sendEmailMock.mockResolvedValueOnce({ ok: false, error: "Resend 503" });
+    const { db, updates } = fakeDb([
+      { data: [{ id: "notify-1" }], error: null },
+      { data: [{ id: "notify-1" }], error: null },
+    ]);
+    await expect(attemptRoundOneParentNotification(db, SETUP_ROW)).resolves.toBe(
+      "send_failed",
+    );
+    expect(updates[1]).toEqual({
+      claimed_at: null,
+      last_error: "Resend 503",
+    });
+  });
+
+  it("retries a lost success stamp with the same provider idempotency key", async () => {
+    const first = fakeDb([
+      { data: [{ id: "notify-1" }], error: null },
+      { data: null, error: { message: "connection lost after provider accepted" } },
+    ]);
+    await expect(attemptRoundOneParentNotification(first.db, SETUP_ROW)).resolves.toBe(
+      "claim_error",
+    );
+
+    const second = fakeDb([
+      { data: [{ id: "notify-1" }], error: null },
+      { data: [{ id: "notify-1" }], error: null },
+    ]);
+    await expect(
+      attemptRoundOneParentNotification(second.db, { ...SETUP_ROW, attempts: 1 }),
+    ).resolves.toBe("sent");
+
+    expect(sendEmailMock).toHaveBeenCalledTimes(2);
+    expect(sendEmailMock.mock.calls.map(([input]) => input.idempotencyKey)).toEqual([
+      SETUP_ROW.dedupeKey,
+      SETUP_ROW.dedupeKey,
+    ]);
+  });
+
+  it("parks a row at the attempt ceiling without claiming or sending it", async () => {
+    const { db, updates } = fakeDb([]);
+    await expect(
+      attemptRoundOneParentNotification(db, {
+        ...SETUP_ROW,
+        attempts: 5,
+      }),
+    ).resolves.toBe("parked");
+    expect(updates).toEqual([]);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("does not send when another worker already stamped the row", async () => {
+    const { db } = fakeDb([
+      { data: [], error: null },
+      { data: { id: "notify-1", sent_at: "2026-09-01T00:00:00.000Z" }, error: null },
+    ]);
+    await expect(attemptRoundOneParentNotification(db, SETUP_ROW)).resolves.toBe(
+      "already_sent",
+    );
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("drains the offer-ready email through the same claim and retry path", async () => {
+    const raw = {
+      id: "notify-2",
+      dedupe_key: "fp-offer-price-ready:child-1:v1:parent:parent-1",
+      kind: "offer_price_ready",
+      parent_id: "parent-1",
+      child_id: "child-1",
+      product_key: "round_one_sell",
+      product_version: 1,
+      recipient_email: "parent@example.com",
+      parent_first_name: "Pat",
+      child_first_name: "Kai",
+      attempts: 0,
+      sent_at: null,
+    };
+    const { db, selects } = fakeDb([
+      { data: [raw], error: null },
+      { data: { child_id: "child-1", status: "active" }, error: null },
+      { data: null, error: null },
+      { data: [{ id: "notify-2" }], error: null },
+      { data: [{ id: "notify-2" }], error: null },
+    ]);
+    await expect(
+      drainRoundOneParentNotifications(db, { limit: 20, paceMs: 0 }),
+    ).resolves.toEqual({
+      considered: 1,
+      sent: 1,
+      alreadySent: 0,
+      failed: 0,
+      raced: 0,
+      suppressed: 0,
+      errors: 0,
+    });
+    expect(sendEmailMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "Kai's offer and price are ready for checkout",
+        idempotencyKey: raw.dedupe_key,
+      }),
+    );
+    expect(selects).toContain("child_id, status");
+  });
+
+  it.each([
+    {
+      name: "a later full refund revoked access",
+      authorizationReplies: [{ data: null, error: null }],
+    },
+    {
+      name: "a later dispute installed a product hold",
+      authorizationReplies: [
+        { data: { child_id: "child-1", status: "active" }, error: null },
+        { data: { id: "held-order-1" }, error: null },
+      ],
+    },
+  ])("suppresses queued offer-ready mail when $name", async ({ authorizationReplies }) => {
+    const raw = {
+      id: "notify-2",
+      dedupe_key: "fp-offer-price-ready:child-1:v1:parent:parent-1",
+      kind: "offer_price_ready",
+      parent_id: "parent-1",
+      child_id: "child-1",
+      product_key: "round_one_sell",
+      product_version: 1,
+      recipient_email: "parent@example.com",
+      parent_first_name: "Pat",
+      child_first_name: "Kai",
+      attempts: 0,
+      sent_at: null,
+    };
+    const { db, updates, deletes } = fakeDb([
+      { data: [raw], error: null },
+      ...authorizationReplies,
+      { data: [{ id: "notify-2" }], error: null },
+    ]);
+
+    await expect(
+      drainRoundOneParentNotifications(db, { limit: 20, paceMs: 0 }),
+    ).resolves.toEqual({
+      considered: 1,
+      sent: 0,
+      alreadySent: 0,
+      failed: 0,
+      raced: 0,
+      suppressed: 1,
+      errors: 0,
+    });
+    expect(updates).toEqual([]);
+    expect(deletes).toEqual(["delete"]);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when queued offer-ready authorization cannot be read", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const row: RoundOneParentNotificationRow = {
+      ...SETUP_ROW,
+      id: "notify-2",
+      dedupeKey: "fp-offer-price-ready:child-1:v1:parent:parent-1",
+      kind: "offer_price_ready",
+    };
+    const { db, updates } = fakeDb([
+      { data: null, error: { message: "database unavailable" } },
+    ]);
+
+    await expect(attemptRoundOneParentNotification(db, row)).resolves.toBe(
+      "claim_error",
+    );
+    expect(updates).toEqual([]);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+});

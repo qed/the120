@@ -63,6 +63,7 @@ import {
   deriveSignupRateLimitKeys,
   extractClientIp,
   launchGateVerdict,
+  normalizeParentSupportPhone,
   shapeSignupRefusal,
   splitParentName,
   SIGNUP_IP_RATE_LIMIT,
@@ -148,12 +149,15 @@ export async function POST(req: Request): Promise<Response> {
     } catch {
       return refuse("malformed_request");
     }
-    // The SAME step-1 schema the /start Server Actions parse (parentName,
-    // parentEmail, parentPassword, consentAccepted:true — strict): one shape
-    // for one flow, and the terms affirmation is a PARSE failure, not a branch.
+    // The shared Step-1 parser accepts an OPTIONAL parentPhone because the
+    // separate the120.school /start journey does not collect one. This First
+    // Profit wire requires and normalizes it before any account is created.
+    // The terms affirmation remains a PARSE failure, not a branch.
     const parsed = parseV3Start(body);
     if (!parsed.ok) return refuse("malformed_request");
     const data = parsed.data;
+    const parentPhone = normalizeParentSupportPhone(data.parentPhone ?? "");
+    if (parentPhone === null) return refuse("malformed_request");
 
     const ip = extractClientIp(req.headers);
     const email = data.parentEmail.trim().toLowerCase();
@@ -229,6 +233,7 @@ export async function POST(req: Request): Promise<Response> {
       parentEmail: email,
       parentFirstName: firstName,
       parentLastName: lastName,
+      parentPhone,
       parentName: data.parentName,
       parentPassword: data.parentPassword,
       isTest: gate.isTest,

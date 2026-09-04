@@ -4,10 +4,11 @@ Status: the reviewed foundation
 `20260927120000_fp_round_one_billing.sql` was applied to the linked production
 Supabase project on 2026-09-04, followed by the dependent site-offer and
 Watchtower migrations. A post-apply dry run reports the remote database fully
-up to date. The isolated Stripe Test catalog, discounts, and disabled Preview
-deployment are prepared. No feature activation or live payment has occurred.
-Both database rollout switches remain at the migration's explicit `false`
-seed values.
+up to date. The isolated Stripe Test catalog, discounts, webhook, restricted
+credential, and release-branch Preview configuration are prepared. The two
+application Preview flags are enabled only for their release branches; no live
+payment or Production application activation has occurred. Both database
+rollout switches remain at the migration's explicit `false` seed values.
 
 ## Product contract
 
@@ -53,18 +54,19 @@ directly in the isolated Preview environment.
 - Backend Preview: `https://the120-round-one-sell-preview.vercel.app`
 - First Profit client Preview:
   `https://first-profit-round-one-sell-preview.vercel.app`
-- Both Vercel builds passed. `FP_ROUND_ONE_BILLING_ENABLED=false` and
-  `VITE_FP_ROUND_ONE=false` remain the intended release-branch state. The
-  client Preview answers successfully while the paid UI remains hidden.
+- Both Vercel builds passed. On 2026-09-04,
+  `FP_ROUND_ONE_BILLING_ENABLED=true` and `VITE_FP_ROUND_ONE=true` were set only
+  on their respective release-branch Preview configurations. Production
+  remained unchanged.
 - Stripe Test webhook: `we_1UByyr25N9cbf3wUpVWEYKmI`, pointed at the backend
   Preview's `/api/fp/billing/round-one/webhook` route, pinned to API version
   `2026-07-29.dahlia`. Its signing secret was written directly to the
   release-branch Preview configuration and was not printed or retained.
-- The webhook currently subscribes to the five events explicitly listed in the
-  original owner handoff: Checkout completed, asynchronous payment succeeded,
-  asynchronous payment failed, Checkout expired, and charge refunded. The two
-  dispute events required by the later immediate-suspension decision still need
-  to be added before the dispute matrix or any activation.
+- The webhook now subscribes to all seven reviewed events: Checkout completed,
+  asynchronous payment succeeded, asynchronous payment failed, Checkout
+  expired, charge refunded, dispute created, and dispute closed. The dispute
+  events were added in Stripe Test mode on 2026-09-04 after the owner confirmed
+  that a dispute should suspend access immediately.
 - Product-scoped test Promotion Codes were created: `ROUND1QA20` (20% off) and
   `ROUND1QA100` (100% off). Each is test-mode only, one-time, limited to 50
   redemptions, and backed by a coupon restricted to
@@ -76,16 +78,18 @@ directly in the isolated Preview environment.
   and was immediately expired after retrieval. No charge was completed and no
   payable QA Session remains open from this matrix.
 
-The Preview is deliberately **not ready to enable**. A no-signature probe to
-the final branch-aware deployment returned `503 Webhook unavailable`, and its
-safe diagnostic named exactly one missing value:
-`FP_ROUND_ONE_STRIPE_SECRET_KEY`. Vercel also has Deployment Protection on this
-Preview, which means Stripe cannot deliver to the current URL without a
-project-scoped [Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation)
-token in the webhook URL or a deliberately public test endpoint. Before
-enabling either application flag, configure a dedicated test-mode server
-credential for the same Stripe sandbox, resolve the Preview protection path,
-redeploy, and require the no-signature probe to return `400 Missing signature`.
+On 2026-09-04, the owner explicitly approved using the project's existing
+[Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation)
+secret for this Stripe Test webhook. The secret was added only as the webhook
+URL's protected query parameter and was neither printed nor retained. A fresh
+no-signature POST reached the application and returned `503 Webhook
+unavailable`, proving that Vercel Deployment Protection no longer intercepts
+Stripe. The dedicated restricted Test credential is now stored as
+`FP_ROUND_ONE_STRIPE_SECRET_KEY` only on the backend release-branch Preview.
+A CLI-sourced deployment deliberately received none of the branch-scoped
+variables and remained fail-closed; release verification must therefore use a
+Git-sourced deployment whose `gitRef` is the release branch. Require the same
+probe to return `400 Missing signature` on that build before running Checkout.
 Production remains untouched.
 
 ## Required server environment
@@ -116,9 +120,11 @@ Round One deliberately does not read the shared `STRIPE_SECRET_KEY` used by
 The 120's existing deposit flow. Create a dedicated test-mode restricted key
 for the `Hatch Coding CDN · sandbox` account and configure only
 `FP_ROUND_ONE_STRIPE_SECRET_KEY` on the isolated backend Preview. It needs
-Checkout Session read/write, Price read, and Payment Intent read access for the
-implemented create/reuse/expire, catalog-proof, and refund/dispute paths. Do
-not replace the deposit key.
+Checkout Session read/write, Price read, Payment Intent read, and Charge read
+access for the implemented create/reuse/expire, catalog-proof, and
+refund/dispute paths. Charge read is required because the dispute handler
+retrieves the disputed charge before resolving its Payment Intent. Do not
+replace the deposit key.
 
 The First Profit client has a separate public fail-off switch:
 

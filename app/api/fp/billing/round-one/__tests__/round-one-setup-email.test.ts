@@ -8,6 +8,7 @@ import {
   ROUND_ONE_STRIPE_US_VERIFICATION_URL,
   roundOneOfferReadyEmailIdempotencyKey,
   roundOneStripeInstructionsUrl,
+  roundOneStripePaymentLinkUrl,
   roundOneSetupEmailIdempotencyKey,
 } from "../round-one-setup-email-rules";
 
@@ -37,8 +38,12 @@ describe("Round One Stripe setup email", () => {
       expect(part).toContain(ROUND_ONE_STRIPE_US_VERIFICATION_URL);
       expect(part).toContain(instructionsUrl);
       expect(part).toContain("can keep building");
+      expect(part).toContain("Do this now");
       expect(part).toContain("select your country");
       expect(part).toContain("payout account Stripe supports");
+      expect(part).toContain("You do not need to paste a Payment Link yet");
+      expect(part).toContain('Stripe Payment Link');
+      expect(part).toContain("one child step needed first");
       expect(part).toContain("does not take a percentage");
       expect(part).toContain("never email us a password");
       expect(part).not.toContain("not a PO box");
@@ -70,6 +75,16 @@ describe("Round One Stripe setup email", () => {
     );
   });
 
+  it("uses distinct child-specific deep links for account setup and Payment Link entry", () => {
+    const childId = "child/with?reserved&characters";
+    expect(roundOneStripeInstructionsUrl(childId)).toBe(
+      "https://firstprofit.school/parent?roundOne=stripe-setup&child=child%2Fwith%3Freserved%26characters"
+    );
+    expect(roundOneStripePaymentLinkUrl(childId)).toBe(
+      "https://firstprofit.school/parent?roundOne=payment-link&child=child%2Fwith%3Freserved%26characters"
+    );
+  });
+
   it("renders the offer-ready follow-up as a safe child-specific action", () => {
     const mail = buildRoundOneOfferReadyEmail({
       parentFirstName: "<Pat>",
@@ -81,7 +96,13 @@ describe("Round One Stripe setup email", () => {
     expect(mail.html).toContain("child%2Fone");
     expect(mail.text).toContain("finished the Price Picker");
     expect(mail.text).toContain(ROUND_ONE_STRIPE_PAYMENT_LINKS_URL);
-    expect(mail.text).toContain("Add that link through the First Profit parent dashboard");
+    expect(mail.text).toContain('field labelled "Stripe Payment Link"');
+    expect(mail.text).toContain("If a website address is still needed");
+    expect(mail.text).toContain("Continue website and Payment Link setup");
+    expect(mail.text).toContain(
+      "roundOne=payment-link&child=child%2Fone"
+    );
+    expect(mail.text).not.toContain("roundOne=stripe-setup");
     expect(mail.text).toContain("Buy, Order, or Book button");
     expect(mail.text).toContain("does not take a percentage");
     expect(mail.text).toContain("Never email us a password");

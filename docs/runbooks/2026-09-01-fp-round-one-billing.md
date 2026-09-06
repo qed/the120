@@ -1,20 +1,42 @@
 # First Profit Round One billing runbook
 
-Status: released to Production with activation intentionally off. The reviewed
-foundation `20260927120000_fp_round_one_billing.sql` was applied to the linked
-production Supabase project on 2026-09-04, followed by the dependent site-offer
-and Watchtower migrations. A post-apply dry run reported the remote database
-fully up to date. The backend was merged through `qed/the120#146`, reached a
-fresh Ready Production deployment, and passed unauthenticated-route, CORS, and
-kill-switch smoke checks. The matching First Profit client was then merged
-through `qed/first-profit#39` and deployed from `main`.
+Status: live Round One billing and the client pay gate are active in Production;
+the final database completion-enforcement switch is intentionally pending the
+authenticated production proof below. The reviewed foundation
+`20260927120000_fp_round_one_billing.sql` was applied to the linked production
+Supabase project on 2026-09-04, followed by the dependent site-offer and
+Watchtower migrations. A post-apply dry run reported the remote database fully
+up to date. The backend was merged through `qed/the120#146`, reached a fresh
+Ready Production deployment, and passed unauthenticated-route, CORS, and
+kill-switch smoke checks. The matching First Profit client was merged through
+`qed/first-profit#39` and is deployed from `main`.
 
-The isolated Stripe Test catalog, discounts, webhook, restricted credential,
-and release-branch Preview configuration remain test-only. Production has no
-Round One billing variables or activation flag, no live Round One Stripe
-catalog was created, and both database rollout switches remain at the
-migration's explicit `false` seed values. This preserves the pre-activation
-rollback boundary while the documented tax/live-catalog gate remains open.
+On 2026-09-05 the dedicated live Round One Stripe prices, webhook secret, server
+variables, and `FP_ROUND_ONE_BILLING_ENABLED=true` were configured in the
+backend Production environment. `VITE_FP_ROUND_ONE=true` was configured in the
+First Profit Production environment. A 2026-09-06 verification found both
+confirmed price variants active in the database, the live billing routes
+reachable with the expected CORS/authentication refusals, the webhook route
+returning `400 Missing signature` rather than a configuration error, no stale
+pending order, no inconsistent paid entitlement, and no unsent parent setup
+email. The live webhook ledger contains successful Checkout, refund, and
+dispute transitions from the earlier Stripe Test matrix. That proves the event
+logic against the production database, but it is not evidence that a signed
+live-mode event has reached the Production webhook. The fresh-family browser
+proof must therefore open the live Checkout and complete one approved QA
+purchase before cutover. `completion_enforcement_enabled=false` remains the one
+deliberate course-access rollout boundary until that matrix passes;
+`storefront_checkout_enabled=false` remains a separate hosted-website launch
+boundary and must not be changed with course enforcement.
+
+The same aggregate audit found six unpaid families with 65 protected-task
+completion stamps that predate enforcement; none is currently excluded from
+Watchtower analytics. The completion guard deliberately preserves historical
+work and only refuses a newly added protected completion. Before reporting
+clean cohort numbers, identify those families in the staff follow-up view and
+use the dedicated Watchtower QA-family control where appropriate. Do not delete
+or rewrite their saved work. This classification is analytics housekeeping,
+not a blocker to enabling completion enforcement.
 
 ## Product contract
 
@@ -113,7 +135,7 @@ FP_ROUND_ONE_PRODUCT_VERSION=1
 FP_ROUND_ONE_STRIPE_PRICE_ID_CAD=price_...
 FP_ROUND_ONE_STRIPE_PRICE_ID_USD=price_...
 FP_ROUND_ONE_STRIPE_WEBHOOK_SECRET=whsec_...
-FP_ROUND_ONE_STRIPE_SECRET_KEY=sk_... # dedicated Test key; never the deposit key
+FP_ROUND_ONE_STRIPE_SECRET_KEY=sk_... # dedicated key for this environment/mode; never the deposit key
 RESEND_API_KEY=re_...
 ```
 
@@ -138,6 +160,12 @@ access for the implemented create/reuse/expire, catalog-proof, and
 refund/dispute paths. Charge read is required because the dispute handler
 retrieves the disputed charge before resolving its Payment Intent. Do not
 replace the deposit key.
+
+Production follows the same isolation rule with a dedicated live-mode
+restricted key and the two live Round One Price ids. A Test secret paired with
+live Price ids (or the reverse) passes a variable-presence check but fails only
+when authenticated Checkout retrieves the selected Price; this is why the
+fresh-family Production proof is required before completion enforcement.
 
 The First Profit client has a separate public fail-off switch:
 
@@ -414,8 +442,9 @@ prove the hold is product-wide rather than order- or queue-state-scoped.
    version and stays `false` until the hosted-storefront deployment and smoke
    matrix in `2026-09-01-fp-site-offers.md` are complete.
 
-Use Stripe test cards only until the test matrix below is complete. The
-customer-facing fee is non-refundable. If staff nevertheless issues an
+Use Stripe test cards for the Preview matrix. Use only an owner-approved live
+QA purchase path for the final Production proof. The customer-facing fee is
+non-refundable. If staff nevertheless issues an
 exceptional full refund in Stripe, access is removed automatically. Partial
 refunds preserve access and create a durable open Watchtower billing-review
 case. Any Stripe dispute/chargeback suspends Round One access immediately and

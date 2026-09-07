@@ -41,9 +41,13 @@ describe("Round One Stripe setup email", () => {
       expect(part).toContain("Do this now");
       expect(part).toContain("select your country");
       expect(part).toContain("payout account Stripe supports");
-      expect(part).toContain("You do not need to paste a Payment Link yet");
+      expect(part).toContain("You do not need to build a separate website");
+      expect(part).toContain("First Profit will provide and host");
+      expect(part).toContain("If Stripe asks for a website before that page is ready");
+      expect(part).toContain("You do not need to create or paste a Stripe Payment Link yet");
+      expect(part).toContain("exact product name, description, amount and currency");
       expect(part).toContain('Stripe Payment Link');
-      expect(part).toContain("one child step needed first");
+      expect(part).toContain("You control the Stripe account");
       expect(part).toContain("does not take a percentage");
       expect(part).toContain("never email us a password");
       expect(part).not.toContain("not a PO box");
@@ -98,6 +102,8 @@ describe("Round One Stripe setup email", () => {
     expect(mail.text).toContain(ROUND_ONE_STRIPE_PAYMENT_LINKS_URL);
     expect(mail.text).toContain('field labelled "Stripe Payment Link"');
     expect(mail.text).toContain("If a website address is still needed");
+    expect(mail.text).toContain("exact product name, description, amount and currency");
+    expect(mail.text).toContain("You control the Stripe account");
     expect(mail.text).toContain("Continue website and Payment Link setup");
     expect(mail.text).toContain(
       "roundOne=payment-link&child=child%2Fone"

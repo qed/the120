@@ -71,13 +71,14 @@ export function buildRoundOneStripeSetupEmail(input: {
   <p style="margin: 0 0 8px;"><strong>Before you start, have:</strong></p>
   <ul style="margin: 0 0 16px; padding-left: 22px;">
     <li style="margin: 0 0 8px;">The parent account representative's contact and identity information. Stripe will show what is required after you select your country.</li>
-    <li style="margin: 0 0 8px;">The business details and public page that accurately describe what the business sells.</li>
+    <li style="margin: 0 0 8px;">The basic business and payout details Stripe requests for your account.</li>
     <li style="margin: 0 0 8px;">A payout account Stripe supports for the country and currency shown during setup.</li>
   </ul>
   <p style="margin: 0 0 12px;"><a href="${instructionsUrl}" style="display: inline-block; background: #1a2233; color: #ffffff; padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: 600;">Start Stripe setup for ${escapeHtml(child)}</a></p>
   <p style="margin: 0 0 16px;">Review Stripe's official <a href="${ROUND_ONE_STRIPE_ACCOUNT_SETUP_URL}">account setup guide</a> and acceptable verification documents for <a href="${ROUND_ONE_STRIPE_CANADA_VERIFICATION_URL}">Canada</a> or the <a href="${ROUND_ONE_STRIPE_US_VERIFICATION_URL}">United States</a>.</p>
-  <p style="margin: 0 0 16px;"><strong>What happens later:</strong> You do not need to paste a Payment Link yet. After ${escapeHtml(child)} finishes the Price Picker, we will email you a direct link to continue the website and Payment Link setup. If the website address is ready, that link opens the field labelled &ldquo;Stripe Payment Link&rdquo;; otherwise it shows the one child step needed first.</p>
-  <p style="margin: 0 0 16px;">The family owns the Stripe relationship and receives customer payments directly. First Profit does not take a percentage of those sales.</p>
+  <p style="margin: 0 0 16px;"><strong>You do not need to build a separate website.</strong> First Profit will provide and host ${escapeHtml(child)}'s business page. If Stripe asks for a website before that page is ready, stop there and return after the next First Profit email.</p>
+  <p style="margin: 0 0 16px;"><strong>What happens later:</strong> You do not need to create or paste a Stripe Payment Link yet. After ${escapeHtml(child)} finishes the Price Picker, we will email you a direct link. First Profit will then show the exact product name, description, amount and currency to copy into Stripe, step by step.</p>
+  <p style="margin: 0 0 16px;">You control the Stripe account and receive customer payments directly. First Profit does not take a percentage of those sales.</p>
   <p style="margin: 0; font-size: 13px; color: #687386;">For your security, never email us a password, verification code, bank detail, or API key. If you get stuck, use the help option in your parent dashboard.</p>
   <p style="margin: 24px 0 0; font-size: 12px; color: #8a93a6;">First Profit at The 120</p>
 </div>`;
@@ -94,7 +95,7 @@ export function buildRoundOneStripeSetupEmail(input: {
     "",
     "Before you start, have:",
     "- The parent account representative's contact and identity information. Stripe will show what is required after you select your country.",
-    "- The business details and public page that accurately describe what the business sells.",
+    "- The basic business and payout details Stripe requests for your account.",
     "- A payout account Stripe supports for the country and currency shown during setup.",
     "",
     `Start Stripe setup for ${child}: ${instructionsUrl}`,
@@ -102,9 +103,11 @@ export function buildRoundOneStripeSetupEmail(input: {
     `Stripe verification guidance for Canada: ${ROUND_ONE_STRIPE_CANADA_VERIFICATION_URL}`,
     `Stripe verification guidance for the United States: ${ROUND_ONE_STRIPE_US_VERIFICATION_URL}`,
     "",
-    `What happens later: You do not need to paste a Payment Link yet. After ${child} finishes the Price Picker, we will email you a direct link to continue the website and Payment Link setup. If the website address is ready, that link opens the field labelled "Stripe Payment Link"; otherwise it shows the one child step needed first.`,
+    `You do not need to build a separate website. First Profit will provide and host ${child}'s business page. If Stripe asks for a website before that page is ready, stop there and return after the next First Profit email.`,
     "",
-    "The family owns the Stripe relationship and receives customer payments directly. First Profit does not take a percentage of those sales.",
+    `What happens later: You do not need to create or paste a Stripe Payment Link yet. After ${child} finishes the Price Picker, we will email you a direct link. First Profit will then show the exact product name, description, amount and currency to copy into Stripe, step by step.`,
+    "",
+    "You control the Stripe account and receive customer payments directly. First Profit does not take a percentage of those sales.",
     "",
     "For your security, never email us a password, verification code, bank detail, or API key. If you get stuck, use the help option in your parent dashboard.",
     "",
@@ -136,13 +139,13 @@ export function buildRoundOneOfferReadyEmail(input: {
   <p style="margin: 0 0 8px;">Your next parent steps are:</p>
   <ol style="margin: 0 0 16px; padding-left: 22px;">
     <li style="margin: 0 0 8px;">Open First Profit and confirm the website setup is ready. If a website address is still needed, the page will show that one child step first.</li>
-    <li style="margin: 0 0 8px;">Create a Stripe Payment Link for the approved offer and saved price in the parent-managed Stripe account.</li>
+    <li style="margin: 0 0 8px;">Use the exact product name, description, amount and currency First Profit shows you to create a one-time Stripe Payment Link.</li>
     <li style="margin: 0 0 8px;">Paste that link into the field labelled &ldquo;Stripe Payment Link&rdquo; in First Profit.</li>
     <li style="margin: 0 0 8px;">Compare the product, price, currency, and website preview, then approve the Buy, Order, or Book button to go live.</li>
   </ol>
   <p style="margin: 0 0 12px;"><a href="${paymentLinkUrl}" style="display: inline-block; background: #1a2233; color: #ffffff; padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: 600;">Continue website and Payment Link setup</a></p>
   <p style="margin: 0 0 16px;"><a href="${ROUND_ONE_STRIPE_PAYMENT_LINKS_URL}">Create the link in Stripe</a></p>
-  <p style="margin: 0 0 16px;">The family owns the Stripe account and receives the customer payment directly. First Profit does not take a percentage.</p>
+  <p style="margin: 0 0 16px;">You control the Stripe account and receive the customer payment directly. First Profit does not take a percentage.</p>
   <p style="margin: 0; font-size: 13px; color: #687386;">For your security, enter Stripe details only in Stripe. Never email us a password, verification code, bank detail, or API key.</p>
 </div>`;
   const text = [
@@ -152,14 +155,14 @@ export function buildRoundOneOfferReadyEmail(input: {
     "",
     "Your next parent steps are:",
     "1. Open First Profit and confirm the website setup is ready. If a website address is still needed, the page will show that one child step first.",
-    "2. Create a Stripe Payment Link for the approved offer and saved price in the parent-managed Stripe account.",
+    "2. Use the exact product name, description, amount and currency First Profit shows you to create a one-time Stripe Payment Link.",
     '3. Paste that link into the field labelled "Stripe Payment Link" in First Profit.',
     "4. Compare the product, price, currency, and website preview, then approve the Buy, Order, or Book button to go live.",
     "",
     `Continue website and Payment Link setup: ${paymentLinkUrl}`,
     `Create the link in Stripe: ${ROUND_ONE_STRIPE_PAYMENT_LINKS_URL}`,
     "",
-    "The family owns the Stripe account and receives the customer payment directly. First Profit does not take a percentage.",
+    "You control the Stripe account and receive the customer payment directly. First Profit does not take a percentage.",
     "",
     "For your security, enter Stripe details only in Stripe. Never email us a password, verification code, bank detail, or API key.",
   ].join("\n");

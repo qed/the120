@@ -81,9 +81,11 @@ const localPartTag = (email: string): string => {
 /** Mirror of provision-deps.googleStatus — pull an HTTP status off a Google/PG
  *  error however it is shaped. */
 const googleStatus = (err: unknown): number | null => {
-  const e = err as { code?: unknown; response?: { status?: unknown } };
+  const e = err as { code?: unknown; status?: unknown; response?: { status?: unknown } };
   const code = typeof e?.code === "number" ? e.code : Number(e?.code);
   if (Number.isFinite(code)) return code;
+  const directStatus = typeof e?.status === "number" ? e.status : Number(e?.status);
+  if (Number.isFinite(directStatus)) return directStatus;
   const status = e?.response?.status;
   return typeof status === "number" ? status : null;
 };

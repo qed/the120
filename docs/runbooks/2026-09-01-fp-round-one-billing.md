@@ -1,8 +1,7 @@
 # First Profit Round One billing runbook
 
-Status: live Round One billing and the client pay gate are active in Production;
-the final database completion-enforcement switch is intentionally pending the
-authenticated production proof below. The reviewed foundation
+Status: live Round One billing, the client pay gate, and database completion
+enforcement are active in Production. The reviewed foundation
 `20260927120000_fp_round_one_billing.sql` was applied to the linked production
 Supabase project on 2026-09-04, followed by the dependent site-offer and
 Watchtower migrations. A post-apply dry run reported the remote database fully
@@ -15,19 +14,25 @@ On 2026-09-05 the dedicated live Round One Stripe prices, webhook secret, server
 variables, and `FP_ROUND_ONE_BILLING_ENABLED=true` were configured in the
 backend Production environment. `VITE_FP_ROUND_ONE=true` was configured in the
 First Profit Production environment. A 2026-09-06 verification found both
-confirmed price variants active in the database, the live billing routes
-reachable with the expected CORS/authentication refusals, the webhook route
-returning `400 Missing signature` rather than a configuration error, no stale
-pending order, no inconsistent paid entitlement, and no unsent parent setup
-email. The live webhook ledger contains successful Checkout, refund, and
-dispute transitions from the earlier Stripe Test matrix. That proves the event
-logic against the production database, but it is not evidence that a signed
-live-mode event has reached the Production webhook. The fresh-family browser
-proof must therefore open the live Checkout and complete one approved QA
-purchase before cutover. `completion_enforcement_enabled=false` remains the one
-deliberate course-access rollout boundary until that matrix passes;
-`storefront_checkout_enabled=false` remains a separate hosted-website launch
-boundary and must not be changed with course enforcement.
+confirmed price variants active in the database and completed one approved
+CAD $350 live-mode QA Checkout using a 100% promotion. The signed Round One
+webhook granted access, the order and entitlement converged, and the parent
+setup email sent. This verifies the production Checkout, signed-event, access,
+and email path; it is not evidence of a full-price card authorization. After
+that proof `completion_enforcement_enabled=true` was enabled for the exact
+Round One version. `storefront_checkout_enabled=false` remains the separate
+hosted-website launch boundary and must not be changed with course enforcement.
+
+A 2026-09-07 log audit found that the same QA Checkout had also reached the
+legacy The120 seat-deposit webhook. Because that endpoint historically had no
+product namespace check, it created one false zero-dollar paid deposit, one
+pending provisioning claim, and one false `c3_deposit` event. Commit `fc1315f`
+now checks the explicit Stripe `billing_kind` before any legacy deposit, seat,
+funnel, or provisioning side effect; refund events resolve the PaymentIntent
+namespace before touching the deposit ledger. The fix is deployed Ready as
+`dpl_33YHQyH85wjCGhFk8RtLXMDoPiKu`. The three known false QA artifacts still
+need a deliberate data cleanup and must not be counted as a real seat or funnel
+conversion.
 
 The same aggregate audit found six unpaid families with 65 protected-task
 completion stamps that predate enforcement; none is currently excluded from

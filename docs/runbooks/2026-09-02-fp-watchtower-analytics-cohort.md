@@ -96,8 +96,11 @@ The release owner must execute the sequence as follows:
    fall by one family, and `scope=all` still shows the family.
 10. Restore the family. Verify totals and the revision change again.
 
-The three schema migrations have been applied. No application deployment,
-feature activation, or analytics-scope mutation was performed with them.
+The three schema migrations and coordinated client/backend application changes
+have been deployed. As of the 2026-09-07 production audit, no analytics-scope
+decision has been recorded: zero families are explicitly excluded. Staff must
+review the numeric-name QA suggestions before reporting clean cohort totals;
+the heuristic never changes scope automatically.
 
 ## Rollback
 

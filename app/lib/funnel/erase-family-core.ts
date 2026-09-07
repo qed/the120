@@ -966,6 +966,29 @@ export async function eraseFamily(
 
       // 6: the child's own auth.users login accounts (now unreferenced).
       for (const authUserId of child.authUserIds) {
+        // A provisioned student owns direct auth.users RESTRICT referrers too:
+        // two path_role_grants (student + family) and, potentially, a
+        // notification-send row. The student-graph drain removes rows keyed by
+        // path_student_profiles.id, but these rows are keyed by the auth user
+        // itself, so they must be swept before deleteUser. This is deliberately
+        // scoped to the child's resolved auth ids; a child-only erasure must
+        // never remove the surviving parent's verifier grant or send history.
+        summary.deleted.path_role_grants += await del(
+          db,
+          "path_role_grants",
+          "user_id",
+          authUserId,
+          summary,
+          `child:${childId}`
+        );
+        summary.deleted.path_notification_sends += await del(
+          db,
+          "path_notification_sends",
+          "recipient_user_id",
+          authUserId,
+          summary,
+          `child:${childId}`
+        );
         const res = await deps.deleteAuthUser(authUserId);
         if (res.ok) {
           summary.deleted.authUsers++;

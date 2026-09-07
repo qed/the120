@@ -607,6 +607,40 @@ describe("eraseFamily — full family, FK-safe order", () => {
     expect(out.deleted.path_notification_sends).toBe(0);
   });
 
+  it("sweeps a child's direct auth RESTRICT rows before deleting that child's login", async () => {
+    const seed = seedFamily();
+    seed.path_role_grants.push(
+      { id: "studentGrant", user_id: "authA", role: "student", scope_type: "student", scope_id: "pspA" },
+      { id: "familyGrant", user_id: "authA", role: "student", scope_type: "family", scope_id: "familyA" }
+    );
+    seed.path_notification_sends.push({
+      id: "studentNotice",
+      recipient_user_id: "authA",
+      kind: "path_student",
+    });
+    const { db, t, deleteLog } = makeDb(seed);
+    const { deps, deletedAuth } = makeDeps(t);
+    deps.db = db;
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+      childIds: ["childA"],
+    });
+
+    expect(out.ok).toBe(true);
+    expect(deletedAuth).toContain("authA");
+    expect(out.deleted.path_role_grants).toBe(2);
+    expect(out.deleted.path_notification_sends).toBe(1);
+    expect((t.path_role_grants as { user_id: string }[]).map((row) => row.user_id)).toEqual(["parentU"]);
+    expect((t.path_notification_sends as { recipient_user_id: string }[]).map((row) => row.recipient_user_id)).toEqual(["parentU"]);
+    expect(deleteLog).toContain("path_role_grants(2)");
+    const grantAt = out.order.findIndex((entry) => entry.startsWith("path_role_grants"));
+    const authAt = out.order.findIndex((entry) => entry.startsWith("auth_users:child:childA"));
+    expect(grantAt).toBeGreaterThanOrEqual(0);
+    expect(grantAt).toBeLessThan(authAt);
+  });
+
   it("an ACTIVE child's whole student graph is drained — objects first, evidence before progress, graph before profile", async () => {
     // The task-#16 scenario: childA has submitted work. Every graph table has
     // a row, the evidence rows name real objects in the fake store, and the

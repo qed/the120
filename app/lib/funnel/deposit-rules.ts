@@ -152,6 +152,20 @@ export type WebhookPlan =
   | { kind: "ignore" };
 
 /**
+ * New payment products share the Stripe account and therefore Stripe may send
+ * their events to this older seat-deposit webhook too. Historical deposit
+ * Sessions predate an explicit namespace and have no `billing_kind`; an
+ * explicitly different namespace must be acknowledged without touching the
+ * deposit ledger, seat count, funnel, or provisioning queue.
+ */
+export const DEPOSIT_BILLING_KIND = "the120_seat_deposit";
+
+export function isForeignBillingKind(value: unknown): boolean {
+  if (typeof value !== "string" || !value.trim()) return false;
+  return value.trim() !== DEPOSIT_BILLING_KIND;
+}
+
+/**
  * Which branch an event takes — "on error" is not a specification (the
  * R40a lesson, applied to money). `completed` with `payment_status:
  * "unpaid"` is a DELAYED payment method: record pending, do not fulfil;

@@ -5,8 +5,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   capacityAlarm,
+  DEPOSIT_BILLING_KIND,
   downgradeAllowed,
   fulfilVerdict,
+  isForeignBillingKind,
   webhookPlan,
 } from "@/app/lib/funnel/deposit-rules";
 
@@ -45,6 +47,29 @@ describe("webhookPlan — the event taxonomy", () => {
   it("refunds route; everything else is ignored", () => {
     expect(webhookPlan({ type: "charge.refunded" })).toEqual({ kind: "refund" });
     expect(webhookPlan({ type: "payment_intent.created" })).toEqual({ kind: "ignore" });
+  });
+});
+
+describe("shared Stripe account billing namespaces", () => {
+  it("keeps historical and explicitly named deposit events in the deposit flow", () => {
+    expect(isForeignBillingKind(null)).toBe(false);
+    expect(isForeignBillingKind(undefined)).toBe(false);
+    expect(isForeignBillingKind("")).toBe(false);
+    expect(isForeignBillingKind(`  ${DEPOSIT_BILLING_KIND}  `)).toBe(false);
+  });
+
+  it("classifies Round One and every other explicit namespace as foreign", () => {
+    expect(isForeignBillingKind("fp_round_one_sell")).toBe(true);
+    expect(isForeignBillingKind("another_product")).toBe(true);
+  });
+
+  it("checks the namespace before the legacy deposit core can write", () => {
+    const src = readFileSync("app/api/stripe/webhook/route.ts", "utf8");
+    const namespaceAt = src.indexOf("if (isForeignBillingKind(billingKind))");
+    const depositCoreAt = src.indexOf("await applyStripeEvent(realDeps()");
+    expect(namespaceAt).toBeGreaterThan(-1);
+    expect(depositCoreAt).toBeGreaterThan(namespaceAt);
+    expect(src).toContain("stripe.paymentIntents.retrieve(charge.payment_intent)");
   });
 });
 

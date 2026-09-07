@@ -7,6 +7,7 @@ import { FOUNDING_COMMITMENTS } from "@/app/lib/seats";
 import { emitFunnelEvent } from "@/app/lib/funnel/events";
 import { ensureProvisionClaim } from "@/app/lib/funnel/provision-deps";
 import { notifyOps } from "@/app/lib/ops-alert";
+import { isForeignBillingKind } from "@/app/lib/funnel/deposit-rules";
 
 /**
  * S3 + funnel U14: the Stripe webhook, rebuilt over the deps-injected core.
@@ -130,6 +131,32 @@ export async function POST(req: Request) {
   const tosConsent: "accepted" | "none" =
     session?.consent?.terms_of_service === "accepted" ? "accepted" : "none";
   const charge = event.type === "charge.refunded" ? (event.data.object as Stripe.Charge) : null;
+
+  // Stripe destinations are event-type filters, not product filters. A Round
+  // One Checkout event can therefore reach both its dedicated webhook and this
+  // older seat-deposit endpoint. Round One stamps `billing_kind` on both the
+  // Checkout Session and PaymentIntent; honour that namespace before any
+  // deposit write, seat count, funnel event, or provisioning side effect.
+  let billingKind: string | null =
+    session?.metadata?.billing_kind ?? charge?.metadata?.billing_kind ?? null;
+  if (!billingKind && charge && typeof charge.payment_intent === "string") {
+    try {
+      const intent = await stripe.paymentIntents.retrieve(charge.payment_intent);
+      billingKind = intent.metadata?.billing_kind ?? null;
+    } catch (error) {
+      console.error(
+        "[stripe/webhook] could not classify refunded PaymentIntent billing namespace:",
+        error
+      );
+      return NextResponse.json({ error: "Payment classification failed" }, { status: 500 });
+    }
+  }
+  if (isForeignBillingKind(billingKind)) {
+    console.info(
+      `[stripe/webhook] ignored ${event.type} for separate billing namespace ${billingKind}`
+    );
+    return NextResponse.json({ received: true });
+  }
 
   // charge.refunded fires for PARTIAL refunds too; `charge.refunded` (the
   // boolean) is true only when FULLY refunded. Marking a $50 goodwill

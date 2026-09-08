@@ -2,21 +2,27 @@
 
 Status: **schema applied, parent editor deployed, and hosted website
 claim/publish released to all authenticated First Profit children; public
-customer checkout not launched**. A read-only live check on 2026-09-04 confirmed
+customer checkout enabled for eligible families**. A read-only live check on
+2026-09-04 confirmed
 `supabase/migrations/20260928120000_fp_site_offers.sql` as the second next-free
 slot. It was then applied in the required position after Round One billing and
 before Watchtower scope. The existing `fp_public_sites` table had zero estimated
 rows. On 2026-09-07 the First Profit production client was rebuilt with both
 website controls enabled, including the guided parent flow that supplies exact
-values for a Stripe Payment Link. The production database still has
-`storefront_checkout_enabled=false`. On 2026-09-08,
+values for a Stripe Payment Link. On 2026-09-08,
 `FP_SITE_TEST_ONLY=off` was added to The120 Production and deployment
 `dpl_AyTAXaWFtfGjGWbRpJygCWtJaNf6` reached Ready at `https://the120.school`.
 This removes the temporary per-username QA restriction from availability,
 claim, and publish while retaining the authenticated First Profit child check,
-handle/content safeguards, parent controls, and operator lock. The production
-storefront smoke test below therefore remains the final launch boundary only
-for the customer Buy/Order/Book handoff.
+handle/content safeguards, parent controls, and operator lock. Later that day,
+the exact active `round_one_sell` version 1 catalog row was enabled with a
+guarded one-row update, and an independent read confirmed
+`storefront_checkout_enabled=true`. The existing QA site remained safely
+closed (`checkout_ready=false`; checkout handoff `404`, `no-store`, and no
+`Location`) because it has no parent-approved Payment Link. This proves the
+global switch does not bypass the per-family gates. No Stripe object, link, or
+payment was created for this activation. A complete redirect smoke with a real
+parent-owned link remains deferred until an eligible family supplies one.
 
 This slice lets a current parent review one child's active business offer,
 paste a parent-owned Stripe Payment Link, and publish a controlled First

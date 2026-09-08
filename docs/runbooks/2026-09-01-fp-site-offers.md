@@ -1,16 +1,22 @@
 # First Profit hosted storefront offers: launch and verification
 
-Status: **schema applied and parent editor deployed; public customer checkout
-not launched**. A read-only live check on 2026-09-04 confirmed
+Status: **schema applied, parent editor deployed, and hosted website
+claim/publish released to all authenticated First Profit children; public
+customer checkout not launched**. A read-only live check on 2026-09-04 confirmed
 `supabase/migrations/20260928120000_fp_site_offers.sql` as the second next-free
 slot. It was then applied in the required position after Round One billing and
 before Watchtower scope. The existing `fp_public_sites` table had zero estimated
 rows. On 2026-09-07 the First Profit production client was rebuilt with both
 website controls enabled, including the guided parent flow that supplies exact
 values for a Stripe Payment Link. The production database still has
-`storefront_checkout_enabled=false`. Its one current site row is an unpublished
-service-template draft with no approved or enabled checkout. The production
-storefront smoke test below therefore remains the final launch boundary.
+`storefront_checkout_enabled=false`. On 2026-09-08,
+`FP_SITE_TEST_ONLY=off` was added to The120 Production and deployment
+`dpl_AyTAXaWFtfGjGWbRpJygCWtJaNf6` reached Ready at `https://the120.school`.
+This removes the temporary per-username QA restriction from availability,
+claim, and publish while retaining the authenticated First Profit child check,
+handle/content safeguards, parent controls, and operator lock. The production
+storefront smoke test below therefore remains the final launch boundary only
+for the customer Buy/Order/Book handoff.
 
 This slice lets a current parent review one child's active business offer,
 paste a parent-owned Stripe Payment Link, and publish a controlled First
